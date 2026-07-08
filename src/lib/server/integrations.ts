@@ -59,6 +59,7 @@ const syncEnabledProviders = new Set<IntegrationProviderId>([
   "google-search-console",
   "rank-tracker",
   "map-checkins",
+  "gohighlevel",
 ]);
 
 const rotatingTokenFields: IntegrationFieldDefinition[] = [
@@ -1344,6 +1345,7 @@ export async function completeOAuthConnection(
   const expiresInSeconds = getNumberFromPayload(payload, ["expires_in", "expiresIn"]);
   const realmId = callbackUrl.searchParams.get("realmId") || undefined;
   const workspaceId = callbackUrl.searchParams.get("workspace_id") || undefined;
+  const locationId = getStringFromPayload(payload, ["locationId", "location_id"]) || undefined;
 
   const record = buildStoredRecord(
     provider,
@@ -1354,12 +1356,13 @@ export async function completeOAuthConnection(
     },
     {
       status: "connected",
-      displayLabel: realmId || workspaceId || "Authorized account",
-      externalAccountId: realmId || workspaceId,
+      displayLabel: realmId || workspaceId || locationId || "Authorized account",
+      externalAccountId: realmId || workspaceId || locationId,
       scopes: provider.oauth.scopes,
       metadata: {
         ...(realmId ? { realmId } : {}),
         ...(workspaceId ? { workspaceId } : {}),
+        ...(locationId ? { locationId } : {}),
       },
       lastValidatedAt: now,
       lastRefreshAt: now,
@@ -1370,6 +1373,7 @@ export async function completeOAuthConnection(
     {
       accessToken,
       refreshToken,
+      ...(locationId ? { locationId } : {}),
     },
   );
 

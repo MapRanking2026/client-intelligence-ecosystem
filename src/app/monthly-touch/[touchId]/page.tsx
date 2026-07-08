@@ -5,6 +5,17 @@ import { CheckCircle2 } from "lucide-react";
 import { AppShell } from "@/src/components/mtos/app-shell";
 import { CallGuideActions } from "@/src/components/mtos/call-guide-actions";
 import { MonthlyTouchPrepActions } from "@/src/components/mtos/monthly-touch-prep-actions";
+import {
+  AdsPerformancePanel,
+  DataGapsBanner,
+  IssuesSolutionsList,
+  LeadQualityQuestionList,
+  ParticipationChecklist,
+  RecapQuestionList,
+  ScorecardGrid,
+  SeoPerformancePanel,
+  StrategicActionPanel,
+} from "@/src/components/mtos/prep-pack-sections";
 import { RecommendationCard } from "@/src/components/mtos/recommendation-card";
 import { ScorePill } from "@/src/components/mtos/score-pill";
 import { SectionCard } from "@/src/components/mtos/section-card";
@@ -90,7 +101,11 @@ export default async function MonthlyTouchPage({
           }
         >
           <div className="rounded-[24px] border border-white/8 bg-black/20 p-5">
-            <p className="text-sm leading-7 text-slate-200">{touch.executiveBrief}</p>
+            {touch.executiveBrief.split("\n\n").map((paragraph, index) => (
+              <p key={index} className="text-sm leading-7 text-slate-200 [&:not(:first-child)]:mt-4">
+                {paragraph}
+              </p>
+            ))}
           </div>
         </SectionCard>
 
@@ -115,6 +130,88 @@ export default async function MonthlyTouchPage({
           </div>
         </SectionCard>
       </div>
+
+      {prepPack ? <DataGapsBanner gaps={prepPack.dataGaps} /> : null}
+
+      {prepPack ? (
+        <SectionCard
+          eyebrow="Scorecard"
+          title="Business scorecard"
+          subtitle="Leads, calls, bookings, and visibility -- the business numbers, reviewed before the services."
+        >
+          <ScorecardGrid scorecard={prepPack.businessScorecard} />
+        </SectionCard>
+      ) : null}
+
+      {prepPack ? (
+        <SectionCard
+          eyebrow="SEO & GBP"
+          title="Keyword heatmaps & profile performance"
+          subtitle="Pulled from the connected Rank Tracker and Google Business Profile syncs -- read Average Ranking, Map Pack %, and Market Share together, never Average Ranking alone."
+        >
+          <SeoPerformancePanel seo={prepPack.seoPerformance} />
+        </SectionCard>
+      ) : null}
+
+      {prepPack ? (
+        <SectionCard
+          eyebrow="Paid media"
+          title="Google Ads & Meta Ads"
+          subtitle="Only run this section of the call if the channel is active for this client."
+        >
+          <AdsPerformancePanel ads={prepPack.adsPerformance} />
+        </SectionCard>
+      ) : null}
+
+      {prepPack ? (
+        <div className="grid gap-6 xl:grid-cols-2">
+          <SectionCard
+            eyebrow="Strategic action"
+            title="Agreed action & implementation %"
+            subtitle="The high-impact action from last cycle -- report what it produced and the next step."
+          >
+            <StrategicActionPanel action={prepPack.strategicAction} />
+          </SectionCard>
+
+          <SectionCard
+            eyebrow="Readiness"
+            title="Client participation"
+            subtitle="Confirm the basics before recommending advanced strategy."
+          >
+            <ParticipationChecklist participation={prepPack.clientParticipation} />
+          </SectionCard>
+        </div>
+      ) : null}
+
+      {prepPack ? (
+        <SectionCard
+          eyebrow="Issues"
+          title="Issues, business impact & solutions"
+          subtitle="Every issue arrives with a proposed solution, an owner, and a date -- anticipate the client."
+        >
+          <IssuesSolutionsList items={prepPack.issuesAndSolutions} />
+        </SectionCard>
+      ) : null}
+
+      {prepPack ? (
+        <div className="grid gap-6 xl:grid-cols-2">
+          <SectionCard
+            eyebrow="Lead quality"
+            title="Questions to ask live"
+            subtitle="Separate marketing performance from sales / operations."
+          >
+            <LeadQualityQuestionList questions={prepPack.leadQualityQuestions} />
+          </SectionCard>
+
+          <SectionCard
+            eyebrow="Recap"
+            title="Five-question close"
+            subtitle="Use this framework to close the meeting -- fill it in during the recap."
+          >
+            <RecapQuestionList questions={prepPack.recapQuestions} />
+          </SectionCard>
+        </div>
+      ) : null}
 
       <SectionCard
         eyebrow="Agenda"

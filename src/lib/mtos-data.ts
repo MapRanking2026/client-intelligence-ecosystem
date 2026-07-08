@@ -47,6 +47,107 @@ export interface PrepPackClaudeState {
   errorMessage?: string;
 }
 
+export type MetricAvailability = "available" | "unavailable";
+
+export interface ScorecardMetric {
+  label: string;
+  value: number | null;
+  previousValue: number | null;
+  unit?: "count" | "currency" | "percent";
+  availability: MetricAvailability;
+  source: string;
+}
+
+export interface BusinessScorecard {
+  totalLeads: ScorecardMetric;
+  qualifiedLeads: ScorecardMetric;
+  costPerLead: ScorecardMetric;
+  callsAnswered: ScorecardMetric;
+  callsMissed: ScorecardMetric;
+  formSubmissions: ScorecardMetric;
+  bookedJobs: ScorecardMetric;
+  shareOfLocalVoice: ScorecardMetric;
+  top3Coverage: ScorecardMetric;
+  mapCheckIns: ScorecardMetric;
+  hasSalesStructureData: boolean;
+}
+
+export interface SeoHeatmapRow {
+  keyword: string;
+  location: string;
+  scanDate: string;
+  averageRanking: number | null;
+  mapPackPercent: number | null;
+  marketShare: number | null;
+  trend: "up" | "down" | "flat" | "unknown";
+  imageUrl: string;
+}
+
+export interface GbpPerformanceSnapshot {
+  locationId: string;
+  periodStart: string;
+  periodEnd: string;
+  calls: number;
+  websiteClicks: number;
+  directionRequests: number;
+  searches: number;
+  mapViews: number;
+  previous: {
+    calls: number;
+    websiteClicks: number;
+    directionRequests: number;
+    searches: number;
+    mapViews: number;
+  };
+}
+
+export interface SeoPerformancePack {
+  heatmaps: SeoHeatmapRow[];
+  gbpPerformance: GbpPerformanceSnapshot[];
+  mapCheckInCount: number | null;
+  availability: MetricAvailability;
+  notes: string[];
+}
+
+export interface AdsPerformancePack {
+  channel: "Google Ads" | "Meta Ads";
+  connected: boolean;
+  spend: number | null;
+  leads: number | null;
+  costPerLead: number | null;
+  ctr: number | null;
+  conversionRate: number | null;
+  benchmarkNote: string;
+}
+
+export interface StrategicActionStatus {
+  hasAgreedAction: boolean;
+  title: string;
+  agreedAt: string;
+  implementationPercent: number;
+  resultsSoFar: string;
+  nextSteps: string;
+}
+
+export interface ParticipationChecklistItem {
+  label: string;
+  inPlace: boolean;
+}
+
+export interface ClientParticipation {
+  items: ParticipationChecklistItem[];
+  basicsReady: boolean;
+  gaps: string[];
+}
+
+export interface IssueSolutionItem {
+  issue: string;
+  businessImpact: string;
+  solution: string;
+  owner: string;
+  dueDate: string;
+}
+
 export interface MonthlyTouchPrepPack {
   preparedAt: string;
   pipelineVersion: string;
@@ -61,6 +162,15 @@ export interface MonthlyTouchPrepPack {
   openCommitments: PrepPackCommitmentItem[];
   activeOpportunities: PrepPackOpportunityItem[];
   integrationSources: PrepPackSourceItem[];
+  businessScorecard: BusinessScorecard;
+  seoPerformance: SeoPerformancePack;
+  adsPerformance: AdsPerformancePack[];
+  strategicAction: StrategicActionStatus;
+  clientParticipation: ClientParticipation;
+  issuesAndSolutions: IssueSolutionItem[];
+  leadQualityQuestions: string[];
+  recapQuestions: { question: string; answer: string }[];
+  dataGaps: string[];
   claude: PrepPackClaudeState;
 }
 
@@ -94,6 +204,20 @@ export interface ClientRecord {
   syncSource?: "clickup";
   sourceUpdatedAt?: string;
   rawPayload?: Record<string, unknown>;
+  strategicAction?: {
+    title: string;
+    agreedAt: string;
+    implementationPercent: number;
+    resultsSoFar: string;
+    nextSteps: string;
+  };
+  participationChecklist?: {
+    offersProvided: boolean;
+    freshPhotos: boolean;
+    reviewsRequested: boolean;
+    approvalsCurrent: boolean;
+    gbpSupported: boolean;
+  };
 }
 
 export interface CommitmentRecord {

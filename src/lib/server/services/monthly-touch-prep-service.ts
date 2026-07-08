@@ -4,12 +4,20 @@ import { z } from "zod";
 import type { IntegrationSnapshotRecord } from "@/src/lib/contracts/integration-sync";
 import type { TenantContext } from "@/src/lib/contracts/mtos";
 import type {
+  AdsPerformancePack,
+  BusinessScorecard,
+  ClientParticipation,
   ClientRecord,
   CommitmentRecord,
+  IssueSolutionItem,
   MonthlyTouchPrepPack,
   MonthlyTouchRecord,
   OpportunityRecord,
   RecommendationItem,
+  ScorecardMetric,
+  SeoHeatmapRow,
+  SeoPerformancePack,
+  StrategicActionStatus,
 } from "@/src/lib/mtos-data";
 import { getMtosDataSource } from "@/src/lib/server/data/seed-mtos-data-source";
 import {
@@ -72,7 +80,26 @@ const providerLabels: Record<string, string> = {
   "google-search-console": "Google Search Console",
   "rank-tracker": "Rank Tracker",
   "map-checkins": "Map Check-ins",
+  gohighlevel: "GoHighLevel",
 };
+
+const LEAD_QUALITY_QUESTIONS = [
+  "Out of the leads you received, how many were actually relevant?",
+  "Were callers generally looking for the right service?",
+  "Did you notice wrong locations, price shoppers, or unqualified leads?",
+  "Did any of these leads turn into real opportunities or sales?",
+  "Walk me through what happens from a new call to a booked job -- who handles it, and how fast?",
+  "How transparent is your pricing upfront, and have you had pushback about surprise or unclear costs?",
+  "After an estimate, how soon and how often do you follow up, and where do you usually lose the deal?",
+];
+
+const RECAP_QUESTIONS = [
+  "What happened?",
+  "What does it mean?",
+  "What are we doing about it?",
+  "What do we need from the client?",
+  "What is the next step?",
+];
 
 function getNowIso() {
   return new Date().toISOString();
@@ -174,6 +201,361 @@ async function getIntegrationSources(tenantId: string) {
     .map(summarizeSnapshot);
 }
 
+async function getRawIntegrationSnapshots(tenantId: string) {
+  const db = getFirebaseAdminDb();
+  const map = new Map<string, JsonRecord>();
+  if (!db) {
+    return map;
+  }
+
+  const snapshot = await db.collection(integrationSnapshotsCollectionPath(tenantId)).get();
+  for (const doc of snapshot.docs) {
+    const data = doc.data() as IntegrationSnapshotRecord;
+    map.set(data.providerId, (data.payload || {}) as JsonRecord);
+  }
+  return map;
+}
+
+function pickString(row: JsonRecord, keys: string[]) {
+  for (const key of keys) {
+    const value = row[key];
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+  }
+  return "";
+}
+
+function pickNumber(row: JsonRecord, keys: string[]): number | null {
+  for (const key of keys) {
+    const value = row[key];
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return value;
+    }
+    if (typeof value === "string" && value.trim() && Number.isFinite(Number(value))) {
+      return Number(value);
+    }
+  }
+  return null;
+}
+
+function pickTrend(row: JsonRecord): SeoHeatmapRow["trend"] {
+  const current = pickNumber(row, ["averageRanking", "avgRank", "average_rank", "rank"]);
+  const previous = pickNumber(row, ["previousRanking", "previousRank", "priorRank", "previous_rank"]);
+  if (current === null || previous === null) {
+    return "unknown";
+  }
+  if (current < previous) return "up";
+  if (current > previous) return "down";
+  return "flat";
+}
+
+function extractRankTrackerRows(payload?: JsonRecord): SeoHeatmapRow[] {
+  if (!payload) {
+    return [];
+  }
+
+  const arrayKeys = ["rankings", "results", "data", "items", "keywords", "rows"];
+  let rows: JsonRecord[] = [];
+  for (const key of arrayKeys) {
+    const value = payload[key];
+    if (Array.isArray(value)) {
+      rows = value as JsonRecord[];
+      break;
+    }
+  }
+
+  return rows.slice(0, 12).map((row) => ({
+    keyword: pickString(row, ["keyword", "query", "term", "name"]) || "Untracked keyword",
+    location: pickString(row, ["location", "city", "area", "zone"]),
+    scanDate: pickString(row, ["scanDate", "date", "scannedAt", "updatedAt"]),
+    averageRanking: pickNumber(row, ["averageRanking", "avgRank", "average_rank", "rank"]),
+    mapPackPercent: pickNumber(row, ["mapPackPercent", "top3", "mapPack", "map_pack_percent"]),
+    marketShare: pickNumber(row, ["marketShare", "shareOfLocalVoice", "market_share"]),
+    trend: pickTrend(row),
+    imageUrl: pickString(row, ["heatmapUrl", "imageUrl", "screenshotUrl", "heatmapImage", "scanImageUrl"]),
+  }));
+}
+
+function extractGbpPerformanceRows(payload?: JsonRecord) {
+  if (!payload) {
+    return [];
+  }
+
+  const rows = Array.isArray(payload.performance) ? (payload.performance as JsonRecord[]) : [];
+  return rows
+    .filter((row) => !row.error)
+    .map((row) => {
+      const previous = (row.previous || {}) as JsonRecord;
+      return {
+        locationId: String(row.locationId || ""),
+        periodStart: String(row.periodStart || ""),
+        periodEnd: String(row.periodEnd || ""),
+        calls: Number(row.calls) || 0,
+        websiteClicks: Number(row.websiteClicks) || 0,
+        directionRequests: Number(row.directionRequests) || 0,
+        searches: Number(row.searches) || 0,
+        mapViews: Number(row.mapViews) || 0,
+        previous: {
+          calls: Number(previous.calls) || 0,
+          websiteClicks: Number(previous.websiteClicks) || 0,
+          directionRequests: Number(previous.directionRequests) || 0,
+          searches: Number(previous.searches) || 0,
+          mapViews: Number(previous.mapViews) || 0,
+        },
+      };
+    });
+}
+
+function extractArrayCount(payload: JsonRecord | undefined, keys: string[]) {
+  if (!payload) {
+    return null;
+  }
+  for (const key of keys) {
+    const value = payload[key];
+    if (Array.isArray(value)) {
+      return value.length;
+    }
+  }
+  return null;
+}
+
+function averageOf(values: Array<number | null>) {
+  const numeric = values.filter((value): value is number => value !== null);
+  if (!numeric.length) {
+    return null;
+  }
+  return Math.round((numeric.reduce((sum, value) => sum + value, 0) / numeric.length) * 10) / 10;
+}
+
+function metric(
+  label: string,
+  value: number | null,
+  previousValue: number | null,
+  source: string,
+  unit: ScorecardMetric["unit"] = "count",
+): ScorecardMetric {
+  return {
+    label,
+    value,
+    previousValue,
+    unit,
+    availability: value === null ? "unavailable" : "available",
+    source,
+  };
+}
+
+function buildBusinessScorecard(
+  rawSnapshots: Map<string, JsonRecord>,
+  heatmaps: SeoHeatmapRow[],
+  gbpPerformance: ReturnType<typeof extractGbpPerformanceRows>,
+  mapCheckInCount: number | null,
+): BusinessScorecard {
+  const crm = rawSnapshots.get("gohighlevel");
+  const totalLeads = crm && typeof crm.totalLeads === "number" ? crm.totalLeads : null;
+  const qualifiedLeads = crm && typeof crm.qualifiedLeads === "number" ? crm.qualifiedLeads : null;
+  const bookedJobs = crm && typeof crm.bookedJobs === "number" ? crm.bookedJobs : null;
+  const sampleContacts = Array.isArray(crm?.sampleContacts) ? (crm!.sampleContacts as JsonRecord[]) : [];
+  const formSubmissions = sampleContacts.length
+    ? sampleContacts.filter((contact) => String(contact.source || "").toLowerCase().includes("form")).length
+    : null;
+
+  const gbpTotals = gbpPerformance.reduce(
+    (acc, row) => ({
+      calls: acc.calls + row.calls,
+      previousCalls: acc.previousCalls + row.previous.calls,
+    }),
+    { calls: 0, previousCalls: 0 },
+  );
+
+  return {
+    totalLeads: metric("Total leads", totalLeads, null, "GoHighLevel"),
+    qualifiedLeads: metric("Qualified leads", qualifiedLeads, null, "GoHighLevel"),
+    costPerLead: metric("Cost per lead", null, null, "Requires Google Ads / Meta Ads sync", "currency"),
+    callsAnswered: metric(
+      "GBP call clicks",
+      gbpPerformance.length ? gbpTotals.calls : null,
+      gbpPerformance.length ? gbpTotals.previousCalls : null,
+      "Google Business Profile performance",
+    ),
+    callsMissed: metric("Calls missed", null, null, "Requires CRM call-tracking data"),
+    formSubmissions: metric("Form submissions", formSubmissions, null, "GoHighLevel contact source"),
+    bookedJobs: metric("Booked jobs", bookedJobs, null, "GoHighLevel won opportunities"),
+    shareOfLocalVoice: metric(
+      "Share of Local Voice",
+      averageOf(heatmaps.map((row) => row.marketShare)),
+      null,
+      "Rank Tracker",
+      "percent",
+    ),
+    top3Coverage: metric(
+      "Top-3 grid coverage",
+      averageOf(heatmaps.map((row) => row.mapPackPercent)),
+      null,
+      "Rank Tracker",
+      "percent",
+    ),
+    mapCheckIns: metric("Map Check-Ins this month", mapCheckInCount, null, "Map Check-Ins"),
+    hasSalesStructureData: totalLeads !== null && qualifiedLeads !== null,
+  };
+}
+
+function buildSeoPerformance(
+  heatmaps: SeoHeatmapRow[],
+  gbpPerformance: ReturnType<typeof extractGbpPerformanceRows>,
+  mapCheckInCount: number | null,
+): SeoPerformancePack {
+  const notes: string[] = [];
+  if (!heatmaps.length) {
+    notes.push(
+      "No Rank Tracker sync is connected yet, so keyword heatmaps cannot be pulled -- connect Rank Tracker in Settings > Integrations before the next prep run.",
+    );
+  }
+  if (!gbpPerformance.length) {
+    notes.push(
+      "No Google Business Profile performance data is available -- reconnect GBP or confirm locations were discovered.",
+    );
+  }
+  if (mapCheckInCount === null) {
+    notes.push("No Map Check-Ins sync is connected yet.");
+  }
+
+  return {
+    heatmaps,
+    gbpPerformance,
+    mapCheckInCount,
+    availability: heatmaps.length || gbpPerformance.length ? "available" : "unavailable",
+    notes,
+  };
+}
+
+function buildAdsPerformance(): AdsPerformancePack[] {
+  return [
+    {
+      channel: "Google Ads",
+      connected: false,
+      spend: null,
+      leads: null,
+      costPerLead: null,
+      ctr: null,
+      conversionRate: null,
+      benchmarkNote:
+        "Connect Google Ads to compare CTR and CPL against the 5% CTR / 10% conversion Search benchmark (3% / 3% for PMax) from the Ads prep SOP.",
+    },
+    {
+      channel: "Meta Ads",
+      connected: false,
+      spend: null,
+      leads: null,
+      costPerLead: null,
+      ctr: null,
+      conversionRate: null,
+      benchmarkNote: "Connect Meta Ads to review creative performance and CPL once campaigns are active for this client.",
+    },
+  ];
+}
+
+function buildStrategicActionStatus(client: ClientRecord): StrategicActionStatus {
+  if (!client.strategicAction) {
+    return {
+      hasAgreedAction: false,
+      title: "",
+      agreedAt: "",
+      implementationPercent: 0,
+      resultsSoFar: "",
+      nextSteps:
+        "No high-impact action is carried from the last cycle yet -- agree one with the client this touch and record it so next month's prep can report on implementation %.",
+    };
+  }
+
+  return {
+    hasAgreedAction: true,
+    title: client.strategicAction.title,
+    agreedAt: client.strategicAction.agreedAt,
+    implementationPercent: clamp(client.strategicAction.implementationPercent, 0, 100),
+    resultsSoFar: client.strategicAction.resultsSoFar,
+    nextSteps: client.strategicAction.nextSteps,
+  };
+}
+
+function buildClientParticipation(client: ClientRecord): ClientParticipation {
+  const checklist = client.participationChecklist;
+  const items = [
+    { label: "Offers / promos provided", inPlace: Boolean(checklist?.offersProvided) },
+    { label: "Fresh photos supplied", inPlace: Boolean(checklist?.freshPhotos) },
+    { label: "Reviews being requested", inPlace: Boolean(checklist?.reviewsRequested) },
+    { label: "Approvals and business updates current", inPlace: Boolean(checklist?.approvalsCurrent) },
+    { label: "Current GBP actively supported", inPlace: Boolean(checklist?.gbpSupported) },
+  ];
+  const gaps = items.filter((item) => !item.inPlace).map((item) => item.label);
+
+  return {
+    items,
+    basicsReady: Boolean(checklist) && gaps.length === 0,
+    gaps: checklist
+      ? gaps
+      : ["Participation has not been assessed yet -- confirm each item before recommending advanced strategy."],
+  };
+}
+
+function buildIssuesWithSolutions(
+  client: ClientRecord,
+  openCommitments: CommitmentRecord[],
+): IssueSolutionItem[] {
+  const overdue = openCommitments.filter((commitment) => commitment.status === "Overdue");
+  const dueDate = client.touchDate || "the next touch";
+
+  const fromOverdue = overdue.map((commitment) => ({
+    issue: `Overdue: ${commitment.title}`,
+    businessImpact: `This was due ${commitment.dueDate} and is still open, which delays the value the client should already be seeing.`,
+    solution: `Confirm the blocker with ${commitment.owner} and commit to a new date live on the call.`,
+    owner: commitment.owner,
+    dueDate,
+  }));
+
+  const fromRisks = client.topRisks
+    .filter((risk) => risk && risk.toLowerCase() !== "no major risks surfaced")
+    .map((risk) => ({
+      issue: risk,
+      businessImpact: "Left unaddressed, this directly limits the business outcome the client is paying for.",
+      solution: "Bring a specific, named fix to the call rather than surfacing the problem without a plan.",
+      owner: "Account Manager",
+      dueDate,
+    }));
+
+  return [...fromOverdue, ...fromRisks].slice(0, 8);
+}
+
+function buildRecapQuestions() {
+  return RECAP_QUESTIONS.map((question) => ({ question, answer: "" }));
+}
+
+function buildDataGaps(
+  seoPerformance: SeoPerformancePack,
+  scorecard: BusinessScorecard,
+  strategicAction: StrategicActionStatus,
+  participation: ClientParticipation,
+) {
+  const gaps = [...seoPerformance.notes];
+
+  if (scorecard.totalLeads.availability === "unavailable") {
+    gaps.push(
+      "No CRM (GoHighLevel) is connected -- lead volume and quality must be assessed live using the lead-quality questions below.",
+    );
+  }
+  if (scorecard.costPerLead.availability === "unavailable") {
+    gaps.push("No Google Ads / Meta Ads sync is connected -- cost per lead and ROI cannot be shown yet.");
+  }
+  if (!strategicAction.hasAgreedAction) {
+    gaps.push(strategicAction.nextSteps);
+  }
+  if (!participation.basicsReady) {
+    gaps.push(...participation.gaps);
+  }
+
+  return unique(gaps);
+}
+
 function buildWins(client: ClientRecord, sources: MonthlyTouchPrepPack["integrationSources"]) {
   const wins = [
     client.relationshipScore >= 80
@@ -263,13 +645,17 @@ function buildExecutiveBrief(
   openCommitments: CommitmentRecord[],
   opportunities: OpportunityRecord[],
   sources: MonthlyTouchPrepPack["integrationSources"],
+  scorecard: BusinessScorecard,
+  seoPerformance: SeoPerformancePack,
+  strategicAction: StrategicActionStatus,
+  participation: ClientParticipation,
 ) {
   const overdueCount = openCommitments.filter((commitment) => commitment.status === "Overdue").length;
   const sourceSummary = sources.length
     ? `${sources.length} connected data source${sources.length === 1 ? "" : "s"} contributed evidence to this prep pack.`
     : "No synced integration snapshots are available yet, so this prep pack is using Monthly Touch OS client and workflow data only.";
 
-  return [
+  const openingParagraph = [
     `${client.name} enters this monthly touch with a health score of ${client.healthScore} and relationship score of ${client.relationshipScore}.`,
     overdueCount
       ? `${overdueCount} overdue commitment${overdueCount === 1 ? "" : "s"} need explicit review before moving into growth planning.`
@@ -279,6 +665,24 @@ function buildExecutiveBrief(
       : "The growth portion of the meeting should focus on identifying the next credible expansion path.",
     sourceSummary,
   ].join(" ");
+
+  const scorecardParagraph = scorecard.totalLeads.availability === "available"
+    ? `On the business scorecard: ${scorecard.totalLeads.value} total leads and ${scorecard.qualifiedLeads.value ?? "an unassessed number of"} qualified leads this cycle${scorecard.bookedJobs.availability === "available" ? `, converting to ${scorecard.bookedJobs.value} booked job${scorecard.bookedJobs.value === 1 ? "" : "s"}` : ""}. ${scorecard.callsAnswered.availability === "available" ? `GBP call clicks stand at ${scorecard.callsAnswered.value} (previous period ${scorecard.callsAnswered.previousValue ?? "n/a"}).` : "Call answer/miss data is not connected yet, so phone handling must be assessed live with the client."}`
+    : "The business scorecard has no CRM data connected yet -- lead volume, qualified leads, and booked jobs must be gathered live using the lead-quality questions in this pack, per the sales-structure conversation in the SOP.";
+
+  const seoParagraph = seoPerformance.heatmaps.length
+    ? `SEO visibility: tracking ${seoPerformance.heatmaps.length} keyword${seoPerformance.heatmaps.length === 1 ? "" : "s"} this cycle${scorecard.shareOfLocalVoice.value !== null ? ` with an average Share of Local Voice of ${scorecard.shareOfLocalVoice.value}% and Top-3 grid coverage of ${scorecard.top3Coverage.value ?? "n/a"}%` : ""}. Read Average Ranking, Map Pack %, and Market Share together -- never Average Ranking alone.`
+    : "No Rank Tracker sync is connected, so keyword heatmaps and Market Share are not available for this touch -- connect it before the next prep cycle so the SEO story can be shown with evidence rather than described from memory.";
+
+  const strategicParagraph = strategicAction.hasAgreedAction
+    ? `Strategic action: "${strategicAction.title}" (agreed ${strategicAction.agreedAt}) is ${strategicAction.implementationPercent}% implemented. ${strategicAction.resultsSoFar || "Results so far are not yet documented."} Next: ${strategicAction.nextSteps}`
+    : strategicAction.nextSteps;
+
+  const participationParagraph = participation.basicsReady
+    ? "Client participation basics are in place, so advanced strategy (a new GBP, a new city, bigger spend) is safe to recommend this cycle."
+    : `Client participation gap${participation.gaps.length === 1 ? "" : "s"}: ${participation.gaps.join("; ")}. Per the readiness rule, address these before recommending advanced moves.`;
+
+  return [openingParagraph, scorecardParagraph, seoParagraph, strategicParagraph, participationParagraph].join("\n\n");
 }
 
 function buildKeyFacts(
@@ -458,7 +862,17 @@ async function generateClaudeTouchOutput(
       "or a client detail that isn't in that bundle -- if there isn't enough evidence for a 3rd win or",
       "a 2nd risk, say so plainly in that item rather than fabricating one.",
       "",
-      "Return JSON only. Keep the output concise, specific, and operational.",
+      "The prepPack.businessScorecard, prepPack.seoPerformance, prepPack.strategicAction, and",
+      "prepPack.clientParticipation objects hold the SOP-required numbers for this touch (leads, calls,",
+      "keyword heatmaps, GBP performance, the agreed strategic action's implementation %, and the",
+      "participation-readiness checklist). The executiveBrief must weave these in explicitly by name",
+      "and number wherever their availability field is 'available' -- and must say plainly what is",
+      "missing (e.g. no CRM connected, no Rank Tracker sync) wherever availability is 'unavailable',",
+      "rather than skipping the topic. This is a bachelor-thesis-standard prep document: exhaustive,",
+      "specific, and structured -- not a five-sentence summary.",
+      "",
+      "Return JSON only. Keep the output specific and operational; the executiveBrief may run several",
+      "paragraphs if the data supports it.",
     ].join("\n"),
   );
 
@@ -526,10 +940,27 @@ function buildPrepPack(
   openCommitments: CommitmentRecord[],
   opportunities: OpportunityRecord[],
   integrationSources: MonthlyTouchPrepPack["integrationSources"],
+  rawSnapshots: Map<string, JsonRecord>,
 ) {
+  const heatmaps = extractRankTrackerRows(rawSnapshots.get("rank-tracker"));
+  const gbpPerformance = extractGbpPerformanceRows(rawSnapshots.get("google-business-profile"));
+  const mapCheckInCount = extractArrayCount(rawSnapshots.get("map-checkins"), [
+    "checkins",
+    "results",
+    "data",
+    "items",
+  ]);
+
+  const businessScorecard = buildBusinessScorecard(rawSnapshots, heatmaps, gbpPerformance, mapCheckInCount);
+  const seoPerformance = buildSeoPerformance(heatmaps, gbpPerformance, mapCheckInCount);
+  const adsPerformance = buildAdsPerformance();
+  const strategicAction = buildStrategicActionStatus(client);
+  const clientParticipation = buildClientParticipation(client);
+  const issuesAndSolutions = buildIssuesWithSolutions(client, openCommitments);
+
   return {
     preparedAt: getNowIso(),
-    pipelineVersion: "prep-pack-v1",
+    pipelineVersion: "prep-pack-v2",
     clientSummary: truncate(client.summary, 320),
     schedule: stripUndefinedDeep({
       touchDate: client.touchDate || "Not scheduled",
@@ -553,6 +984,15 @@ function buildPrepPack(
       nextStep: opportunity.nextStep,
     })),
     integrationSources,
+    businessScorecard,
+    seoPerformance,
+    adsPerformance,
+    strategicAction,
+    clientParticipation,
+    issuesAndSolutions,
+    leadQualityQuestions: LEAD_QUALITY_QUESTIONS,
+    recapQuestions: buildRecapQuestions(),
+    dataGaps: buildDataGaps(seoPerformance, businessScorecard, strategicAction, clientParticipation),
     claude: {
       status: "not_configured",
     },
@@ -575,11 +1015,12 @@ export async function prepareMonthlyTouch(
     throw new Error("Monthly touch not found");
   }
 
-  const [client, commitments, opportunities, integrationSources] = await Promise.all([
+  const [client, commitments, opportunities, integrationSources, rawSnapshots] = await Promise.all([
     dataSource.getClientById(touch.clientId),
     dataSource.getCommitments(touch.clientId),
     dataSource.getOpportunities(touch.clientId),
     getIntegrationSources(context.tenantId),
+    getRawIntegrationSnapshots(context.tenantId),
   ]);
 
   if (!client) {
@@ -587,10 +1028,19 @@ export async function prepareMonthlyTouch(
   }
 
   const openCommitments = commitments.filter((commitment) => commitment.status !== "Completed");
-  const prepPack = buildPrepPack(client, touch, openCommitments, opportunities, integrationSources);
+  const prepPack = buildPrepPack(client, touch, openCommitments, opportunities, integrationSources, rawSnapshots);
   const env = getServerEnv();
 
-  let executiveBrief = buildExecutiveBrief(client, openCommitments, opportunities, integrationSources);
+  let executiveBrief = buildExecutiveBrief(
+    client,
+    openCommitments,
+    opportunities,
+    integrationSources,
+    prepPack.businessScorecard,
+    prepPack.seoPerformance,
+    prepPack.strategicAction,
+    prepPack.clientParticipation,
+  );
   let agenda = buildAgenda(client, openCommitments, opportunities);
   let talkingPoints = buildTalkingPoints(client, openCommitments, opportunities);
   let aiRecommendations = buildDeterministicRecommendations(

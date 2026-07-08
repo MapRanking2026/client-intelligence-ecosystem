@@ -670,6 +670,10 @@ async function syncGoogleBusinessProfile(context: TenantContext, record: Integra
   counts.fetched = accounts.length + locations.length;
   counts.created = locations.length;
 
+  const performance = await Promise.all(
+    locations.slice(0, 5).map((location) => fetchGbpLocationPerformance(accessToken, String(location.name || ""))),
+  );
+
   return {
     summary: [
       `${formatSummaryCount("account", accounts.length)} loaded`,
@@ -683,8 +687,116 @@ async function syncGoogleBusinessProfile(context: TenantContext, record: Integra
         type: account.type || "UNKNOWN",
       })),
       locations: locations.slice(0, 25),
+      performance: performance.filter((entry): entry is NonNullable<typeof entry> => Boolean(entry)),
     },
   } satisfies SyncExecutionResult;
+}
+
+const GBP_PERFORMANCE_METRICS = [
+  "CALL_CLICKS",
+  "WEBSITE_CLICKS",
+  "BUSINESS_DIRECTION_REQUESTS",
+  "BUSINESS_IMPRESSIONS_DESKTOP_SEARCH",
+  "BUSINESS_IMPRESSIONS_DESKTOP_MAPS",
+  "BUSINESS_IMPRESSIONS_MOBILE_SEARCH",
+  "BUSINESS_IMPRESSIONS_MOBILE_MAPS",
+];
+
+function formatIsoDate(date: Date) {
+  return date.toISOString().slice(0, 10);
+}
+
+function toGoogleDateParts(date: Date) {
+  return { year: date.getUTCFullYear(), month: date.getUTCMonth() + 1, day: date.getUTCDate() };
+}
+
+function sumGbpDailyMetrics(payload: JsonRecord) {
+  const series = Array.isArray(payload.multiDailyMetricTimeSeries)
+    ? (payload.multiDailyMetricTimeSeries as JsonRecord[])
+    : [];
+  const totals: Record<string, number> = {};
+
+  for (const bucket of series) {
+    const dailyMetricTimeSeries = Array.isArray(bucket.dailyMetricTimeSeries)
+      ? (bucket.dailyMetricTimeSeries as JsonRecord[])
+      : [];
+    for (const entry of dailyMetricTimeSeries) {
+      const metric = String(entry.dailyMetric || "UNKNOWN");
+      const timeSeries = entry.timeSeries as JsonRecord | undefined;
+      const datedValues = Array.isArray(timeSeries?.datedValues) ? (timeSeries!.datedValues as JsonRecord[]) : [];
+      const total = datedValues.reduce((sum, item) => sum + (Number(item.value) || 0), 0);
+      totals[metric] = (totals[metric] || 0) + total;
+    }
+  }
+
+  return totals;
+}
+
+async function fetchGbpLocationPerformance(accessToken: string, locationResourceName: string) {
+  const locationId = locationResourceName.split("/").filter(Boolean).pop();
+  if (!locationId) {
+    return null;
+  }
+
+  const periodEnd = new Date();
+  periodEnd.setUTCDate(periodEnd.getUTCDate() - 1);
+  const periodStart = new Date(periodEnd);
+  periodStart.setUTCDate(periodStart.getUTCDate() - 29);
+  const priorEnd = new Date(periodStart);
+  priorEnd.setUTCDate(priorEnd.getUTCDate() - 1);
+  const priorStart = new Date(priorEnd);
+  priorStart.setUTCDate(priorStart.getUTCDate() - 29);
+
+  const buildUrl = (start: Date, end: Date) => {
+    const url = new URL(
+      `https://businessprofileperformance.googleapis.com/v1/locations/${locationId}:fetchMultiDailyMetricsTimeSeries`,
+    );
+    for (const metric of GBP_PERFORMANCE_METRICS) {
+      url.searchParams.append("dailyMetrics", metric);
+    }
+    const startParts = toGoogleDateParts(start);
+    const endParts = toGoogleDateParts(end);
+    url.searchParams.set("dailyRange.start_date.year", String(startParts.year));
+    url.searchParams.set("dailyRange.start_date.month", String(startParts.month));
+    url.searchParams.set("dailyRange.start_date.day", String(startParts.day));
+    url.searchParams.set("dailyRange.end_date.year", String(endParts.year));
+    url.searchParams.set("dailyRange.end_date.month", String(endParts.month));
+    url.searchParams.set("dailyRange.end_date.day", String(endParts.day));
+    return url.toString();
+  };
+
+  try {
+    const [currentPayload, priorPayload] = await Promise.all([
+      fetchJson(buildUrl(periodStart, periodEnd), { headers: getBearerHeaders(accessToken) }),
+      fetchJson(buildUrl(priorStart, priorEnd), { headers: getBearerHeaders(accessToken) }).catch(() => ({})),
+    ]);
+
+    const current = sumGbpDailyMetrics(currentPayload);
+    const prior = sumGbpDailyMetrics(priorPayload);
+
+    return {
+      locationId,
+      periodStart: formatIsoDate(periodStart),
+      periodEnd: formatIsoDate(periodEnd),
+      calls: current.CALL_CLICKS || 0,
+      websiteClicks: current.WEBSITE_CLICKS || 0,
+      directionRequests: current.BUSINESS_DIRECTION_REQUESTS || 0,
+      searches: (current.BUSINESS_IMPRESSIONS_DESKTOP_SEARCH || 0) + (current.BUSINESS_IMPRESSIONS_MOBILE_SEARCH || 0),
+      mapViews: (current.BUSINESS_IMPRESSIONS_DESKTOP_MAPS || 0) + (current.BUSINESS_IMPRESSIONS_MOBILE_MAPS || 0),
+      previous: {
+        calls: prior.CALL_CLICKS || 0,
+        websiteClicks: prior.WEBSITE_CLICKS || 0,
+        directionRequests: prior.BUSINESS_DIRECTION_REQUESTS || 0,
+        searches: (prior.BUSINESS_IMPRESSIONS_DESKTOP_SEARCH || 0) + (prior.BUSINESS_IMPRESSIONS_MOBILE_SEARCH || 0),
+        mapViews: (prior.BUSINESS_IMPRESSIONS_DESKTOP_MAPS || 0) + (prior.BUSINESS_IMPRESSIONS_MOBILE_MAPS || 0),
+      },
+    };
+  } catch (error) {
+    return {
+      locationId,
+      error: error instanceof Error ? error.message : "Performance metrics unavailable for this location",
+    };
+  }
 }
 
 function getLast28DaysRange() {
@@ -816,6 +928,77 @@ async function syncRotatingTokenProvider(
   } satisfies SyncExecutionResult;
 }
 
+async function syncGoHighLevel(context: TenantContext, record: IntegrationConnectionRecord, origin?: string) {
+  const refreshedRecord = await maybeRefreshConnection(context, record, origin);
+  const credentials = getIntegrationCredentials(refreshedRecord);
+  const accessToken = credentials.accessToken;
+  const locationId = credentials.locationId || refreshedRecord.externalAccountId;
+
+  if (!accessToken) {
+    throw new Error("GoHighLevel access token is missing");
+  }
+  if (!locationId) {
+    throw new Error("GoHighLevel sub-account is missing -- reconnect and select a location");
+  }
+
+  const baseUrl = getIntegrationDefinition("gohighlevel").defaultApiBaseUrl || "https://services.leadconnectorhq.com";
+  const headers = {
+    ...getBearerHeaders(accessToken),
+    Version: "2021-07-28",
+  };
+
+  const contactsPayload = await fetchJson(
+    `${baseUrl}/contacts/?locationId=${encodeURIComponent(locationId)}&limit=100`,
+    { headers },
+  );
+  const contacts = Array.isArray(contactsPayload.contacts) ? (contactsPayload.contacts as JsonRecord[]) : [];
+
+  const opportunitiesPayload = await fetchJson(
+    `${baseUrl}/opportunities/search?location_id=${encodeURIComponent(locationId)}&limit=100`,
+    { headers },
+  ).catch(() => ({}) as JsonRecord);
+  const dealOpportunities = Array.isArray(opportunitiesPayload.opportunities)
+    ? (opportunitiesPayload.opportunities as JsonRecord[])
+    : [];
+  const wonOpportunities = dealOpportunities.filter(
+    (item) => String(item.status || "").toLowerCase() === "won",
+  );
+
+  const counts = createEmptyCounts();
+  counts.fetched = contacts.length + dealOpportunities.length;
+  counts.created = counts.fetched;
+
+  return {
+    summary: [
+      `${formatSummaryCount("contact", contacts.length)} loaded`,
+      `${formatSummaryCount("opportunity", dealOpportunities.length)} loaded`,
+    ].join(", "),
+    counts,
+    snapshotPayload: {
+      locationId,
+      totalLeads: contacts.length,
+      qualifiedLeads: dealOpportunities.length,
+      bookedJobs: wonOpportunities.length,
+      sampleContacts: contacts.slice(0, 10).map((contact) => ({
+        id: contact.id,
+        name:
+          contact.contactName ||
+          contact.name ||
+          `${contact.firstName || ""} ${contact.lastName || ""}`.trim() ||
+          "Unnamed contact",
+        source: contact.source || "unknown",
+        dateAdded: contact.dateAdded,
+      })),
+      opportunities: dealOpportunities.slice(0, 10).map((item) => ({
+        id: item.id,
+        name: item.name,
+        status: item.status,
+        monetaryValue: item.monetaryValue,
+      })),
+    },
+  } satisfies SyncExecutionResult;
+}
+
 async function runProviderSync(
   context: TenantContext,
   providerId: IntegrationProviderId,
@@ -836,6 +1019,8 @@ async function runProviderSync(
       return syncRotatingTokenProvider(context, "rank-tracker", record, origin);
     case "map-checkins":
       return syncRotatingTokenProvider(context, "map-checkins", record, origin);
+    case "gohighlevel":
+      return syncGoHighLevel(context, record, origin);
     default:
       throw new Error(`${getIntegrationDefinition(providerId).name} sync is not implemented in this slice`);
   }

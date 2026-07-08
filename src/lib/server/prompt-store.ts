@@ -9,12 +9,18 @@ export type PromptRole =
   | "Memory Agent"
   | "Writing Agent";
 
+export type PromptProvider = "gemini" | "claude";
+
+export type PromptTaskDifficulty = "simple" | "moderate" | "difficult";
+
 export type PromptDefinition = {
   key: string;
   title: string;
   role: PromptRole;
   prompt: string;
   description?: string;
+  provider?: PromptProvider;
+  difficulty?: PromptTaskDifficulty;
 };
 
 export type PromptPhase = {
@@ -90,8 +96,8 @@ export async function getPrompts(): Promise<PromptConfig> {
     const text = await fs.promises.readFile(PROMPT_FILE, "utf8");
     const json = JSON.parse(text);
     return normalizePromptConfig(json);
-  } catch (err: any) {
-    if (err && err.code === "ENOENT") {
+  } catch (err: unknown) {
+    if (typeof err === "object" && err !== null && "code" in err && err.code === "ENOENT") {
       return [];
     }
     throw err;

@@ -1,7 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import type { PromptConfig, PromptDefinition, PromptRole } from "@/src/lib/server/prompt-store";
+import type {
+  PromptConfig,
+  PromptDefinition,
+  PromptProvider,
+  PromptRole,
+  PromptTaskDifficulty,
+} from "@/src/lib/server/prompt-store";
 
 const promptRoles = [
   "Research Agent",
@@ -12,12 +18,18 @@ const promptRoles = [
   "Writing Agent",
 ] as const;
 
+const promptProviders: PromptProvider[] = ["gemini", "claude"];
+
+const promptDifficulties: PromptTaskDifficulty[] = ["simple", "moderate", "difficult"];
+
 const defaultPrompt: PromptDefinition = {
   key: "new_prompt",
   title: "New Prompt",
   role: "Research Agent",
   prompt: "",
   description: "",
+  provider: "gemini",
+  difficulty: "simple",
 };
 
 function normalizePrompts(value: unknown): PromptConfig {
@@ -149,7 +161,7 @@ export function PromptManager() {
   return (
     <div className="space-y-6">
       <div className="text-sm text-slate-400">
-        Organize prompts by workflow stage and assign model-agnostic roles. The prompt key is used by AI services, while the role helps route the prompt to the right agent type.
+        Organize prompts by workflow stage, assign roles, and define execution routing. Use Gemini for simple tasks and Claude for difficult or reasoning-heavy tasks.
       </div>
 
       <div className="space-y-8">
@@ -216,6 +228,37 @@ export function PromptManager() {
                             onChange={(event) => updatePrompt(phaseIndex, promptIndex, { description: event.target.value })}
                             className="w-full rounded-2xl border border-white/10 bg-black/15 px-3 py-2 text-sm text-slate-200 outline-none"
                           />
+                        </div>
+                      </div>
+
+                      <div className="mt-3 grid gap-3 sm:grid-cols-[1fr_1fr]">
+                        <div>
+                          <label className="block text-xs uppercase tracking-[0.2em] text-slate-400">Provider</label>
+                          <select
+                            value={prompt.provider ?? "gemini"}
+                            onChange={(event) => updatePrompt(phaseIndex, promptIndex, { provider: event.target.value as PromptProvider })}
+                            className="w-full rounded-2xl border border-white/10 bg-black/15 px-3 py-2 text-sm text-slate-200 outline-none"
+                          >
+                            {promptProviders.map((provider) => (
+                              <option key={provider} value={provider}>
+                                {provider}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-xs uppercase tracking-[0.2em] text-slate-400">Difficulty</label>
+                          <select
+                            value={prompt.difficulty ?? "simple"}
+                            onChange={(event) => updatePrompt(phaseIndex, promptIndex, { difficulty: event.target.value as PromptTaskDifficulty })}
+                            className="w-full rounded-2xl border border-white/10 bg-black/15 px-3 py-2 text-sm text-slate-200 outline-none"
+                          >
+                            {promptDifficulties.map((difficulty) => (
+                              <option key={difficulty} value={difficulty}>
+                                {difficulty}
+                              </option>
+                            ))}
+                          </select>
                         </div>
                       </div>
 

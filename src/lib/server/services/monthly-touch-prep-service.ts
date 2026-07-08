@@ -267,7 +267,7 @@ function buildExecutiveBrief(
   const overdueCount = openCommitments.filter((commitment) => commitment.status === "Overdue").length;
   const sourceSummary = sources.length
     ? `${sources.length} connected data source${sources.length === 1 ? "" : "s"} contributed evidence to this prep pack.`
-    : "No synced integration snapshots are available yet, so this prep pack is using GrowthPilot client and workflow data only.";
+    : "No synced integration snapshots are available yet, so this prep pack is using Monthly Touch OS client and workflow data only.";
 
   return [
     `${client.name} enters this monthly touch with a health score of ${client.healthScore} and relationship score of ${client.relationshipScore}.`,
@@ -336,7 +336,7 @@ function buildDeterministicRecommendations(
     evidence: [
       {
         label: `${openCommitments.length} open commitments`,
-        source: "GrowthPilot workflow data",
+        source: "Monthly Touch OS workflow data",
         freshness: "Prepared just now",
       },
       {
@@ -359,7 +359,7 @@ function buildDeterministicRecommendations(
     evidence: [
       {
         label: topOpportunity ? topOpportunity.title : "No active opportunity attached",
-        source: topOpportunity ? "GrowthPilot opportunity pipeline" : "GrowthPilot preparation bundle",
+        source: topOpportunity ? "Monthly Touch OS opportunity pipeline" : "Monthly Touch OS preparation bundle",
         freshness: "Prepared just now",
       },
       {

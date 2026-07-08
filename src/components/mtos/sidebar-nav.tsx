@@ -38,7 +38,7 @@ export function SidebarNav() {
               <Sparkles className="h-5 w-5 text-[#d7f5ec]" />
             </div>
             <div>
-              <p className="font-medium text-white">GrowthPilot</p>
+              <p className="font-medium text-white">Monthly Touch OS</p>
               <p className="text-sm text-slate-400">AI operating system for Monthly Touches</p>
             </div>
           </div>

@@ -2,6 +2,8 @@ import type { ReactNode } from "react";
 import { Bell, Search, Sparkles } from "lucide-react";
 
 import { SidebarNav } from "@/src/components/mtos/sidebar-nav";
+import { resolveTenantContext } from "@/src/lib/auth/resolve-tenant-context";
+import { getUserGreeting } from "@/src/lib/server/services/user-service";
 
 interface AppShellProps {
   title: string;
@@ -9,7 +11,10 @@ interface AppShellProps {
   children: ReactNode;
 }
 
-export function AppShell({ title, subtitle, children }: AppShellProps) {
+export async function AppShell({ title, subtitle, children }: AppShellProps) {
+  const context = await resolveTenantContext();
+  const greeting = await getUserGreeting(context);
+
   return (
     <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,#223554_0%,#08111e_34%,#050a12_100%)] text-slate-100">
       <div className="mx-auto grid min-h-screen max-w-[1700px] gap-6 p-5 xl:grid-cols-[300px_minmax(0,1fr)]">
@@ -20,7 +25,7 @@ export function AppShell({ title, subtitle, children }: AppShellProps) {
           <header className="flex flex-col gap-5 rounded-[28px] border border-white/8 bg-white/5 p-5 md:flex-row md:items-center md:justify-between md:p-6">
             <div className="space-y-2">
               <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">
-                Account manager workspace
+                Account manager operating workspace
               </p>
               <div className="space-y-2">
                 <h1 className="font-serif text-3xl tracking-tight text-white md:text-4xl">
@@ -32,10 +37,11 @@ export function AppShell({ title, subtitle, children }: AppShellProps) {
               </div>
             </div>
             <div className="grid gap-3 md:min-w-[360px]">
+              <div className="text-sm font-semibold text-slate-200">{greeting.label}</div>
               <div className="flex items-center gap-3 rounded-2xl border border-white/8 bg-black/20 px-4 py-3">
                 <Search className="h-4 w-4 text-slate-400" />
                 <span className="text-sm text-slate-400">
-                  Search clients, touches, risks, commitments, or ask AI
+                  Search clients, Monthly Touches, risks, commitments, or ask AI
                 </span>
               </div>
               <div className="flex flex-wrap items-center gap-3">

@@ -2,21 +2,22 @@ import Link from "next/link";
 import { ArrowRight, CalendarClock, ShieldAlert, Sparkles, Target } from "lucide-react";
 
 import { AppShell } from "@/src/components/mtos/app-shell";
+import { AiVisibilityCard } from "@/src/components/mtos/ai-visibility-card";
 import { ScorePill } from "@/src/components/mtos/score-pill";
 import { SectionCard } from "@/src/components/mtos/section-card";
-import { getClients, getCommandCenterSnapshot } from "@/src/lib/mtos-data";
+import { resolveTenantContext } from "@/src/lib/auth/resolve-tenant-context";
+import { getCommandCenterView } from "@/src/lib/server/services/command-center-service";
 import { healthTone } from "@/src/lib/utils";
 
-export default function CommandCenterPage() {
-  const snapshot = getCommandCenterSnapshot();
-  const clients = getClients();
+export default async function CommandCenterPage() {
+  const { snapshot, clients } = await getCommandCenterView(await resolveTenantContext());
 
   return (
     <AppShell
       title="Command Center"
-      subtitle="Start from the clearest operational picture: what changed, what matters, and what the Account Manager should do next."
+      subtitle="Start from the clearest operational picture: what changed, what matters, and what the Account Manager should do next for each Monthly Touch."
     >
-      <div className="grid gap-6 xl:grid-cols-[1.55fr_minmax(0,1fr)]">
+      <div className="grid gap-6">
         <SectionCard
           eyebrow="Today"
           title={snapshot.focusDate}
@@ -40,66 +41,81 @@ export default function CommandCenterPage() {
             </div>
           }
         >
-          <div className="grid gap-4 lg:grid-cols-3">
-            {snapshot.priorities.map((priority, index) => (
-              <article
-                key={priority}
-                className="rounded-[24px] border border-white/8 bg-white/4 p-5"
-              >
-                <div className="mb-4 flex items-center justify-between">
-                  <span className="rounded-full bg-white/8 px-3 py-1 text-[11px] uppercase tracking-[0.24em] text-slate-300">
-                    Priority {index + 1}
-                  </span>
-                  <Sparkles className="h-4 w-4 text-[#d7f5ec]" />
-                </div>
-                <p className="text-sm leading-7 text-slate-100">{priority}</p>
-              </article>
-            ))}
-          </div>
-        </SectionCard>
-
-        <SectionCard
-          eyebrow="Meeting readiness"
-          title="Upcoming monthly touches"
-          subtitle="The Account Manager should be able to judge readiness, relationship health, and next action from a single surface."
-        >
-          <div className="space-y-3">
-            {clients.map((client) => (
-              <Link
-                key={client.id}
-                href={`/monthly-touch/${client.touchId}`}
-                className="flex flex-col gap-4 rounded-[24px] border border-white/8 bg-white/4 p-5 transition hover:border-white/16 hover:bg-white/6"
-              >
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div>
-                    <p className="text-lg font-semibold text-white">{client.name}</p>
-                    <p className="text-sm text-slate-400">
-                      {client.industry} · next touch {client.touchDate}
-                    </p>
+          <div className="space-y-6">
+            <div className="grid gap-4 lg:grid-cols-3">
+              {snapshot.priorities.map((priority, index) => (
+                <article
+                  key={priority}
+                  className="rounded-[24px] border border-white/8 bg-white/4 p-5"
+                >
+                  <div className="mb-4 flex items-center justify-between">
+                    <span className="rounded-full bg-white/8 px-3 py-1 text-[11px] uppercase tracking-[0.24em] text-slate-300">
+                      Priority {index + 1}
+                    </span>
+                    <Sparkles className="h-4 w-4 text-[#d7f5ec]" />
                   </div>
-                  <ScorePill
-                    label="Health"
-                    value={client.healthScore}
-                    tone={healthTone(client.healthScore)}
-                  />
+                  <p className="text-sm leading-7 text-slate-100">{priority}</p>
+                </article>
+              ))}
+            </div>
+
+            <section className="rounded-[24px] border border-white/8 bg-white/3 p-5">
+              <div className="border-b border-white/8 pb-4">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">
+                  Meeting readiness
+                </p>
+                <div className="mt-2 space-y-1">
+                  <h2 className="text-xl font-semibold tracking-tight text-white">
+                    Upcoming Monthly Touches
+                  </h2>
+                  <p className="max-w-2xl text-sm text-slate-400">
+                    The Account Manager should be able to judge readiness, relationship health, and
+                    next action from a single surface before each meeting.
+                  </p>
                 </div>
-                <p className="text-sm leading-6 text-slate-300">{client.summary}</p>
-                <div className="flex flex-wrap items-center gap-4 text-xs text-slate-400">
-                  <span className="inline-flex items-center gap-2">
-                    <CalendarClock className="h-4 w-4" />
-                    {client.commitmentsOpen} open commitments
-                  </span>
-                  <span className="inline-flex items-center gap-2">
-                    <ShieldAlert className="h-4 w-4" />
-                    {client.topRisks[0]}
-                  </span>
-                  <span className="inline-flex items-center gap-2">
-                    <Target className="h-4 w-4" />
-                    {client.topOpportunities[0]}
-                  </span>
+              </div>
+
+              <div className="pt-5">
+                <div className="space-y-3">
+                  {clients.map((client) => (
+                    <Link
+                      key={client.id}
+                      href={`/monthly-touch/${client.touchId}`}
+                      className="flex flex-col gap-4 rounded-[24px] border border-white/8 bg-white/4 p-5 transition hover:border-white/16 hover:bg-white/6"
+                    >
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                          <p className="text-lg font-semibold text-white">{client.name}</p>
+                          <p className="text-sm text-slate-400">
+                            {client.industry} · next touch {client.touchDate}
+                          </p>
+                        </div>
+                        <ScorePill
+                          label="Health"
+                          value={client.healthScore}
+                          tone={healthTone(client.healthScore)}
+                        />
+                      </div>
+                      <p className="text-sm leading-6 text-slate-300">{client.summary}</p>
+                      <div className="flex flex-wrap items-center gap-4 text-xs text-slate-400">
+                        <span className="inline-flex items-center gap-2">
+                          <CalendarClock className="h-4 w-4" />
+                          {client.commitmentsOpen} open commitments
+                        </span>
+                        <span className="inline-flex items-center gap-2">
+                          <ShieldAlert className="h-4 w-4" />
+                          {client.topRisks[0]}
+                        </span>
+                        <span className="inline-flex items-center gap-2">
+                          <Target className="h-4 w-4" />
+                          {client.topOpportunities[0]}
+                        </span>
+                      </div>
+                    </Link>
+                  ))}
                 </div>
-              </Link>
-            ))}
+              </div>
+            </section>
           </div>
         </SectionCard>
       </div>
@@ -115,20 +131,36 @@ export default function CommandCenterPage() {
               <Link
                 key={client.id}
                 href={`/clients/${client.id}`}
-                className="rounded-[24px] border border-white/8 bg-black/15 p-5 transition hover:bg-black/25"
+                className="min-w-0 rounded-[24px] border border-white/8 bg-black/15 p-5 transition hover:bg-black/25"
               >
                 <p className="text-base font-semibold text-white">{client.name}</p>
-                <div className="mt-4 grid gap-2">
-                  <ScorePill label="Health" value={client.healthScore} tone={healthTone(client.healthScore)} />
+                <div className="mt-4 grid gap-1.5">
+                  <ScorePill
+                    label="Health"
+                    value={client.healthScore}
+                    tone={healthTone(client.healthScore)}
+                    className="flex w-full flex-col rounded-xl px-2.5 py-1.5"
+                    contentClassName="flex-col items-start gap-1"
+                    labelClassName="text-[10px] tracking-[0.18em]"
+                    valueClassName="text-xs"
+                  />
                   <ScorePill
                     label="Relationship"
                     value={client.relationshipScore}
                     tone={healthTone(client.relationshipScore)}
+                    className="flex w-full flex-col rounded-xl px-2.5 py-1.5"
+                    contentClassName="flex-col items-start gap-1"
+                    labelClassName="text-[10px] tracking-[0.18em]"
+                    valueClassName="text-xs"
                   />
                   <ScorePill
                     label="Growth Readiness"
                     value={client.growthReadiness}
                     tone={healthTone(client.growthReadiness)}
+                    className="flex w-full flex-col rounded-xl px-2.5 py-1.5"
+                    contentClassName="flex-col items-start gap-1"
+                    labelClassName="text-[10px] tracking-[0.18em]"
+                    valueClassName="text-xs"
                   />
                 </div>
               </Link>
@@ -139,7 +171,7 @@ export default function CommandCenterPage() {
         <SectionCard
           eyebrow="Guiding principle"
           title="The five-answer standard"
-          subtitle="Every workflow in MTOS is designed to help the Account Manager answer these questions before the meeting ends."
+          subtitle="Every workflow in MTOS is designed to help the Account Manager answer these questions before the Monthly Touch ends."
         >
           <div className="grid gap-3">
             {[

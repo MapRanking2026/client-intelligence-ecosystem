@@ -16,6 +16,54 @@ export interface RecommendationItem {
   evidence: EvidenceItem[];
 }
 
+export interface PrepPackSourceItem {
+  providerId: string;
+  label: string;
+  syncedAt: string;
+  summary: string;
+  bullets: string[];
+}
+
+export interface PrepPackCommitmentItem {
+  title: string;
+  owner: string;
+  dueDate: string;
+  status: string;
+  category: string;
+}
+
+export interface PrepPackOpportunityItem {
+  title: string;
+  stage: string;
+  value: string;
+  readiness: string;
+  nextStep: string;
+}
+
+export interface PrepPackClaudeState {
+  status: "generated" | "not_configured" | "failed";
+  generatedAt?: string;
+  model?: string;
+  errorMessage?: string;
+}
+
+export interface MonthlyTouchPrepPack {
+  preparedAt: string;
+  pipelineVersion: string;
+  clientSummary: string;
+  schedule: {
+    touchDate: string;
+    scheduledAt?: string;
+    calendarEventId?: string;
+  };
+  focusAreas: string[];
+  keyFacts: string[];
+  openCommitments: PrepPackCommitmentItem[];
+  activeOpportunities: PrepPackOpportunityItem[];
+  integrationSources: PrepPackSourceItem[];
+  claude: PrepPackClaudeState;
+}
+
 export interface ClientRecord {
   id: string;
   name: string;
@@ -33,6 +81,19 @@ export interface ClientRecord {
   topOpportunities: string[];
   commitmentsOpen: number;
   nextBestAction: string;
+  clickupTaskId?: string;
+  accountManager?: string;
+  location?: string;
+  sentiment?: string;
+  tenure?: string;
+  mrr?: string;
+  riskNote?: string;
+  contextNotes?: string;
+  churnSignals?: string[];
+  goals?: string[];
+  syncSource?: "clickup";
+  sourceUpdatedAt?: string;
+  rawPayload?: Record<string, unknown>;
 }
 
 export interface CommitmentRecord {
@@ -56,12 +117,79 @@ export interface OpportunityRecord {
   nextStep: string;
 }
 
+export interface CallGuideSection {
+  title: string;
+  minutes: number;
+  talkingPoints: string[];
+  clientPrompts: string[];
+}
+
+export interface CallGuide {
+  status: "not_generated" | "generated";
+  source?: "claude" | "deterministic";
+  sections: CallGuideSection[];
+  generatedAt?: string;
+  model?: string;
+  errorMessage?: string;
+}
+
+export type TicketDepartment = "SEO" | "Web Design" | "Ads" | "Account Manager" | "Other";
+
+export interface DraftTicket {
+  id: string;
+  title: string;
+  description: string;
+  department: TicketDepartment;
+  status: "pending" | "approved" | "declined";
+  clickupTaskId?: string;
+  clickupTaskUrl?: string;
+  executionNote?: string;
+}
+
+export interface ClientEmailDraft {
+  subject: string;
+  body: string;
+  status: "pending" | "approved";
+}
+
+export interface PostMeetingReview {
+  status: "not_started" | "draft_ready" | "approved";
+  transcript?: string;
+  recapSummary?: string;
+  extractedCommitments?: string[];
+  draftTickets?: DraftTicket[];
+  clientEmail?: ClientEmailDraft;
+  analyzedAt?: string;
+  model?: string;
+  errorMessage?: string;
+}
+
+export interface QaScorecardCategory {
+  category: string;
+  score: number;
+  notes: string;
+}
+
+export interface QaReview {
+  status: "not_started" | "pending_victor_approval" | "approved" | "changes_requested";
+  scorecard?: QaScorecardCategory[];
+  overallGrade?: string;
+  summary?: string;
+  generatedAt?: string;
+  victorDecisionAt?: string;
+  victorNote?: string;
+  errorMessage?: string;
+}
+
 export interface MonthlyTouchRecord {
   id: string;
   clientId: string;
   status: "Preparing" | "Ready" | "Live" | "Completed";
   readinessScore: number;
   confidenceScore: number;
+  scheduledAt?: string;
+  calendarEventId?: string;
+  updatedAt?: string;
   executiveBrief: string;
   agenda: string[];
   wins: string[];
@@ -70,6 +198,10 @@ export interface MonthlyTouchRecord {
   talkingPoints: string[];
   commitments: string[];
   aiRecommendations: RecommendationItem[];
+  prepPack?: MonthlyTouchPrepPack;
+  callGuide?: CallGuide;
+  postMeeting?: PostMeetingReview;
+  qaReview?: QaReview;
 }
 
 const clients: ClientRecord[] = [

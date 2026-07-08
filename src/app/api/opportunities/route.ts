@@ -4,6 +4,6 @@ import { resolveTenantContext } from "@/src/lib/auth/resolve-tenant-context";
 import { opportunitiesResponse } from "@/src/lib/api/mtos-query";
 
 export async function GET(request: Request) {
-  const context = resolveTenantContext(request);
-  return NextResponse.json(opportunitiesResponse(context));
+  const context = await resolveTenantContext(request);
+  return NextResponse.json(await opportunitiesResponse(context));
 }

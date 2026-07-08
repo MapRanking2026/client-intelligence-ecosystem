@@ -4,11 +4,12 @@ import { ArrowUpRight, CalendarRange, Clock3 } from "lucide-react";
 import { AppShell } from "@/src/components/mtos/app-shell";
 import { ScorePill } from "@/src/components/mtos/score-pill";
 import { SectionCard } from "@/src/components/mtos/section-card";
-import { getClientById, getMonthlyTouches } from "@/src/lib/mtos-data";
+import { resolveTenantContext } from "@/src/lib/auth/resolve-tenant-context";
+import { getMonthlyTouchQueueView } from "@/src/lib/server/services/monthly-touch-service";
 import { healthTone } from "@/src/lib/utils";
 
-export default function MonthlyTouchIndexPage() {
-  const touches = getMonthlyTouches();
+export default async function MonthlyTouchIndexPage() {
+  const { queue } = await getMonthlyTouchQueueView(await resolveTenantContext());
 
   return (
     <AppShell
@@ -17,13 +18,11 @@ export default function MonthlyTouchIndexPage() {
     >
       <SectionCard
         eyebrow="Queue"
-        title="Upcoming and active monthly touches"
-        subtitle="This index route turns the Monthly Touch navigation into a real workspace instead of a dead-end. Each card leads into the meeting environment."
+        title="Upcoming and active Monthly Touches"
+        subtitle="This workspace turns the Monthly Touch journey into a real operating environment instead of a dead-end. Each card leads into the meeting preparation flow."
       >
         <div className="grid gap-4 xl:grid-cols-3">
-          {touches.map((touch) => {
-            const client = getClientById(touch.clientId);
-
+          {queue.map(({ touch, client }) => {
             if (!client) {
               return null;
             }

@@ -1,84 +1,100 @@
 import type { ApiResponse, TenantContext } from "@/src/lib/contracts/mtos";
-import {
-  getClientById,
-  getClients,
-  getCommandCenterSnapshot,
-  getCommitments,
-  getMonthlyTouchById,
-  getMonthlyTouches,
-  getOpportunities,
-} from "@/src/lib/mtos-data";
+import { getMtosDataSource } from "@/src/lib/server/data/seed-mtos-data-source";
 
-export function commandCenterResponse(context: TenantContext): ApiResponse<ReturnType<typeof getCommandCenterSnapshot>> {
+export async function commandCenterResponse(context: TenantContext): Promise<
+  ApiResponse<Awaited<ReturnType<ReturnType<typeof getMtosDataSource>["getCommandCenterSnapshot"]>>>
+> {
+  const dataSource = getMtosDataSource(context);
   return {
     context,
-    data: getCommandCenterSnapshot(),
+    data: await dataSource.getCommandCenterSnapshot(),
   };
 }
 
-export function clientsResponse(context: TenantContext) {
+export async function clientsResponse(context: TenantContext) {
+  const dataSource = getMtosDataSource(context);
   return {
     context,
-    data: getClients(),
+    data: await dataSource.getClients(),
   };
 }
 
-export function clientWorkspaceResponse(context: TenantContext, clientId: string) {
-  const client = getClientById(clientId);
+export async function clientWorkspaceResponse(context: TenantContext, clientId: string) {
+  const dataSource = getMtosDataSource(context);
+  const client = await dataSource.getClientById(clientId);
 
   if (!client) {
     return null;
   }
 
+  const [touch, commitments, opportunities] = await Promise.all([
+    dataSource.getMonthlyTouchById(client.touchId),
+    dataSource.getCommitments(client.id),
+    dataSource.getOpportunities(client.id),
+  ]);
+
   return {
     context,
     data: {
       client,
-      touch: getMonthlyTouchById(client.touchId) ?? null,
-      commitments: getCommitments(client.id),
-      opportunities: getOpportunities(client.id),
+      touch: touch ?? null,
+      commitments,
+      opportunities,
     },
   };
 }
 
-export function monthlyTouchesResponse(context: TenantContext) {
+export async function monthlyTouchesResponse(context: TenantContext) {
+  const dataSource = getMtosDataSource(context);
+  const touches = await dataSource.getMonthlyTouches();
   return {
     context,
-    data: getMonthlyTouches().map((touch) => ({
+    data: await Promise.all(
+      touches.map(async (touch) => ({
       ...touch,
-      client: getClientById(touch.clientId) ?? null,
-    })),
+      client: (await dataSource.getClientById(touch.clientId)) ?? null,
+      })),
+    ),
   };
 }
 
-export function monthlyTouchWorkspaceResponse(context: TenantContext, touchId: string) {
-  const touch = getMonthlyTouchById(touchId);
+export async function monthlyTouchWorkspaceResponse(context: TenantContext, touchId: string) {
+  const dataSource = getMtosDataSource(context);
+  const touch = await dataSource.getMonthlyTouchById(touchId);
 
   if (!touch) {
     return null;
   }
 
+  const [client, commitments, opportunities] = await Promise.all([
+    dataSource.getClientById(touch.clientId),
+    dataSource.getCommitments(touch.clientId),
+    dataSource.getOpportunities(touch.clientId),
+  ]);
+
   return {
     context,
     data: {
       touch,
-      client: getClientById(touch.clientId) ?? null,
-      commitments: getCommitments(touch.clientId),
-      opportunities: getOpportunities(touch.clientId),
+      client: client ?? null,
+      commitments,
+      opportunities,
     },
   };
 }
 
-export function commitmentsResponse(context: TenantContext) {
+export async function commitmentsResponse(context: TenantContext) {
+  const dataSource = getMtosDataSource(context);
   return {
     context,
-    data: getCommitments(),
+    data: await dataSource.getCommitments(),
   };
 }
 
-export function opportunitiesResponse(context: TenantContext) {
+export async function opportunitiesResponse(context: TenantContext) {
+  const dataSource = getMtosDataSource(context);
   return {
     context,
-    data: getOpportunities(),
+    data: await dataSource.getOpportunities(),
   };
 }

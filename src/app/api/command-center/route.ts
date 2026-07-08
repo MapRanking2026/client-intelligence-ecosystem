@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
 
 import { resolveTenantContext } from "@/src/lib/auth/resolve-tenant-context";
-import { commandCenterResponse } from "@/src/lib/api/mtos-query";
+import { getCommandCenterView } from "@/src/lib/server/services/command-center-service";
 
 export async function GET(request: Request) {
-  const context = resolveTenantContext(request);
-  return NextResponse.json(commandCenterResponse(context));
+  const context = await resolveTenantContext(request);
+  return NextResponse.json(await getCommandCenterView(context));
 }

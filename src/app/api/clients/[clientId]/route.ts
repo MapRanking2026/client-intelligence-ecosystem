@@ -7,9 +7,9 @@ export async function GET(
   request: Request,
   { params }: { params: Promise<{ clientId: string }> },
 ) {
-  const context = resolveTenantContext(request);
+  const context = await resolveTenantContext(request);
   const { clientId } = await params;
-  const payload = clientWorkspaceResponse(context, clientId);
+  const payload = await clientWorkspaceResponse(context, clientId);
 
   if (!payload) {
     return NextResponse.json({ error: "Client not found" }, { status: 404 });

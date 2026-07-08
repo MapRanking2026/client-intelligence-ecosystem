@@ -15,7 +15,7 @@ const displayFont = Fraunces({
 
 export const metadata: Metadata = {
   title: "Monthly Touch OS",
-  description: "AI-assisted operating system for Account Managers running monthly client touchpoints.",
+  description: "AI-powered operating system for Account Managers preparing and running Monthly Touches.",
 };
 
 export default function RootLayout({

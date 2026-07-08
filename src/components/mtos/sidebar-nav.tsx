@@ -19,7 +19,7 @@ import { cn } from "@/src/lib/utils";
 const navItems = [
   { href: "/command-center", label: "Command Center", icon: LayoutDashboard },
   { href: "/clients", label: "Clients", icon: Building2 },
-  { href: "/monthly-touch", label: "Monthly Touch", icon: CalendarRange },
+  { href: "/monthly-touch", label: "Monthly Touches", icon: CalendarRange },
   { href: "/commitments", label: "Commitments", icon: BadgeCheck },
   { href: "/opportunities", label: "Opportunities", icon: BriefcaseBusiness },
   { href: "/qa", label: "QA", icon: ClipboardCheck },
@@ -38,8 +38,8 @@ export function SidebarNav() {
               <Sparkles className="h-5 w-5 text-[#d7f5ec]" />
             </div>
             <div>
-              <p className="font-medium text-white">Monthly Touch OS</p>
-              <p className="text-sm text-slate-400">Account Manager intelligence layer</p>
+              <p className="font-medium text-white">GrowthPilot</p>
+              <p className="text-sm text-slate-400">AI operating system for Monthly Touches</p>
             </div>
           </div>
         </div>
@@ -47,7 +47,7 @@ export function SidebarNav() {
         <nav className="space-y-2">
           {navItems.map(({ href, label, icon: Icon }) => {
             const active = pathname === href || pathname.startsWith(`${href}/`);
-            const activeStyle = active ? { color: "#1d2e4b" } : undefined;
+            const activeStyle = active ? { color: "#0c1524" } : undefined;
             return (
               <Link
                 key={href}
@@ -56,7 +56,7 @@ export function SidebarNav() {
                 className={cn(
                   "flex items-center gap-3 rounded-2xl px-4 py-3 text-sm transition-all",
                   active
-                    ? "bg-white text-slate-950 shadow-lg shadow-white/10"
+                    ? "bg-white text-[#0c1524] shadow-lg shadow-white/10"
                     : "text-slate-300 hover:bg-white/7 hover:text-white",
                 )}
               >

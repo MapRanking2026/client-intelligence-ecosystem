@@ -1,0 +1,92 @@
+import { NextResponse } from "next/server";
+import { z } from "zod";
+
+import { integrationProviderIds } from "@/src/lib/contracts/integrations";
+import { resolveTenantContext } from "@/src/lib/auth/resolve-tenant-context";
+import { syncIntegrationProvider } from "@/src/lib/server/integration-sync";
+import {
+  connectIntegration,
+  disconnectIntegration,
+  listIntegrationViews,
+  refreshIntegration,
+} from "@/src/lib/server/integrations";
+
+const providerIdSchema = z.enum(integrationProviderIds);
+
+const integrationActionSchema = z.object({
+  action: z.enum(["connect", "disconnect", "refresh", "sync"]),
+  providerId: providerIdSchema,
+  credentials: z.record(z.string(), z.string()).optional(),
+});
+
+export async function GET(request: Request) {
+  const context = await resolveTenantContext(request);
+  const integrations = await listIntegrationViews(context);
+
+  return NextResponse.json({
+    context,
+    data: {
+      integrations,
+    },
+  });
+}
+
+export async function POST(request: Request) {
+  const context = await resolveTenantContext(request);
+
+  try {
+    const payload = integrationActionSchema.parse(await request.json());
+    const origin = new URL(request.url).origin;
+
+    if (payload.action === "disconnect") {
+      await disconnectIntegration(context, payload.providerId);
+      return NextResponse.json({
+        context,
+        data: {
+          providerId: payload.providerId,
+          disconnected: true,
+        },
+      });
+    }
+
+    if (payload.action === "refresh") {
+      const provider = await refreshIntegration(context, payload.providerId, origin);
+      return NextResponse.json({
+        context,
+        data: {
+          provider,
+        },
+      });
+    }
+
+    if (payload.action === "sync") {
+      const syncResult = await syncIntegrationProvider(context, payload.providerId, origin);
+      return NextResponse.json({
+        context,
+        data: {
+          providerId: payload.providerId,
+          syncResult,
+        },
+      });
+    }
+
+    const connection = await connectIntegration(
+      context,
+      payload.providerId,
+      payload.credentials || {},
+      origin,
+    );
+
+    return NextResponse.json({
+      context,
+      data: connection,
+    });
+  } catch (error) {
+    return NextResponse.json(
+      {
+        error: error instanceof Error ? error.message : "Integration request failed",
+      },
+      { status: 400 },
+    );
+  }
+}

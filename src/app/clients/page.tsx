@@ -4,11 +4,12 @@ import { ArrowUpRight, Pin, Search } from "lucide-react";
 import { AppShell } from "@/src/components/mtos/app-shell";
 import { ScorePill } from "@/src/components/mtos/score-pill";
 import { SectionCard } from "@/src/components/mtos/section-card";
-import { getClients } from "@/src/lib/mtos-data";
+import { resolveTenantContext } from "@/src/lib/auth/resolve-tenant-context";
+import { getClientsDirectoryView } from "@/src/lib/server/services/clients-service";
 import { healthTone } from "@/src/lib/utils";
 
-export default function ClientsPage() {
-  const clients = getClients();
+export default async function ClientsPage() {
+  const { clients } = await getClientsDirectoryView(await resolveTenantContext());
 
   return (
     <AppShell

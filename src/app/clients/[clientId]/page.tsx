@@ -5,7 +5,8 @@ import { ArrowRight, BookOpenText, CalendarDays, MessageSquareQuote } from "luci
 import { AppShell } from "@/src/components/mtos/app-shell";
 import { ScorePill } from "@/src/components/mtos/score-pill";
 import { SectionCard } from "@/src/components/mtos/section-card";
-import { getClientById, getCommitments, getMonthlyTouchById, getOpportunities } from "@/src/lib/mtos-data";
+import { resolveTenantContext } from "@/src/lib/auth/resolve-tenant-context";
+import { getClientWorkspaceView } from "@/src/lib/server/services/clients-service";
 import { healthTone } from "@/src/lib/utils";
 
 export default async function ClientWorkspacePage({
@@ -14,15 +15,13 @@ export default async function ClientWorkspacePage({
   params: Promise<{ clientId: string }>;
 }) {
   const { clientId } = await params;
-  const client = getClientById(clientId);
+  const payload = await getClientWorkspaceView(await resolveTenantContext(), clientId);
 
-  if (!client) {
+  if (!payload) {
     notFound();
   }
 
-  const touch = getMonthlyTouchById(client.touchId);
-  const clientCommitments = getCommitments(client.id);
-  const clientOpportunities = getOpportunities(client.id);
+  const { client, touch, commitments: clientCommitments, opportunities: clientOpportunities } = payload;
 
   return (
     <AppShell
@@ -91,7 +90,7 @@ export default async function ClientWorkspacePage({
               </div>
               <Link
                 href={`/monthly-touch/${touch.id}`}
-                className="inline-flex items-center gap-2 rounded-full border border-white/12 bg-white px-4 py-3 text-sm font-semibold text-slate-950 transition hover:bg-[#d7f5ec]"
+                className="inline-flex items-center gap-2 rounded-full border border-white/12 bg-white px-4 py-3 text-sm font-semibold text-[#0c1524] transition hover:bg-[#d7f5ec]"
               >
                 Open monthly touch workspace
                 <ArrowRight className="h-4 w-4" />

@@ -1,8 +1,10 @@
 import type { TenantContext, Role } from "@/src/lib/contracts/mtos";
+import { tryGetSessionFromNextCookies, tryGetSessionFromRequest } from "@/src/lib/auth/session-cookie";
+import { getServerEnv } from "@/src/lib/server/env";
 
 const defaultContext: TenantContext = {
-  tenantId: "tenant-map-ranking-demo",
-  userId: "user-am-demo",
+  tenantId: "map-ranking",
+  userId: "unknown",
   role: "account_manager",
 };
 
@@ -13,18 +15,34 @@ const allowedRoles = new Set<Role>([
   "tenant_admin",
 ]);
 
-export function resolveTenantContext(request?: Request): TenantContext {
+export async function resolveTenantContext(request?: Request): Promise<TenantContext> {
+  const env = getServerEnv();
+
   if (!request) {
-    return defaultContext;
+    const session = await tryGetSessionFromNextCookies();
+    if (session && allowedRoles.has(session.role)) {
+      return session;
+    }
+
+    return {
+      tenantId: env.pilotTenantId || defaultContext.tenantId,
+      userId: defaultContext.userId,
+      role: defaultContext.role,
+    };
   }
 
-  const requestedRole = request.headers.get("x-mtos-role") as Role | null;
-  const requestedTenantId = request.headers.get("x-mtos-tenant-id");
-  const requestedUserId = request.headers.get("x-mtos-user-id");
+  const session = await tryGetSessionFromRequest(request);
+  if (session && allowedRoles.has(session.role)) {
+    return session;
+  }
 
-  return {
-    tenantId: requestedTenantId || defaultContext.tenantId,
-    userId: requestedUserId || defaultContext.userId,
-    role: requestedRole && allowedRoles.has(requestedRole) ? requestedRole : defaultContext.role,
-  };
+  if (env.useSeedData) {
+    return {
+      tenantId: env.pilotTenantId || defaultContext.tenantId,
+      userId: defaultContext.userId,
+      role: defaultContext.role,
+    };
+  }
+
+  return defaultContext;
 }

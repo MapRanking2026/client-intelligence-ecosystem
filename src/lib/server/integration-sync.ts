@@ -30,6 +30,7 @@ import {
   monthlyTouchPath,
 } from "@/src/lib/server/firebase/collections";
 import { getFirebaseAdminDb } from "@/src/lib/server/firebase/admin";
+import { getServerEnv } from "@/src/lib/server/env";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -977,6 +978,58 @@ async function syncRotatingTokenProvider(
     throw new Error(`${getIntegrationDefinition(providerId).name} sync endpoint is missing`);
   }
 
+  if (providerId === "map-checkins") {
+    const apiBase = (credentials.apiBaseUrl || refreshedRecord.apiBaseUrl || "https://dashboardapi.mapranking.com").replace(/\/$/, "");
+    const checkinBusinesses: Array<Record<string, unknown>> = [];
+    for (let page = 1; page <= 10; page += 1) {
+      const pagePayload = await fetchJson(`${apiBase}/api/checkin-business/get-business-paginated`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...getBearerHeaders(accessToken),
+        },
+        body: JSON.stringify({ page, limit: 100 }),
+      });
+      const rows = Array.isArray(pagePayload.data) ? (pagePayload.data as Array<Record<string, unknown>>) : [];
+      checkinBusinesses.push(...rows);
+      if (rows.length < 100) {
+        break;
+      }
+    }
+
+    const clients = await listFirestoreClients(context.tenantId);
+    const checkinBusinessesByClient = matchBusinessesToClients(
+      clients,
+      checkinBusinesses.map((row) => ({
+        ...row,
+        business_name: row.business_name,
+      })),
+    );
+
+    const counts = createEmptyCounts();
+    counts.fetched = checkinBusinesses.length;
+    counts.created = counts.fetched;
+
+    return {
+      summary: `${formatSummaryCount("check-in business", checkinBusinesses.length)} synced, ${formatSummaryCount("business", Object.keys(checkinBusinessesByClient).length)} matched to MTOS clients`,
+      counts,
+      snapshotPayload: {
+        checkinBusinessesByClient: Object.fromEntries(
+          Object.entries(checkinBusinessesByClient).map(([clientId, rows]) => [
+            clientId,
+            rows.map((row) => ({
+              _id: row._id,
+              business_name: row.business_name,
+              totalPosts: row.totalPosts,
+              scheduledPosts: row.scheduledPosts,
+              integration_status: row.integration_status,
+            })),
+          ]),
+        ),
+      },
+    } satisfies SyncExecutionResult;
+  }
+
   const payload = await fetchJson(syncEndpoint, {
     method: "GET",
     headers: {
@@ -995,17 +1048,150 @@ async function syncRotatingTokenProvider(
   const clients = await listFirestoreClients(context.tenantId);
   const businessesByClient = matchBusinessesToClients(clients, businesses);
 
+  // Store only the fields the prep pack reads -- the raw list of every business in the
+  // workspace would push the snapshot document toward Firestore's 1MB limit.
+  const compactBusinessesByClient = Object.fromEntries(
+    Object.entries(businessesByClient).map(([clientId, rows]) => [
+      clientId,
+      rows.map((row) => ({
+        _id: row._id,
+        business_name: row.business_name,
+        formatted_address: row.formatted_address || row.address,
+        rating: row.rating,
+        reviews: row.reviews,
+        place_id: row.place_id,
+        keywords: Array.isArray(row.keywords) ? Array.from(new Set(row.keywords as unknown[])) : [],
+      })),
+    ]),
+  );
+
   return {
-    summary: `${formatSummaryCount(providerId === "rank-tracker" ? "ranking row" : "check-in row", counts.fetched)} synced, ${formatSummaryCount("business", Object.keys(businessesByClient).length)} matched to MTOS clients`,
+    summary: `${formatSummaryCount("ranking row", counts.fetched)} synced, ${formatSummaryCount("business", Object.keys(businessesByClient).length)} matched to MTOS clients`,
     counts,
     snapshotPayload: {
-      ...payload,
-      businessesByClient,
+      totalBusinesses: businesses.length,
+      businessesByClient: compactBusinessesByClient,
+    },
+  } satisfies SyncExecutionResult;
+}
+
+interface GhlAgencyLocation {
+  id: string;
+  name: string;
+  apiKey?: string;
+}
+
+async function listGhlAgencyLocations(agencyKey: string): Promise<GhlAgencyLocation[]> {
+  if (agencyKey.startsWith("pit-")) {
+    // v2 private integration token created at the agency level
+    const payload = await fetchJson("https://services.leadconnectorhq.com/locations/search?limit=500", {
+      headers: { ...getBearerHeaders(agencyKey), Version: "2021-07-28" },
+    });
+    const locations = Array.isArray(payload.locations) ? (payload.locations as JsonRecord[]) : [];
+    return locations.map((location) => ({
+      id: String(location.id || location._id || ""),
+      name: String(location.name || ""),
+    }));
+  }
+
+  // v1 agency API key
+  const payload = await fetchJson("https://rest.gohighlevel.com/v1/locations/", {
+    headers: getBearerHeaders(agencyKey),
+  });
+  const locations = Array.isArray(payload.locations) ? (payload.locations as JsonRecord[]) : [];
+  return locations.map((location) => ({
+    id: String(location.id || location._id || ""),
+    name: String(location.name || ""),
+    apiKey: typeof location.apiKey === "string" ? location.apiKey : undefined,
+  }));
+}
+
+async function fetchGhlLocationLeadCounts(agencyKey: string, location: GhlAgencyLocation) {
+  if (agencyKey.startsWith("pit-")) {
+    const headers = { ...getBearerHeaders(agencyKey), Version: "2021-07-28" };
+    const contactsPayload = await fetchJson(
+      `https://services.leadconnectorhq.com/contacts/?locationId=${encodeURIComponent(location.id)}&limit=100`,
+      { headers },
+    ).catch(() => ({}) as JsonRecord);
+    const opportunitiesPayload = await fetchJson(
+      `https://services.leadconnectorhq.com/opportunities/search?location_id=${encodeURIComponent(location.id)}&limit=100`,
+      { headers },
+    ).catch(() => ({}) as JsonRecord);
+
+    const contacts = Array.isArray(contactsPayload.contacts) ? (contactsPayload.contacts as JsonRecord[]) : [];
+    const opportunities = Array.isArray(opportunitiesPayload.opportunities)
+      ? (opportunitiesPayload.opportunities as JsonRecord[])
+      : [];
+    return { contacts, opportunities };
+  }
+
+  // v1: each location record carries its own API key for location-scoped endpoints
+  if (!location.apiKey) {
+    return { contacts: [], opportunities: [] };
+  }
+  const headers = getBearerHeaders(location.apiKey);
+  const contactsPayload = await fetchJson("https://rest.gohighlevel.com/v1/contacts/?limit=100", { headers }).catch(
+    () => ({}) as JsonRecord,
+  );
+  const contacts = Array.isArray(contactsPayload.contacts) ? (contactsPayload.contacts as JsonRecord[]) : [];
+  return { contacts, opportunities: [] };
+}
+
+async function syncGoHighLevelAgency(context: TenantContext, agencyKey: string): Promise<SyncExecutionResult> {
+  const locations = await listGhlAgencyLocations(agencyKey);
+  const clients = await listFirestoreClients(context.tenantId);
+
+  const matchedPairs: Array<{ client: ClientRecord; location: GhlAgencyLocation }> = [];
+  for (const client of clients) {
+    const match = locations.find((location) => namesLikelyMatch(client.name, location.name));
+    if (match) {
+      matchedPairs.push({ client, location: match });
+    }
+  }
+
+  const leadsByClient: Record<string, JsonRecord> = {};
+  // Cap per-sync work; a nightly sync cycles through the rest.
+  for (const { client, location } of matchedPairs.slice(0, 40)) {
+    const { contacts, opportunities } = await fetchGhlLocationLeadCounts(agencyKey, location);
+    const wonOpportunities = opportunities.filter((item) => String(item.status || "").toLowerCase() === "won");
+    leadsByClient[client.id] = {
+      locationId: location.id,
+      locationName: location.name,
+      totalLeads: contacts.length,
+      qualifiedLeads: opportunities.length,
+      bookedJobs: wonOpportunities.length,
+      sampleContacts: contacts.slice(0, 5).map((contact) => ({
+        id: contact.id,
+        source: contact.source || "unknown",
+        dateAdded: contact.dateAdded,
+      })),
+    };
+  }
+
+  const counts = createEmptyCounts();
+  counts.fetched = locations.length;
+  counts.created = Object.keys(leadsByClient).length;
+
+  return {
+    summary: `${formatSummaryCount("agency location", locations.length)} listed, ${formatSummaryCount(
+      "location",
+      matchedPairs.length,
+    )} matched to MTOS clients, lead data pulled for ${Object.keys(leadsByClient).length}`,
+    counts,
+    snapshotPayload: {
+      mode: "agency",
+      totalLocations: locations.length,
+      leadsByClient,
     },
   } satisfies SyncExecutionResult;
 }
 
 async function syncGoHighLevel(context: TenantContext, record: IntegrationConnectionRecord, origin?: string) {
+  const agencyKey = getServerEnv().gohighlevelAgencyApiKey;
+  if (agencyKey) {
+    return syncGoHighLevelAgency(context, agencyKey);
+  }
+
   const refreshedRecord = await maybeRefreshConnection(context, record, origin);
   const credentials = getIntegrationCredentials(refreshedRecord);
   const accessToken = credentials.accessToken;

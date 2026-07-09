@@ -20,6 +20,7 @@ export function getServerEnv() {
     adminSignupCode: process.env.MTOS_ADMIN_SIGNUP_CODE || "",
     anthropicApiKey: process.env.ANTHROPIC_API_KEY || "",
     anthropicModel: process.env.ANTHROPIC_MODEL || "claude-3-5-sonnet-latest",
+    gohighlevelAgencyApiKey: process.env.GOHIGHLEVEL_AGENCY_API_KEY || "",
   };
 }
 

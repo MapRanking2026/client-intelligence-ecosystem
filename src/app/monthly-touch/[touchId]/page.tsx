@@ -76,6 +76,7 @@ export default async function MonthlyTouchPage({
         borderWidth: "1px",
         borderStyle: "solid",
         borderColor: "var(--tw-ring-color)",
+        color: "#223554",
       }
     : undefined;
 

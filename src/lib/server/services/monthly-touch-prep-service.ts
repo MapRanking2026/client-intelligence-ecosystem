@@ -9,7 +9,10 @@ import type {
   ClientParticipation,
   ClientRecord,
   CommitmentRecord,
+  HeatmapGrid,
   IssueSolutionItem,
+  KeywordScanHistory,
+  MapCheckinBusinessSummary,
   MonthlyTouchPrepPack,
   MonthlyTouchRecord,
   OpportunityRecord,
@@ -18,6 +21,11 @@ import type {
   SeoPerformancePack,
   StrategicActionStatus,
 } from "@/src/lib/mtos-data";
+import {
+  fetchHeatmapGrids,
+  fetchKeywordScanHistory,
+  openDashboardSession,
+} from "@/src/lib/server/services/mapranking-dashboard";
 import { getMtosDataSource } from "@/src/lib/server/data/seed-mtos-data-source";
 import {
   integrationSnapshotsCollectionPath,
@@ -247,12 +255,31 @@ function extractMatchedBusinesses(payload: JsonRecord | undefined, clientId: str
   const matches = Array.isArray(businessesByClient[clientId]) ? (businessesByClient[clientId] as JsonRecord[]) : [];
 
   return matches.map((row) => ({
+    businessId: pickString(row, ["_id", "id"]),
     businessName: pickString(row, ["business_name", "name"]) || "Unnamed business",
     address: pickString(row, ["formatted_address", "address"]),
     rating: pickNumber(row, ["rating"]),
     reviews: pickNumber(row, ["reviews"]),
     placeId: pickString(row, ["place_id"]),
     keywords: Array.from(new Set(Array.isArray(row.keywords) ? (row.keywords as unknown[]).map(String) : [])),
+  }));
+}
+
+function extractCheckinBusinesses(payload: JsonRecord | undefined, clientId: string): MapCheckinBusinessSummary[] {
+  if (!payload) {
+    return [];
+  }
+
+  const byClient = (payload.checkinBusinessesByClient || {}) as JsonRecord;
+  const matches = Array.isArray(byClient[clientId]) ? (byClient[clientId] as JsonRecord[]) : [];
+
+  return matches.map((row) => ({
+    businessName: pickString(row, ["business_name"]) || "Unnamed business",
+    totalPosts: pickNumber(row, ["totalPosts"]) ?? 0,
+    scheduledPosts: pickNumber(row, ["scheduledPosts"]) ?? 0,
+    connectedPlatforms: Object.entries((row.integration_status || {}) as Record<string, unknown>)
+      .filter(([, connected]) => connected === true)
+      .map(([platform]) => platform),
   }));
 }
 
@@ -311,10 +338,30 @@ function metric(
   };
 }
 
+function latestAndPrevious(scans: KeywordScanHistory["scans"], pick: (scan: KeywordScanHistory["scans"][number]) => number | null) {
+  const values = scans.map(pick).filter((value): value is number => value !== null);
+  return { latest: values[0] ?? null, previous: values[1] ?? null };
+}
+
+function averageAcrossKeywords(
+  keywordHistory: KeywordScanHistory[],
+  pick: (scan: KeywordScanHistory["scans"][number]) => number | null,
+  which: "latest" | "previous",
+) {
+  const values = keywordHistory
+    .map((entry) => latestAndPrevious(entry.scans, pick)[which])
+    .filter((value): value is number => value !== null);
+  if (!values.length) {
+    return null;
+  }
+  return Math.round((values.reduce((sum, value) => sum + value, 0) / values.length) * 10) / 10;
+}
+
 function buildBusinessScorecard(
   rawSnapshots: Map<string, JsonRecord>,
-  matchedBusinesses: ReturnType<typeof extractMatchedBusinesses>,
   gbpPerformance: ReturnType<typeof extractGbpPerformanceRows>,
+  keywordHistory: KeywordScanHistory[],
+  checkinBusinesses: MapCheckinBusinessSummary[],
 ): BusinessScorecard {
   const crm = rawSnapshots.get("gohighlevel");
   const totalLeads = crm && typeof crm.totalLeads === "number" ? crm.totalLeads : null;
@@ -333,10 +380,6 @@ function buildBusinessScorecard(
     { calls: 0, previousCalls: 0 },
   );
 
-  // When multiple businesses matched the client's name, treat the one with the most reviews as
-  // primary rather than averaging -- separate same-named businesses shouldn't blend their numbers.
-  const primaryBusiness = [...matchedBusinesses].sort((a, b) => (b.reviews ?? 0) - (a.reviews ?? 0))[0];
-
   return {
     totalLeads: metric("Total leads", totalLeads, null, "GoHighLevel"),
     qualifiedLeads: metric("Qualified leads", qualifiedLeads, null, "GoHighLevel"),
@@ -351,18 +394,26 @@ function buildBusinessScorecard(
     formSubmissions: metric("Form submissions", formSubmissions, null, "GoHighLevel contact source"),
     bookedJobs: metric("Booked jobs", bookedJobs, null, "GoHighLevel won opportunities"),
     shareOfLocalVoice: metric(
-      "Review rating",
-      primaryBusiness?.rating ?? null,
-      null,
-      "Rank Tracker business profile",
+      "Market Share (avg across keywords)",
+      averageAcrossKeywords(keywordHistory, (scan) => scan.marketSharePercent, "latest"),
+      averageAcrossKeywords(keywordHistory, (scan) => scan.marketSharePercent, "previous"),
+      "Rank Tracker keyword scans",
+      "percent",
     ),
     top3Coverage: metric(
-      "Reviews tracked",
-      primaryBusiness?.reviews ?? null,
-      null,
-      "Rank Tracker business profile",
+      "Average keyword rank",
+      averageAcrossKeywords(keywordHistory, (scan) => scan.averageRank, "latest"),
+      averageAcrossKeywords(keywordHistory, (scan) => scan.averageRank, "previous"),
+      "Rank Tracker keyword scans",
     ),
-    mapCheckIns: metric("Map Check-Ins this month", null, null, "No dedicated Map Check-Ins endpoint on the connected API"),
+    mapCheckIns: metric(
+      "Map Check-In posts (all time)",
+      checkinBusinesses.length
+        ? checkinBusinesses.reduce((sum, business) => sum + business.totalPosts, 0)
+        : null,
+      null,
+      "Map Check-Ins dashboard",
+    ),
     hasSalesStructureData: totalLeads !== null && qualifiedLeads !== null,
   };
 }
@@ -370,6 +421,9 @@ function buildBusinessScorecard(
 function buildSeoPerformance(
   matchedBusinesses: ReturnType<typeof extractMatchedBusinesses>,
   gbpPerformance: ReturnType<typeof extractGbpPerformanceRows>,
+  keywordHistory: KeywordScanHistory[],
+  heatmapGrids: HeatmapGrid[],
+  checkinBusinesses: MapCheckinBusinessSummary[],
   clientName: string,
 ): SeoPerformancePack {
   const notes: string[] = [];
@@ -377,29 +431,37 @@ function buildSeoPerformance(
     notes.push(
       `No Rank Tracker business record matched "${clientName}" -- confirm the business name in Rank Tracker matches this client exactly, or check for a typo/suffix mismatch.`,
     );
-  } else {
+  } else if (matchedBusinesses.length > 1) {
     notes.push(
-      "Rank Tracker's connected API exposes business identity, rating, reviews, and tracked keywords -- it does not yet expose per-keyword rank position, Map Pack %, or heatmap images. Those require Map Ranking's scan-results endpoint once it is available.",
+      `${matchedBusinesses.length} businesses named "${clientName}" were found in Rank Tracker -- verify each is actually a location for this client (a shared name can also mean two unrelated businesses).`,
     );
-    if (matchedBusinesses.length > 1) {
-      notes.push(
-        `${matchedBusinesses.length} businesses named "${clientName}" were found in Rank Tracker -- verify each is actually a location for this client (a shared name can also mean two unrelated businesses). The scorecard above uses the one with the most reviews as primary.`,
-      );
-    }
+  }
+  if (matchedBusinesses.length && !keywordHistory.length) {
+    notes.push(
+      "The matched Rank Tracker business has no completed keyword scans yet -- ask the SEO team to verify the scan schedule (scans should run 2 days before the touch).",
+    );
   }
   if (!gbpPerformance.length) {
     notes.push(
       "No Google Business Profile location matched this client's name, or performance data is unavailable for the matched location -- confirm the GBP listing title matches this client.",
     );
   }
-  notes.push("Map Check-Ins has no dedicated data endpoint on the connected Rank Tracker API yet -- review check-in activity directly in the Map Check-Ins dashboard.");
+  if (!checkinBusinesses.length) {
+    notes.push("No Map Check-Ins business matched this client -- check-ins may not be part of this client's package.");
+  }
 
   return {
     heatmaps: [],
     matchedBusinesses,
+    keywordScanHistory: keywordHistory,
+    heatmapGrids,
+    checkinBusinesses,
     gbpPerformance,
-    mapCheckInCount: null,
-    availability: matchedBusinesses.length || gbpPerformance.length ? "available" : "unavailable",
+    mapCheckInCount: checkinBusinesses.length
+      ? checkinBusinesses.reduce((sum, business) => sum + business.totalPosts, 0)
+      : null,
+    availability:
+      matchedBusinesses.length || gbpPerformance.length || checkinBusinesses.length ? "available" : "unavailable",
     notes,
   };
 }
@@ -646,8 +708,24 @@ function buildExecutiveBrief(
     : "The business scorecard has no CRM data connected yet -- lead volume, qualified leads, and booked jobs must be gathered live using the lead-quality questions in this pack, per the sales-structure conversation in the SOP.";
 
   const matchedBusiness = seoPerformance.matchedBusinesses[0];
+  const scanSummaries = seoPerformance.keywordScanHistory
+    .slice(0, 5)
+    .map((entry) => {
+      const latest = entry.scans[0];
+      const previous = entry.scans[1];
+      if (!latest) {
+        return "";
+      }
+      const movement =
+        previous && latest.averageRank !== null && previous.averageRank !== null
+          ? ` (was ${previous.averageRank})`
+          : "";
+      return `"${entry.keyword}" avg rank ${latest.averageRank ?? "n/a"}${movement}, Market Share ${latest.marketSharePercent ?? "n/a"}%`;
+    })
+    .filter(Boolean);
+
   const seoParagraph = matchedBusiness
-    ? `SEO / GBP identity: matched to "${matchedBusiness.businessName}" in Rank Tracker -- ${matchedBusiness.reviews ?? "an unknown number of"} reviews at a ${matchedBusiness.rating ?? "n/a"}-star rating, tracking ${matchedBusiness.keywords.length} keyword${matchedBusiness.keywords.length === 1 ? "" : "s"}. Per-keyword rank position and heatmap images are not exposed by this connection yet.${seoPerformance.gbpPerformance.length ? ` GBP performance: ${seoPerformance.gbpPerformance.reduce((sum, row) => sum + row.calls, 0)} call clicks and ${seoPerformance.gbpPerformance.reduce((sum, row) => sum + row.directionRequests, 0)} direction requests this period.` : ""}`
+    ? `SEO visibility (Rank Tracker, live scans): ${matchedBusiness.businessName} -- ${matchedBusiness.reviews ?? "n/a"} reviews at ${matchedBusiness.rating ?? "n/a"} stars. ${scanSummaries.length ? `Latest keyword scans: ${scanSummaries.join("; ")}. Read Average Rank and Market Share together, and lead with trend over any single snapshot.` : "No completed keyword scans were returned -- verify the scan schedule with the SEO team."}${seoPerformance.gbpPerformance.length ? ` GBP performance: ${seoPerformance.gbpPerformance.reduce((sum, row) => sum + row.calls, 0)} call clicks and ${seoPerformance.gbpPerformance.reduce((sum, row) => sum + row.directionRequests, 0)} direction requests this period.` : ""}${seoPerformance.checkinBusinesses.length ? ` Map Check-Ins: ${seoPerformance.checkinBusinesses.reduce((sum, b) => sum + b.totalPosts, 0)} posts published across connected platforms.` : ""}`
     : `No Rank Tracker business record matched "${client.name}" -- confirm the business name in Rank Tracker matches this client exactly so SEO evidence can be pulled automatically.`;
 
   const strategicParagraph = strategicAction.hasAgreedAction
@@ -910,7 +988,40 @@ async function generateClaudeTouchOutput(
   } satisfies ClaudeTouchOutput;
 }
 
-function buildPrepPack(
+async function fetchLiveRankTrackerEvidence(
+  context: TenantContext,
+  matchedBusinesses: ReturnType<typeof extractMatchedBusinesses>,
+) {
+  const empty = { keywordHistory: [] as KeywordScanHistory[], heatmapGrids: [] as HeatmapGrid[] };
+  if (!matchedBusinesses.length) {
+    return empty;
+  }
+
+  try {
+    const session = await openDashboardSession(context);
+    if (!session) {
+      return empty;
+    }
+
+    const keywordHistory = await fetchKeywordScanHistory(
+      session,
+      matchedBusinesses.map((business) => ({
+        businessId: business.businessId,
+        businessName: business.businessName,
+      })),
+    );
+    const heatmapGrids = await fetchHeatmapGrids(session, keywordHistory);
+    return { keywordHistory, heatmapGrids };
+  } catch (error) {
+    console.warn(
+      `Rank Tracker live evidence fetch failed: ${error instanceof Error ? error.message : "unknown error"}`,
+    );
+    return empty;
+  }
+}
+
+async function buildPrepPack(
+  context: TenantContext,
   client: ClientRecord,
   touch: MonthlyTouchRecord,
   openCommitments: CommitmentRecord[],
@@ -920,9 +1031,18 @@ function buildPrepPack(
 ) {
   const matchedBusinesses = extractMatchedBusinesses(rawSnapshots.get("rank-tracker"), client.id);
   const gbpPerformance = extractGbpPerformanceRows(rawSnapshots.get("google-business-profile"), client.id);
+  const checkinBusinesses = extractCheckinBusinesses(rawSnapshots.get("map-checkins"), client.id);
+  const { keywordHistory, heatmapGrids } = await fetchLiveRankTrackerEvidence(context, matchedBusinesses);
 
-  const businessScorecard = buildBusinessScorecard(rawSnapshots, matchedBusinesses, gbpPerformance);
-  const seoPerformance = buildSeoPerformance(matchedBusinesses, gbpPerformance, client.name);
+  const businessScorecard = buildBusinessScorecard(rawSnapshots, gbpPerformance, keywordHistory, checkinBusinesses);
+  const seoPerformance = buildSeoPerformance(
+    matchedBusinesses,
+    gbpPerformance,
+    keywordHistory,
+    heatmapGrids,
+    checkinBusinesses,
+    client.name,
+  );
   const adsPerformance = buildAdsPerformance();
   const strategicAction = buildStrategicActionStatus(client);
   const clientParticipation = buildClientParticipation(client);
@@ -930,7 +1050,7 @@ function buildPrepPack(
 
   return {
     preparedAt: getNowIso(),
-    pipelineVersion: "prep-pack-v2",
+    pipelineVersion: "prep-pack-v3",
     clientSummary: truncate(client.summary, 320),
     schedule: stripUndefinedDeep({
       touchDate: client.touchDate || "Not scheduled",
@@ -998,7 +1118,15 @@ export async function prepareMonthlyTouch(
   }
 
   const openCommitments = commitments.filter((commitment) => commitment.status !== "Completed");
-  const prepPack = buildPrepPack(client, touch, openCommitments, opportunities, integrationSources, rawSnapshots);
+  const prepPack = await buildPrepPack(
+    context,
+    client,
+    touch,
+    openCommitments,
+    opportunities,
+    integrationSources,
+    rawSnapshots,
+  );
   const env = getServerEnv();
 
   let executiveBrief = buildExecutiveBrief(

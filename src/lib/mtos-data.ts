@@ -102,6 +102,7 @@ export interface GbpPerformanceSnapshot {
 }
 
 export interface MatchedRankTrackerBusiness {
+  businessId: string;
   businessName: string;
   address: string;
   rating: number | null;
@@ -110,9 +111,57 @@ export interface MatchedRankTrackerBusiness {
   keywords: string[];
 }
 
+export interface KeywordScanPoint {
+  scanDate: string;
+  averageRank: number | null;
+  top3Pins: number | null;
+  marketSharePercent: number | null;
+  notRankingPins: number | null;
+  reportId: string;
+}
+
+export interface KeywordScanHistory {
+  keyword: string;
+  businessName: string;
+  scans: KeywordScanPoint[];
+}
+
+export interface HeatmapPin {
+  lat: number;
+  lng: number;
+  rank: number | null;
+}
+
+export interface HeatmapCompetitor {
+  name: string;
+  rating: number | null;
+  reviews: number | null;
+}
+
+export interface HeatmapGrid {
+  keyword: string;
+  scanDate: string;
+  gridSize: number;
+  averageRankPosition: number | null;
+  shareOfLocalVoicePercent: number | null;
+  top3Percent: number | null;
+  pins: HeatmapPin[];
+  topCompetitors: HeatmapCompetitor[];
+}
+
+export interface MapCheckinBusinessSummary {
+  businessName: string;
+  totalPosts: number;
+  scheduledPosts: number;
+  connectedPlatforms: string[];
+}
+
 export interface SeoPerformancePack {
   heatmaps: SeoHeatmapRow[];
   matchedBusinesses: MatchedRankTrackerBusiness[];
+  keywordScanHistory: KeywordScanHistory[];
+  heatmapGrids: HeatmapGrid[];
+  checkinBusinesses: MapCheckinBusinessSummary[];
   gbpPerformance: GbpPerformanceSnapshot[];
   mapCheckInCount: number | null;
   availability: MetricAvailability;

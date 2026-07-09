@@ -29,33 +29,37 @@ export async function AppShell({ title, subtitle, children }: AppShellProps) {
           <SidebarNav />
         </div>
         <main className="space-y-6 rounded-[36px] border border-white/8 bg-[linear-gradient(180deg,rgba(7,13,23,0.88),rgba(6,10,18,0.94))] p-5 shadow-[0_60px_140px_rgba(3,6,14,0.5)] md:p-7">
-          <div className="flex flex-col gap-4 rounded-[28px] border border-white/8 bg-white/5 p-4 md:flex-row md:items-center md:justify-between">
-            <div className="text-sm font-semibold text-slate-200">{greeting.label}</div>
-            <div className="flex flex-1 justify-center px-0 md:px-6">
-              <GlobalSearch />
+          <div className="flex flex-col gap-3 rounded-[28px] border border-white/8 bg-white/5 p-4">
+            <div className="flex justify-end">
+              <div className="text-[11px] font-medium tracking-[0.08em] text-slate-400">{greeting.label}</div>
             </div>
-            <div className="flex items-center justify-end gap-3">
-              <div className="flex items-center gap-2 rounded-full border border-emerald-400/20 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-100">
-                <Sparkles className="h-4 w-4" />
-                Evidence-first AI active
+            <div className="flex flex-col gap-3 md:flex-row md:items-center">
+              <div className="flex min-w-0 flex-1">
+              <GlobalSearch />
               </div>
-              <details className="group rounded-full border border-white/10 bg-white/5 px-3 py-2 text-xs text-slate-200">
-                <summary className="flex cursor-pointer list-none items-center gap-2">
-                  <Bell className="h-4 w-4" />
-                  3 alerts
-                </summary>
-                <div className="mt-3 grid min-w-[280px] gap-2">
-                  {actionableAlerts.map((alert) => (
-                    <Link
-                      key={alert.label}
-                      href={alert.href}
-                      className="rounded-2xl border border-white/8 bg-[#d7f5ec] px-3 py-2 text-sm font-medium text-[#223554] transition hover:bg-white"
-                    >
-                      {alert.label}
-                    </Link>
-                  ))}
+              <div className="flex items-center justify-end gap-3 md:shrink-0">
+                <div className="flex items-center gap-2 rounded-full border border-emerald-400/20 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-100">
+                  <Sparkles className="h-4 w-4" />
+                  Evidence-first AI active
                 </div>
-              </details>
+                <details className="group rounded-full border border-white/10 bg-white/5 px-3 py-2 text-xs text-slate-200">
+                  <summary className="flex cursor-pointer list-none items-center gap-2">
+                    <Bell className="h-4 w-4" />
+                    3 alerts
+                  </summary>
+                  <div className="mt-3 grid min-w-[280px] gap-2">
+                    {actionableAlerts.map((alert) => (
+                      <Link
+                        key={alert.label}
+                        href={alert.href}
+                        className="rounded-2xl border border-white/8 bg-[#d7f5ec] px-3 py-2 text-sm font-medium text-[#223554] transition hover:bg-white"
+                      >
+                        {alert.label}
+                      </Link>
+                    ))}
+                  </div>
+                </details>
+              </div>
             </div>
           </div>
 

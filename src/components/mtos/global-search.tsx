@@ -97,7 +97,7 @@ export function GlobalSearch() {
   }, [query]);
 
   return (
-    <div className="relative w-full max-w-[520px]">
+    <div className="relative w-full min-w-0 max-w-none">
       <div className="flex items-center gap-3 rounded-2xl border border-white/8 bg-black/25 px-4 py-3 shadow-[0_18px_40px_rgba(2,6,14,0.24)]">
         <Search className="h-4 w-4 text-slate-400" />
         <input

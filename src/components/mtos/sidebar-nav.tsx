@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
 import {
   BadgeCheck,
   BriefcaseBusiness,
@@ -29,7 +29,6 @@ const navItems = [
 
 export function SidebarNav() {
   const pathname = usePathname();
-  const [isPaletteOpen, setIsPaletteOpen] = useState(false);
   const modifierLabel = useMemo(() => {
     if (typeof navigator === "undefined") {
       return "Ctrl";
@@ -37,31 +36,6 @@ export function SidebarNav() {
 
     return /Mac|iPhone|iPad|iPod/.test(navigator.platform) ? "⌘" : "Ctrl";
   }, []);
-
-  useEffect(() => {
-    function onKeyDown(event: KeyboardEvent) {
-      const isMac = /Mac|iPhone|iPad|iPod/.test(navigator.platform);
-      const usesModifier = isMac ? event.metaKey : event.ctrlKey;
-      if (usesModifier && event.key.toLowerCase() === "k") {
-        event.preventDefault();
-        setIsPaletteOpen((current) => !current);
-      }
-
-      if (event.key === "Escape") {
-        setIsPaletteOpen(false);
-      }
-    }
-
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, []);
-
-  const quickActions = [
-    { href: "/command-center", label: "Open Command Center" },
-    { href: "/monthly-touch", label: "Jump to Monthly Touch queue" },
-    { href: "/qa", label: "Review QA and coaching" },
-    { href: "/settings", label: "Open prompt engine settings" },
-  ];
 
   return (
     <aside className="flex h-full w-full flex-col justify-between rounded-[32px] border border-white/10 bg-[#0b1321]/90 p-5 shadow-[0_35px_80px_rgba(3,7,18,0.55)]">
@@ -103,11 +77,7 @@ export function SidebarNav() {
       </div>
 
       <div className="rounded-[24px] border border-white/10 bg-white/5 p-4">
-        <button
-          type="button"
-          onClick={() => setIsPaletteOpen((current) => !current)}
-          className="flex w-full items-center gap-3 rounded-2xl text-left"
-        >
+        <div className="flex w-full items-center gap-3 rounded-2xl text-left">
           <div className="rounded-2xl bg-[#d7f5ec] p-3 text-slate-950">
             <Command className="h-5 w-5" />
           </div>
@@ -120,21 +90,7 @@ export function SidebarNav() {
             </div>
             <p className="text-xs text-slate-400">Search clients, commitments, and live actions</p>
           </div>
-        </button>
-        {isPaletteOpen ? (
-          <div className="mt-4 space-y-2">
-            {quickActions.map((action) => (
-              <Link
-                key={action.href}
-                href={action.href}
-                onClick={() => setIsPaletteOpen(false)}
-                className="block rounded-2xl border border-white/8 bg-white/4 px-3 py-2 text-sm text-slate-200 transition hover:border-white/16 hover:bg-white/8"
-              >
-                {action.label}
-              </Link>
-            ))}
-          </div>
-        ) : null}
+        </div>
       </div>
     </aside>
   );

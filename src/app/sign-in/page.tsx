@@ -144,7 +144,7 @@ function SignInContent() {
 
             <Link
               href={requestedNextPath ? `/sign-up?next=${encodeURIComponent(requestedNextPath)}` : "/sign-up"}
-              className="inline-flex w-full items-center justify-center rounded-2xl border border-white/12 bg-white/4 px-4 py-3 text-sm font-semibold text-white shadow-[0_4px_8px_0_rgba(0,0,0,0.25)] transition hover:bg-white/6"
+              className="inline-flex w-full items-center justify-center rounded-2xl border border-white/12 bg-white px-4 py-3 text-sm font-semibold text-[#223554] shadow-[0_4px_8px_0_rgba(0,0,0,0.25)] transition hover:bg-[#d7f5ec]"
             >
               Sign up
             </Link>

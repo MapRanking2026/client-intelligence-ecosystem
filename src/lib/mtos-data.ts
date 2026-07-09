@@ -101,8 +101,18 @@ export interface GbpPerformanceSnapshot {
   };
 }
 
+export interface MatchedRankTrackerBusiness {
+  businessName: string;
+  address: string;
+  rating: number | null;
+  reviews: number | null;
+  placeId: string;
+  keywords: string[];
+}
+
 export interface SeoPerformancePack {
   heatmaps: SeoHeatmapRow[];
+  matchedBusinesses: MatchedRankTrackerBusiness[];
   gbpPerformance: GbpPerformanceSnapshot[];
   mapCheckInCount: number | null;
   availability: MetricAvailability;

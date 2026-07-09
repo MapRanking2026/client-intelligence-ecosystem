@@ -1206,6 +1206,9 @@ export async function refreshIntegration(context: TenantContext, providerId: Int
         "x-api-key": credentials.apiKey || "",
       },
       body: JSON.stringify({
+        type: "email",
+        email: credentials.clientId,
+        password: credentials.clientSecret,
         apiKey: credentials.apiKey,
         clientId: credentials.clientId,
         clientSecret: credentials.clientSecret,
@@ -1221,8 +1224,12 @@ export async function refreshIntegration(context: TenantContext, providerId: Int
       );
     }
 
+    const nestedPayload =
+      payload.data && typeof payload.data === "object" ? (payload.data as Record<string, unknown>) : {};
     const nextToken =
-      getStringFromPayload(payload, ["access_token", "token", "accessToken"]) || credentials.accessToken;
+      getStringFromPayload(payload, ["access_token", "token", "accessToken"]) ||
+      getStringFromPayload(nestedPayload, ["access_token", "token", "accessToken"]) ||
+      credentials.accessToken;
     const expiresInSeconds = getNumberFromPayload(payload, ["expires_in", "expiresIn"]);
     const refreshWindowMinutes =
       Number(credentials.refreshWindowMinutes || existing.refreshWindowMinutes || "120") || 120;

@@ -628,6 +628,61 @@ async function syncClickUp(context: TenantContext, record: IntegrationConnection
   } satisfies SyncExecutionResult;
 }
 
+function stripBusinessNameNoise(value: string) {
+  return value
+    .replace(/\([^)]*\)/g, " ")
+    .replace(/\b(llc|inc|corp|co|ltd|usa|dba)\b/gi, " ")
+    .trim();
+}
+
+function namesLikelyMatch(clientName: string, candidateName: string) {
+  const normalizedClient = normalizeText(stripBusinessNameNoise(clientName));
+  const normalizedCandidate = normalizeText(stripBusinessNameNoise(candidateName));
+
+  if (!normalizedClient || !normalizedCandidate) {
+    return false;
+  }
+
+  if (normalizedClient === normalizedCandidate) {
+    return true;
+  }
+
+  const [shorter, longer] =
+    normalizedClient.length <= normalizedCandidate.length
+      ? [normalizedClient, normalizedCandidate]
+      : [normalizedCandidate, normalizedClient];
+
+  return shorter.length >= 6 && longer.includes(shorter);
+}
+
+function matchLocationsToClients(clients: ClientRecord[], locations: Array<Record<string, unknown>>) {
+  const byClient: Record<string, Array<Record<string, unknown>>> = {};
+
+  for (const client of clients) {
+    const matches = locations.filter((location) => namesLikelyMatch(client.name, String(location.title || "")));
+    if (matches.length) {
+      byClient[client.id] = matches;
+    }
+  }
+
+  return byClient;
+}
+
+function matchBusinessesToClients(clients: ClientRecord[], businesses: Array<Record<string, unknown>>) {
+  const byClient: Record<string, Array<Record<string, unknown>>> = {};
+
+  for (const client of clients) {
+    const matches = businesses.filter((business) =>
+      namesLikelyMatch(client.name, String(business.business_name || "")),
+    );
+    if (matches.length) {
+      byClient[client.id] = matches;
+    }
+  }
+
+  return byClient;
+}
+
 async function syncGoogleBusinessProfile(context: TenantContext, record: IntegrationConnectionRecord) {
   const refreshedRecord = await maybeRefreshConnection(context, record);
   const credentials = getIntegrationCredentials(refreshedRecord);
@@ -645,39 +700,53 @@ async function syncGoogleBusinessProfile(context: TenantContext, record: Integra
     : [];
 
   const locations: Array<Record<string, unknown>> = [];
-  for (const account of accounts.slice(0, 5)) {
+  for (const account of accounts) {
     if (!account.name) {
       continue;
     }
 
-    const locationsPayload = await fetchJson(
-      `https://mybusinessbusinessinformation.googleapis.com/v1/${account.name}/locations?pageSize=20&readMask=name,title,storeCode,websiteUri,metadata`,
-      {
+    let pageToken: string | undefined;
+    do {
+      const url = new URL(`https://mybusinessbusinessinformation.googleapis.com/v1/${account.name}/locations`);
+      url.searchParams.set("pageSize", "100");
+      url.searchParams.set("readMask", "name,title,storeCode,websiteUri,metadata");
+      if (pageToken) {
+        url.searchParams.set("pageToken", pageToken);
+      }
+
+      const locationsPayload = await fetchJson(url.toString(), {
         headers: getBearerHeaders(accessToken),
-      },
-    );
-    const accountLocations = Array.isArray(locationsPayload.locations)
-      ? (locationsPayload.locations as Array<Record<string, unknown>>)
-      : [];
-    locations.push(
-      ...accountLocations.map((location) => ({
-        ...location,
-        accountName: account.accountName || account.name,
-      })),
-    );
+      });
+      const accountLocations = Array.isArray(locationsPayload.locations)
+        ? (locationsPayload.locations as Array<Record<string, unknown>>)
+        : [];
+      locations.push(
+        ...accountLocations.map((location) => ({
+          ...location,
+          accountName: account.accountName || account.name,
+        })),
+      );
+      pageToken = typeof locationsPayload.nextPageToken === "string" ? locationsPayload.nextPageToken : undefined;
+    } while (pageToken);
   }
 
   counts.fetched = accounts.length + locations.length;
   counts.created = locations.length;
 
-  const performance = await Promise.all(
-    locations.slice(0, 5).map((location) => fetchGbpLocationPerformance(accessToken, String(location.name || ""))),
-  );
+  const clients = await listFirestoreClients(context.tenantId);
+  const locationsByClient = matchLocationsToClients(clients, locations);
+  const matchedLocations = Object.values(locationsByClient).flat();
+
+  const performance: Array<Awaited<ReturnType<typeof fetchGbpLocationPerformance>>> = [];
+  for (const location of matchedLocations) {
+    performance.push(await fetchGbpLocationPerformance(accessToken, String(location.name || "")));
+  }
 
   return {
     summary: [
       `${formatSummaryCount("account", accounts.length)} loaded`,
       `${formatSummaryCount("location", locations.length)} discovered`,
+      `${formatSummaryCount("location", matchedLocations.length)} matched to MTOS clients`,
     ].join(", "),
     counts,
     snapshotPayload: {
@@ -686,7 +755,8 @@ async function syncGoogleBusinessProfile(context: TenantContext, record: Integra
         name: account.accountName || "Unknown account",
         type: account.type || "UNKNOWN",
       })),
-      locations: locations.slice(0, 25),
+      locations,
+      locationsByClient,
       performance: performance.filter((entry): entry is NonNullable<typeof entry> => Boolean(entry)),
     },
   } satisfies SyncExecutionResult;
@@ -921,10 +991,17 @@ async function syncRotatingTokenProvider(
     getArrayCount(payload, ["results", "data", "items", "rankings", "checkins"]) || 1;
   counts.created = counts.fetched;
 
+  const businesses = Array.isArray(payload.data) ? (payload.data as Array<Record<string, unknown>>) : [];
+  const clients = await listFirestoreClients(context.tenantId);
+  const businessesByClient = matchBusinessesToClients(clients, businesses);
+
   return {
-    summary: `${formatSummaryCount(providerId === "rank-tracker" ? "ranking row" : "check-in row", counts.fetched)} synced`,
+    summary: `${formatSummaryCount(providerId === "rank-tracker" ? "ranking row" : "check-in row", counts.fetched)} synced, ${formatSummaryCount("business", Object.keys(businessesByClient).length)} matched to MTOS clients`,
     counts,
-    snapshotPayload: payload,
+    snapshotPayload: {
+      ...payload,
+      businessesByClient,
+    },
   } satisfies SyncExecutionResult;
 }
 

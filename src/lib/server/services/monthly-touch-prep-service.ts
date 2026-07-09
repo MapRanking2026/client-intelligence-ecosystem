@@ -15,7 +15,6 @@ import type {
   OpportunityRecord,
   RecommendationItem,
   ScorecardMetric,
-  SeoHeatmapRow,
   SeoPerformancePack,
   StrategicActionStatus,
 } from "@/src/lib/mtos-data";
@@ -239,52 +238,40 @@ function pickNumber(row: JsonRecord, keys: string[]): number | null {
   return null;
 }
 
-function pickTrend(row: JsonRecord): SeoHeatmapRow["trend"] {
-  const current = pickNumber(row, ["averageRanking", "avgRank", "average_rank", "rank"]);
-  const previous = pickNumber(row, ["previousRanking", "previousRank", "priorRank", "previous_rank"]);
-  if (current === null || previous === null) {
-    return "unknown";
-  }
-  if (current < previous) return "up";
-  if (current > previous) return "down";
-  return "flat";
-}
-
-function extractRankTrackerRows(payload?: JsonRecord): SeoHeatmapRow[] {
+function extractMatchedBusinesses(payload: JsonRecord | undefined, clientId: string) {
   if (!payload) {
     return [];
   }
 
-  const arrayKeys = ["rankings", "results", "data", "items", "keywords", "rows"];
-  let rows: JsonRecord[] = [];
-  for (const key of arrayKeys) {
-    const value = payload[key];
-    if (Array.isArray(value)) {
-      rows = value as JsonRecord[];
-      break;
-    }
-  }
+  const businessesByClient = (payload.businessesByClient || {}) as JsonRecord;
+  const matches = Array.isArray(businessesByClient[clientId]) ? (businessesByClient[clientId] as JsonRecord[]) : [];
 
-  return rows.slice(0, 12).map((row) => ({
-    keyword: pickString(row, ["keyword", "query", "term", "name"]) || "Untracked keyword",
-    location: pickString(row, ["location", "city", "area", "zone"]),
-    scanDate: pickString(row, ["scanDate", "date", "scannedAt", "updatedAt"]),
-    averageRanking: pickNumber(row, ["averageRanking", "avgRank", "average_rank", "rank"]),
-    mapPackPercent: pickNumber(row, ["mapPackPercent", "top3", "mapPack", "map_pack_percent"]),
-    marketShare: pickNumber(row, ["marketShare", "shareOfLocalVoice", "market_share"]),
-    trend: pickTrend(row),
-    imageUrl: pickString(row, ["heatmapUrl", "imageUrl", "screenshotUrl", "heatmapImage", "scanImageUrl"]),
+  return matches.map((row) => ({
+    businessName: pickString(row, ["business_name", "name"]) || "Unnamed business",
+    address: pickString(row, ["formatted_address", "address"]),
+    rating: pickNumber(row, ["rating"]),
+    reviews: pickNumber(row, ["reviews"]),
+    placeId: pickString(row, ["place_id"]),
+    keywords: Array.from(new Set(Array.isArray(row.keywords) ? (row.keywords as unknown[]).map(String) : [])),
   }));
 }
 
-function extractGbpPerformanceRows(payload?: JsonRecord) {
+function extractGbpPerformanceRows(payload: JsonRecord | undefined, clientId: string) {
   if (!payload) {
     return [];
   }
 
+  const locationsByClient = (payload.locationsByClient || {}) as JsonRecord;
+  const matchedLocations = Array.isArray(locationsByClient[clientId])
+    ? (locationsByClient[clientId] as JsonRecord[])
+    : [];
+  const matchedLocationIds = new Set(
+    matchedLocations.map((location) => String(location.name || "").split("/").filter(Boolean).pop()),
+  );
+
   const rows = Array.isArray(payload.performance) ? (payload.performance as JsonRecord[]) : [];
   return rows
-    .filter((row) => !row.error)
+    .filter((row) => !row.error && matchedLocationIds.has(String(row.locationId || "")))
     .map((row) => {
       const previous = (row.previous || {}) as JsonRecord;
       return {
@@ -307,27 +294,6 @@ function extractGbpPerformanceRows(payload?: JsonRecord) {
     });
 }
 
-function extractArrayCount(payload: JsonRecord | undefined, keys: string[]) {
-  if (!payload) {
-    return null;
-  }
-  for (const key of keys) {
-    const value = payload[key];
-    if (Array.isArray(value)) {
-      return value.length;
-    }
-  }
-  return null;
-}
-
-function averageOf(values: Array<number | null>) {
-  const numeric = values.filter((value): value is number => value !== null);
-  if (!numeric.length) {
-    return null;
-  }
-  return Math.round((numeric.reduce((sum, value) => sum + value, 0) / numeric.length) * 10) / 10;
-}
-
 function metric(
   label: string,
   value: number | null,
@@ -347,9 +313,8 @@ function metric(
 
 function buildBusinessScorecard(
   rawSnapshots: Map<string, JsonRecord>,
-  heatmaps: SeoHeatmapRow[],
+  matchedBusinesses: ReturnType<typeof extractMatchedBusinesses>,
   gbpPerformance: ReturnType<typeof extractGbpPerformanceRows>,
-  mapCheckInCount: number | null,
 ): BusinessScorecard {
   const crm = rawSnapshots.get("gohighlevel");
   const totalLeads = crm && typeof crm.totalLeads === "number" ? crm.totalLeads : null;
@@ -368,6 +333,10 @@ function buildBusinessScorecard(
     { calls: 0, previousCalls: 0 },
   );
 
+  // When multiple businesses matched the client's name, treat the one with the most reviews as
+  // primary rather than averaging -- separate same-named businesses shouldn't blend their numbers.
+  const primaryBusiness = [...matchedBusinesses].sort((a, b) => (b.reviews ?? 0) - (a.reviews ?? 0))[0];
+
   return {
     totalLeads: metric("Total leads", totalLeads, null, "GoHighLevel"),
     qualifiedLeads: metric("Qualified leads", qualifiedLeads, null, "GoHighLevel"),
@@ -382,49 +351,55 @@ function buildBusinessScorecard(
     formSubmissions: metric("Form submissions", formSubmissions, null, "GoHighLevel contact source"),
     bookedJobs: metric("Booked jobs", bookedJobs, null, "GoHighLevel won opportunities"),
     shareOfLocalVoice: metric(
-      "Share of Local Voice",
-      averageOf(heatmaps.map((row) => row.marketShare)),
+      "Review rating",
+      primaryBusiness?.rating ?? null,
       null,
-      "Rank Tracker",
-      "percent",
+      "Rank Tracker business profile",
     ),
     top3Coverage: metric(
-      "Top-3 grid coverage",
-      averageOf(heatmaps.map((row) => row.mapPackPercent)),
+      "Reviews tracked",
+      primaryBusiness?.reviews ?? null,
       null,
-      "Rank Tracker",
-      "percent",
+      "Rank Tracker business profile",
     ),
-    mapCheckIns: metric("Map Check-Ins this month", mapCheckInCount, null, "Map Check-Ins"),
+    mapCheckIns: metric("Map Check-Ins this month", null, null, "No dedicated Map Check-Ins endpoint on the connected API"),
     hasSalesStructureData: totalLeads !== null && qualifiedLeads !== null,
   };
 }
 
 function buildSeoPerformance(
-  heatmaps: SeoHeatmapRow[],
+  matchedBusinesses: ReturnType<typeof extractMatchedBusinesses>,
   gbpPerformance: ReturnType<typeof extractGbpPerformanceRows>,
-  mapCheckInCount: number | null,
+  clientName: string,
 ): SeoPerformancePack {
   const notes: string[] = [];
-  if (!heatmaps.length) {
+  if (!matchedBusinesses.length) {
     notes.push(
-      "No Rank Tracker sync is connected yet, so keyword heatmaps cannot be pulled -- connect Rank Tracker in Settings > Integrations before the next prep run.",
+      `No Rank Tracker business record matched "${clientName}" -- confirm the business name in Rank Tracker matches this client exactly, or check for a typo/suffix mismatch.`,
     );
+  } else {
+    notes.push(
+      "Rank Tracker's connected API exposes business identity, rating, reviews, and tracked keywords -- it does not yet expose per-keyword rank position, Map Pack %, or heatmap images. Those require Map Ranking's scan-results endpoint once it is available.",
+    );
+    if (matchedBusinesses.length > 1) {
+      notes.push(
+        `${matchedBusinesses.length} businesses named "${clientName}" were found in Rank Tracker -- verify each is actually a location for this client (a shared name can also mean two unrelated businesses). The scorecard above uses the one with the most reviews as primary.`,
+      );
+    }
   }
   if (!gbpPerformance.length) {
     notes.push(
-      "No Google Business Profile performance data is available -- reconnect GBP or confirm locations were discovered.",
+      "No Google Business Profile location matched this client's name, or performance data is unavailable for the matched location -- confirm the GBP listing title matches this client.",
     );
   }
-  if (mapCheckInCount === null) {
-    notes.push("No Map Check-Ins sync is connected yet.");
-  }
+  notes.push("Map Check-Ins has no dedicated data endpoint on the connected Rank Tracker API yet -- review check-in activity directly in the Map Check-Ins dashboard.");
 
   return {
-    heatmaps,
+    heatmaps: [],
+    matchedBusinesses,
     gbpPerformance,
-    mapCheckInCount,
-    availability: heatmaps.length || gbpPerformance.length ? "available" : "unavailable",
+    mapCheckInCount: null,
+    availability: matchedBusinesses.length || gbpPerformance.length ? "available" : "unavailable",
     notes,
   };
 }
@@ -670,9 +645,10 @@ function buildExecutiveBrief(
     ? `On the business scorecard: ${scorecard.totalLeads.value} total leads and ${scorecard.qualifiedLeads.value ?? "an unassessed number of"} qualified leads this cycle${scorecard.bookedJobs.availability === "available" ? `, converting to ${scorecard.bookedJobs.value} booked job${scorecard.bookedJobs.value === 1 ? "" : "s"}` : ""}. ${scorecard.callsAnswered.availability === "available" ? `GBP call clicks stand at ${scorecard.callsAnswered.value} (previous period ${scorecard.callsAnswered.previousValue ?? "n/a"}).` : "Call answer/miss data is not connected yet, so phone handling must be assessed live with the client."}`
     : "The business scorecard has no CRM data connected yet -- lead volume, qualified leads, and booked jobs must be gathered live using the lead-quality questions in this pack, per the sales-structure conversation in the SOP.";
 
-  const seoParagraph = seoPerformance.heatmaps.length
-    ? `SEO visibility: tracking ${seoPerformance.heatmaps.length} keyword${seoPerformance.heatmaps.length === 1 ? "" : "s"} this cycle${scorecard.shareOfLocalVoice.value !== null ? ` with an average Share of Local Voice of ${scorecard.shareOfLocalVoice.value}% and Top-3 grid coverage of ${scorecard.top3Coverage.value ?? "n/a"}%` : ""}. Read Average Ranking, Map Pack %, and Market Share together -- never Average Ranking alone.`
-    : "No Rank Tracker sync is connected, so keyword heatmaps and Market Share are not available for this touch -- connect it before the next prep cycle so the SEO story can be shown with evidence rather than described from memory.";
+  const matchedBusiness = seoPerformance.matchedBusinesses[0];
+  const seoParagraph = matchedBusiness
+    ? `SEO / GBP identity: matched to "${matchedBusiness.businessName}" in Rank Tracker -- ${matchedBusiness.reviews ?? "an unknown number of"} reviews at a ${matchedBusiness.rating ?? "n/a"}-star rating, tracking ${matchedBusiness.keywords.length} keyword${matchedBusiness.keywords.length === 1 ? "" : "s"}. Per-keyword rank position and heatmap images are not exposed by this connection yet.${seoPerformance.gbpPerformance.length ? ` GBP performance: ${seoPerformance.gbpPerformance.reduce((sum, row) => sum + row.calls, 0)} call clicks and ${seoPerformance.gbpPerformance.reduce((sum, row) => sum + row.directionRequests, 0)} direction requests this period.` : ""}`
+    : `No Rank Tracker business record matched "${client.name}" -- confirm the business name in Rank Tracker matches this client exactly so SEO evidence can be pulled automatically.`;
 
   const strategicParagraph = strategicAction.hasAgreedAction
     ? `Strategic action: "${strategicAction.title}" (agreed ${strategicAction.agreedAt}) is ${strategicAction.implementationPercent}% implemented. ${strategicAction.resultsSoFar || "Results so far are not yet documented."} Next: ${strategicAction.nextSteps}`
@@ -942,17 +918,11 @@ function buildPrepPack(
   integrationSources: MonthlyTouchPrepPack["integrationSources"],
   rawSnapshots: Map<string, JsonRecord>,
 ) {
-  const heatmaps = extractRankTrackerRows(rawSnapshots.get("rank-tracker"));
-  const gbpPerformance = extractGbpPerformanceRows(rawSnapshots.get("google-business-profile"));
-  const mapCheckInCount = extractArrayCount(rawSnapshots.get("map-checkins"), [
-    "checkins",
-    "results",
-    "data",
-    "items",
-  ]);
+  const matchedBusinesses = extractMatchedBusinesses(rawSnapshots.get("rank-tracker"), client.id);
+  const gbpPerformance = extractGbpPerformanceRows(rawSnapshots.get("google-business-profile"), client.id);
 
-  const businessScorecard = buildBusinessScorecard(rawSnapshots, heatmaps, gbpPerformance, mapCheckInCount);
-  const seoPerformance = buildSeoPerformance(heatmaps, gbpPerformance, mapCheckInCount);
+  const businessScorecard = buildBusinessScorecard(rawSnapshots, matchedBusinesses, gbpPerformance);
+  const seoPerformance = buildSeoPerformance(matchedBusinesses, gbpPerformance, client.name);
   const adsPerformance = buildAdsPerformance();
   const strategicAction = buildStrategicActionStatus(client);
   const clientParticipation = buildClientParticipation(client);

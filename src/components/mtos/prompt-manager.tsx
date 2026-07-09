@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type {
   PromptConfig,
   PromptDefinition,
@@ -64,6 +64,7 @@ export function PromptManager() {
   const [prompts, setPrompts] = useState<PromptConfig | null>(null);
   const [saving, setSaving] = useState(false);
   const [newPhase, setNewPhase] = useState("");
+  const [selectedPromptKey, setSelectedPromptKey] = useState<string | null>(null);
 
   useEffect(() => {
     let mounted = true;
@@ -79,6 +80,14 @@ export function PromptManager() {
       mounted = false;
     };
   }, []);
+
+  const allPrompts = useMemo(
+    () => (prompts || []).flatMap((phase, phaseIndex) => phase.prompts.map((prompt, promptIndex) => ({ phase, phaseIndex, prompt, promptIndex }))),
+    [prompts],
+  );
+
+  const selectedPromptRecord =
+    allPrompts.find((item) => item.prompt.key === selectedPromptKey) || allPrompts[0] || null;
 
   if (prompts === null) {
     return <div className="text-sm text-slate-400">Loading prompts…</div>;
@@ -164,141 +173,166 @@ export function PromptManager() {
         Organize prompts by workflow stage, assign roles, and define execution routing. Use Gemini for simple tasks and Claude for difficult or reasoning-heavy tasks.
       </div>
 
-      <div className="space-y-8">
-        {prompts.length ? (
-          prompts.map((phase, phaseIndex) => (
-            <section key={phase.phase} className="space-y-4 rounded-2xl border border-white/8 bg-white/5 p-4">
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <input
-                  value={phase.phase}
-                  onChange={(event) => updatePhase(phaseIndex, { phase: event.target.value })}
-                  className="w-full rounded-2xl border border-white/10 bg-black/15 px-3 py-2 text-sm font-semibold text-slate-200 outline-none"
-                />
+      <div className="grid gap-6 xl:grid-cols-[420px_minmax(0,1fr)]">
+        <div className="space-y-4 rounded-[28px] border border-white/8 bg-white/4 p-4">
+          {prompts.length ? (
+            prompts.map((phase, phaseIndex) => (
+              <section key={phase.phase} className="space-y-3 rounded-2xl border border-white/8 bg-black/20 p-4">
+                <div className="flex items-center gap-2">
+                  <input
+                    value={phase.phase}
+                    onChange={(event) => updatePhase(phaseIndex, { phase: event.target.value })}
+                    className="w-full rounded-2xl border border-white/10 bg-black/15 px-3 py-2 text-sm font-semibold text-slate-200 outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => removePhase(phaseIndex)}
+                    className="rounded-2xl border border-rose-400/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-200 hover:bg-rose-500/20"
+                  >
+                    Remove
+                  </button>
+                </div>
+                <div className="space-y-2">
+                  {phase.prompts.length ? (
+                    phase.prompts.map((prompt) => {
+                      const active = selectedPromptRecord?.prompt.key === prompt.key;
+                      return (
+                        <button
+                          key={prompt.key}
+                          type="button"
+                          onClick={() => setSelectedPromptKey(prompt.key)}
+                          className={`block w-full rounded-2xl border px-4 py-3 text-left transition ${
+                            active
+                              ? "border-[#d7f5ec]/35 bg-[#d7f5ec] text-[#223554]"
+                              : "border-white/8 bg-white/4 text-slate-200 hover:border-white/16 hover:bg-white/8"
+                          }`}
+                        >
+                          <div className="text-sm font-semibold">{prompt.title}</div>
+                          <div className={`mt-1 text-xs ${active ? "text-[#36506b]" : "text-slate-400"}`}>
+                            {prompt.provider ?? "gemini"} · {prompt.difficulty ?? "simple"} · {prompt.role}
+                          </div>
+                        </button>
+                      );
+                    })
+                  ) : (
+                    <div className="rounded-2xl border border-white/10 bg-black/15 p-4 text-sm text-slate-400">This phase has no prompts yet.</div>
+                  )}
+                </div>
                 <button
                   type="button"
-                  onClick={() => removePhase(phaseIndex)}
+                  onClick={() => addPrompt(phaseIndex)}
+                  className="rounded-2xl bg-white px-4 py-2 text-sm font-medium text-[#223554] hover:bg-[#d7f5ec]"
+                >
+                  Add prompt
+                </button>
+              </section>
+            ))
+          ) : (
+            <div className="rounded-2xl border border-white/8 bg-black/20 p-4 text-sm text-slate-400">No workflow stages configured yet.</div>
+          )}
+        </div>
+
+        <div className="rounded-[28px] border border-white/8 bg-[linear-gradient(180deg,rgba(255,255,255,0.06),rgba(255,255,255,0.02))] p-5">
+          {selectedPromptRecord ? (
+            <div className="space-y-4">
+              <div className="grid gap-3 lg:grid-cols-[1fr_auto]">
+                <div className="space-y-2">
+                  <label className="block text-xs uppercase tracking-[0.2em] text-slate-400">Prompt title</label>
+                  <input
+                    value={selectedPromptRecord.prompt.title}
+                    onChange={(event) => updatePrompt(selectedPromptRecord.phaseIndex, selectedPromptRecord.promptIndex, { title: event.target.value })}
+                    className="w-full rounded-2xl border border-white/10 bg-black/15 px-3 py-2 text-sm text-slate-200 outline-none"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="block text-xs uppercase tracking-[0.2em] text-slate-400">Prompt key</label>
+                  <input
+                    value={selectedPromptRecord.prompt.key}
+                    onChange={(event) => updatePrompt(selectedPromptRecord.phaseIndex, selectedPromptRecord.promptIndex, { key: event.target.value })}
+                    className="w-full rounded-2xl border border-white/10 bg-black/15 px-3 py-2 text-sm text-slate-200 outline-none"
+                  />
+                </div>
+              </div>
+
+              <div className="grid gap-3 lg:grid-cols-2">
+                <div>
+                  <label className="block text-xs uppercase tracking-[0.2em] text-slate-400">Role</label>
+                  <select
+                    value={selectedPromptRecord.prompt.role}
+                    onChange={(event) => updatePrompt(selectedPromptRecord.phaseIndex, selectedPromptRecord.promptIndex, { role: event.target.value as PromptRole })}
+                    className="w-full rounded-2xl border border-white/10 bg-black/15 px-3 py-2 text-sm text-slate-200 outline-none"
+                  >
+                    {promptRoles.map((role) => (
+                      <option key={role} value={role}>
+                        {role}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs uppercase tracking-[0.2em] text-slate-400">Description</label>
+                  <input
+                    value={selectedPromptRecord.prompt.description ?? ""}
+                    onChange={(event) => updatePrompt(selectedPromptRecord.phaseIndex, selectedPromptRecord.promptIndex, { description: event.target.value })}
+                    className="w-full rounded-2xl border border-white/10 bg-black/15 px-3 py-2 text-sm text-slate-200 outline-none"
+                  />
+                </div>
+              </div>
+
+              <div className="grid gap-3 lg:grid-cols-2">
+                <div>
+                  <label className="block text-xs uppercase tracking-[0.2em] text-slate-400">Provider</label>
+                  <select
+                    value={selectedPromptRecord.prompt.provider ?? "gemini"}
+                    onChange={(event) => updatePrompt(selectedPromptRecord.phaseIndex, selectedPromptRecord.promptIndex, { provider: event.target.value as PromptProvider })}
+                    className="w-full rounded-2xl border border-white/10 bg-black/15 px-3 py-2 text-sm text-slate-200 outline-none"
+                  >
+                    {promptProviders.map((provider) => (
+                      <option key={provider} value={provider}>
+                        {provider}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs uppercase tracking-[0.2em] text-slate-400">Difficulty</label>
+                  <select
+                    value={selectedPromptRecord.prompt.difficulty ?? "simple"}
+                    onChange={(event) => updatePrompt(selectedPromptRecord.phaseIndex, selectedPromptRecord.promptIndex, { difficulty: event.target.value as PromptTaskDifficulty })}
+                    className="w-full rounded-2xl border border-white/10 bg-black/15 px-3 py-2 text-sm text-slate-200 outline-none"
+                  >
+                    {promptDifficulties.map((difficulty) => (
+                      <option key={difficulty} value={difficulty}>
+                        {difficulty}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <label className="block text-xs uppercase tracking-[0.2em] text-slate-400">Prompt text</label>
+                <textarea
+                  value={selectedPromptRecord.prompt.prompt}
+                  onChange={(event) => updatePrompt(selectedPromptRecord.phaseIndex, selectedPromptRecord.promptIndex, { prompt: event.target.value })}
+                  className="min-h-[560px] w-full rounded-2xl border border-white/10 bg-black/15 px-4 py-3 text-sm leading-6 text-slate-200 outline-none"
+                />
+              </div>
+
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => removePrompt(selectedPromptRecord.phaseIndex, selectedPromptRecord.promptIndex)}
                   className="rounded-2xl border border-rose-400/30 bg-rose-500/10 px-3 py-2 text-sm text-rose-200 hover:bg-rose-500/20"
                 >
-                  Remove phase
+                  Remove prompt
                 </button>
               </div>
-
-              <div className="space-y-4">
-                {phase.prompts.length ? (
-                  phase.prompts.map((prompt, promptIndex) => (
-                    <div key={prompt.key} className="rounded-2xl border border-white/10 bg-black/10 p-4">
-                      <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
-                        <div className="space-y-2">
-                          <label className="block text-xs uppercase tracking-[0.2em] text-slate-400">Prompt title</label>
-                          <input
-                            value={prompt.title}
-                            onChange={(event) => updatePrompt(phaseIndex, promptIndex, { title: event.target.value })}
-                            className="w-full rounded-2xl border border-white/10 bg-black/15 px-3 py-2 text-sm text-slate-200 outline-none"
-                          />
-                        </div>
-                        <div className="space-y-2">
-                          <label className="block text-xs uppercase tracking-[0.2em] text-slate-400">Prompt key</label>
-                          <input
-                            value={prompt.key}
-                            onChange={(event) => updatePrompt(phaseIndex, promptIndex, { key: event.target.value })}
-                            className="w-full rounded-2xl border border-white/10 bg-black/15 px-3 py-2 text-sm text-slate-200 outline-none"
-                          />
-                        </div>
-                      </div>
-
-                      <div className="mt-3 grid gap-3 sm:grid-cols-[1fr_1fr]">
-                        <div>
-                          <label className="block text-xs uppercase tracking-[0.2em] text-slate-400">Role</label>
-                          <select
-                            value={prompt.role}
-                            onChange={(event) => updatePrompt(phaseIndex, promptIndex, { role: event.target.value as PromptRole })}
-                            className="w-full rounded-2xl border border-white/10 bg-black/15 px-3 py-2 text-sm text-slate-200 outline-none"
-                          >
-                            {promptRoles.map((role) => (
-                              <option key={role} value={role}>
-                                {role}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-                        <div>
-                          <label className="block text-xs uppercase tracking-[0.2em] text-slate-400">Description</label>
-                          <input
-                            value={prompt.description ?? ""}
-                            onChange={(event) => updatePrompt(phaseIndex, promptIndex, { description: event.target.value })}
-                            className="w-full rounded-2xl border border-white/10 bg-black/15 px-3 py-2 text-sm text-slate-200 outline-none"
-                          />
-                        </div>
-                      </div>
-
-                      <div className="mt-3 grid gap-3 sm:grid-cols-[1fr_1fr]">
-                        <div>
-                          <label className="block text-xs uppercase tracking-[0.2em] text-slate-400">Provider</label>
-                          <select
-                            value={prompt.provider ?? "gemini"}
-                            onChange={(event) => updatePrompt(phaseIndex, promptIndex, { provider: event.target.value as PromptProvider })}
-                            className="w-full rounded-2xl border border-white/10 bg-black/15 px-3 py-2 text-sm text-slate-200 outline-none"
-                          >
-                            {promptProviders.map((provider) => (
-                              <option key={provider} value={provider}>
-                                {provider}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-                        <div>
-                          <label className="block text-xs uppercase tracking-[0.2em] text-slate-400">Difficulty</label>
-                          <select
-                            value={prompt.difficulty ?? "simple"}
-                            onChange={(event) => updatePrompt(phaseIndex, promptIndex, { difficulty: event.target.value as PromptTaskDifficulty })}
-                            className="w-full rounded-2xl border border-white/10 bg-black/15 px-3 py-2 text-sm text-slate-200 outline-none"
-                          >
-                            {promptDifficulties.map((difficulty) => (
-                              <option key={difficulty} value={difficulty}>
-                                {difficulty}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-                      </div>
-
-                      <div className="mt-3 space-y-2">
-                        <label className="block text-xs uppercase tracking-[0.2em] text-slate-400">Prompt text</label>
-                        <textarea
-                          value={prompt.prompt}
-                          onChange={(event) => updatePrompt(phaseIndex, promptIndex, { prompt: event.target.value })}
-                          className="w-full min-h-[140px] rounded-2xl border border-white/10 bg-black/15 px-3 py-2 text-sm text-slate-200 outline-none"
-                        />
-                      </div>
-
-                      <div className="mt-3 flex justify-end">
-                        <button
-                          type="button"
-                          onClick={() => removePrompt(phaseIndex, promptIndex)}
-                          className="rounded-2xl border border-rose-400/30 bg-rose-500/10 px-3 py-2 text-sm text-rose-200 hover:bg-rose-500/20"
-                        >
-                          Remove prompt
-                        </button>
-                      </div>
-                    </div>
-                  ))
-                ) : (
-                  <div className="rounded-2xl border border-white/10 bg-black/15 p-4 text-sm text-slate-400">This phase has no prompts yet.</div>
-                )}
-              </div>
-
-              <button
-                type="button"
-                onClick={() => addPrompt(phaseIndex)}
-                className="rounded-2xl bg-white/5 px-4 py-2 text-sm font-medium text-slate-100 hover:bg-white/10"
-              >
-                Add prompt to phase
-              </button>
-            </section>
-          ))
-        ) : (
-          <div className="rounded-2xl border border-white/8 bg-black/20 p-4 text-sm text-slate-400">No workflow stages configured yet.</div>
-        )}
+            </div>
+          ) : (
+            <div className="rounded-2xl border border-white/8 bg-black/20 p-4 text-sm text-slate-400">Select a prompt to edit its details.</div>
+          )}
+        </div>
       </div>
 
       <div className="grid gap-3 sm:grid-cols-[1fr_auto]">

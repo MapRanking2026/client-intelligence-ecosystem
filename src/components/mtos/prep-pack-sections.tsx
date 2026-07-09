@@ -74,45 +74,29 @@ export function ScorecardGrid({ scorecard }: { scorecard: BusinessScorecard }) {
   );
 }
 
-const trendGlyph = { up: "▲", down: "▼", flat: "—", unknown: "?" } as const;
-const trendColor = {
-  up: "text-emerald-300",
-  down: "text-rose-300",
-  flat: "text-slate-400",
-  unknown: "text-slate-500",
-} as const;
-
 export function SeoPerformancePanel({ seo }: { seo: SeoPerformancePack }) {
   return (
     <div className="space-y-4">
-      {seo.heatmaps.length ? (
+      {seo.matchedBusinesses.length ? (
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-          {seo.heatmaps.map((row) => (
-            <div
-              key={`${row.keyword}-${row.location}-${row.scanDate}`}
-              className="overflow-hidden rounded-2xl border border-white/8 bg-white/4"
-            >
-              {row.imageUrl ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={row.imageUrl} alt={`${row.keyword} heatmap`} className="h-36 w-full object-cover" />
-              ) : (
-                <div className="flex h-36 w-full items-center justify-center bg-black/30 px-3 text-center text-xs text-slate-500">
-                  No heatmap image returned by Rank Tracker for this keyword
-                </div>
-              )}
-              <div className="space-y-1 p-3">
-                <p className="text-sm font-semibold text-white">{row.keyword}</p>
-                <p className="text-xs text-slate-400">
-                  {row.location || "Location not specified"}
-                  {row.scanDate ? ` -- ${row.scanDate}` : ""}
-                </p>
-                <div className="flex flex-wrap items-center gap-2 pt-1 text-xs text-slate-300">
-                  <span>Avg rank: {row.averageRanking ?? "n/a"}</span>
-                  <span>Top-3: {row.mapPackPercent ?? "n/a"}%</span>
-                  <span>Market share: {row.marketShare ?? "n/a"}%</span>
-                  <span className={trendColor[row.trend]}>{trendGlyph[row.trend]}</span>
-                </div>
+          {seo.matchedBusinesses.map((business) => (
+            <div key={`${business.businessName}-${business.placeId}`} className="rounded-2xl border border-white/8 bg-white/4 p-4">
+              <p className="text-sm font-semibold text-white">{business.businessName}</p>
+              <p className="mt-1 text-xs text-slate-400">{business.address || "Address not on file"}</p>
+              <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-slate-300">
+                <span>{business.rating ?? "n/a"}★ rating</span>
+                <span>{business.reviews ?? "n/a"} reviews</span>
+                <span>{business.keywords.length} keywords tracked</span>
               </div>
+              {business.keywords.length ? (
+                <div className="mt-2 flex flex-wrap gap-1">
+                  {business.keywords.slice(0, 6).map((keyword) => (
+                    <span key={keyword} className="rounded-full border border-white/8 bg-black/20 px-2 py-1 text-[11px] text-slate-300">
+                      {keyword}
+                    </span>
+                  ))}
+                </div>
+              ) : null}
             </div>
           ))}
         </div>

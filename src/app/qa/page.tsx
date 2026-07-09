@@ -1,106 +1,69 @@
+import Link from "next/link";
+
 import { AppShell } from "@/src/components/mtos/app-shell";
 import { SectionCard } from "@/src/components/mtos/section-card";
 import { ScorePill } from "@/src/components/mtos/score-pill";
+import { resolveTenantContext } from "@/src/lib/auth/resolve-tenant-context";
+import { getQaClientIndexView } from "@/src/lib/server/services/qa-service";
 
-export default function QaPage() {
-  const qaDimensions = [
-    "Meeting Preparation",
-    "Wins Delivered",
-    "Performance Translation",
-    "SEO Strategy Review",
-    "Google Ads Review",
-    "Meta Ads Review",
-    "Issues & Risk Management",
-    "Strategic Recommendations",
-    "Value Communication",
-    "Objection Handling",
-    "Michelin Communication Standard",
-    "Client Sentiment",
-    "Testimonial Opportunity",
-    "30-Day Strategic Plan",
-    "Live Meeting Recap",
-    "Operational Hygiene",
-  ];
+function toneForRisk(risk: "Low" | "Moderate" | "High") {
+  if (risk === "Low") return "positive" as const;
+  if (risk === "Moderate") return "warning" as const;
+  return "danger" as const;
+}
 
-  const workflowStages = [
-    {
-      title: "Evidence intake",
-      description: "Pull transcript, prep pack, coverage checklist, and post-call outputs into one review packet before scoring starts.",
-    },
-    {
-      title: "Dimension scoring",
-      description: "Run the QA evaluation prompt against the full MTOS rubric and keep every score grounded in evidence.",
-    },
-    {
-      title: "Coaching output",
-      description: "Turn the lowest-friction coaching moves into next-meeting behaviors and implementation intentions.",
-    },
-    {
-      title: "Leadership rollup",
-      description: "Summarize recurring wins, misses, and retention signals for leadership visibility.",
-    },
-  ];
+function toneForScore(score: number | null) {
+  if (score === null) return "neutral" as const;
+  if (score >= 85) return "positive" as const;
+  if (score >= 70) return "warning" as const;
+  return "danger" as const;
+}
 
-  const promptConnections = [
-    "QA Evaluation → scores each dimension and coverage item with evidence",
-    "Coaching Feedback → converts the score into AM-specific coaching",
-    "Executive Summary → rolls up retention and coaching themes",
-    "Prompt Self-Improvement → flags prompt modules that drive repeated human edits",
-  ];
+export default async function QaPage() {
+  const { cards } = await getQaClientIndexView(await resolveTenantContext());
 
   return (
     <AppShell
       title="Quality And Coaching"
-      subtitle="QA in MTOS exists to improve future meetings through evidence-backed review, coaching, and calibration."
+      subtitle="Review Monthly Touch quality by client first, then drill into each recorded meeting for score trends, sentiment movement, and coaching opportunities."
     >
-      <div className="grid gap-6 xl:grid-cols-[1.05fr_0.95fr]">
-        <SectionCard
-          eyebrow="Quality queue"
-          title="MTOS review flow"
-          subtitle="This page is structured to match the prompt engine so the same evaluation logic can drive QA, coaching, and leadership rollups."
-        >
-          <div className="grid gap-4 md:grid-cols-2">
-            {workflowStages.map((item, index) => (
-              <article key={item.title} className="rounded-[24px] border border-white/8 bg-white/4 p-5">
-                <div className="mb-3 flex items-center justify-between gap-3">
-                  <span className="rounded-full border border-white/10 bg-white px-3 py-1 text-xs font-semibold text-[#223554]">
-                    Stage {index + 1}
-                  </span>
-                  <ScorePill label="Status" value={index === 0 ? "Ready" : "Planned"} tone={index === 0 ? "positive" : "warning"} />
-                </div>
-                <h3 className="text-base font-semibold text-white">{item.title}</h3>
-                <p className="mt-2 text-sm leading-6 text-slate-300">{item.description}</p>
-              </article>
-            ))}
-          </div>
-        </SectionCard>
-
-        <SectionCard
-          eyebrow="Prompt alignment"
-          title="Connected to the prompt engine"
-          subtitle="QA and coaching are intentionally tied to the same workflow prompts that drive preparation and follow-through."
-        >
-          <div className="space-y-3">
-            {promptConnections.map((item) => (
-              <div key={item} className="rounded-2xl border border-white/8 bg-black/20 px-4 py-4 text-sm text-slate-200">
-                {item}
-              </div>
-            ))}
-          </div>
-        </SectionCard>
-      </div>
-
       <SectionCard
-        eyebrow="Rubric"
-        title="QA dimensions ready for full Monthly Touch runs"
-        subtitle="The scoring surface now reflects the dimensions defined in the MTOS prompt library, so the next slice can attach actual evaluation outputs to each row."
+        eyebrow="Client quality index"
+        title="Clients with recorded Monthly Touch reviews"
+        subtitle="Each client card shows the average QA result, retention risk, current sentiment signal, and how many Monthly Touch reviews are already on file."
       >
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          {qaDimensions.map((item) => (
-            <div key={item} className="rounded-[24px] border border-white/8 bg-white/4 p-5">
-              <p className="text-sm font-semibold text-white">{item}</p>
-              <p className="mt-2 text-xs leading-5 text-slate-400">Ready to receive prompt-driven evidence, score, explanation, and coaching follow-up.</p>
-            </div>
+        <div className="grid gap-4 xl:grid-cols-3">
+          {cards.map((item) => (
+            <Link
+              key={item.client.id}
+              href={`/qa/${item.client.id}`}
+              className="rounded-[26px] border border-white/8 bg-[linear-gradient(180deg,rgba(255,255,255,0.06),rgba(255,255,255,0.025))] p-5 transition hover:-translate-y-0.5 hover:border-white/16"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-lg font-semibold text-white">{item.client.name}</p>
+                  <p className="text-sm text-slate-400">{item.client.industry}</p>
+                </div>
+                <div className="rounded-full border border-emerald-400/20 bg-emerald-500/10 px-2.5 py-1 text-[11px] font-medium text-emerald-100">
+                  Connected
+                </div>
+              </div>
+
+              <div className="mt-4 grid gap-2 sm:grid-cols-2">
+                <ScorePill label="Avg QA" value={item.averageQaScore ?? "--"} tone={toneForScore(item.averageQaScore)} />
+                <ScorePill label="Retention risk" value={item.retentionRisk} tone={toneForRisk(item.retentionRisk)} />
+                <ScorePill label="Sentiment" value={item.averageSentimentScore} tone={toneForScore(item.averageSentimentScore)} />
+                <ScorePill label="Meetings" value={item.meetingsRecorded} tone="neutral" />
+              </div>
+
+              <p className="mt-4 text-sm leading-6 text-slate-300">{item.client.summary}</p>
+
+              <div className="mt-4 flex flex-wrap items-center gap-2 text-xs text-slate-400">
+                <span>Latest grade {item.latestGrade}</span>
+                <span>•</span>
+                <span>{item.latestTouchDate}</span>
+              </div>
+            </Link>
           ))}
         </div>
       </SectionCard>

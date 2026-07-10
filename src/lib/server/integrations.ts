@@ -325,11 +325,11 @@ const providerDefinitions: ProviderDefinition[] = [
     oauth: {
       authUrl: "https://marketplace.gohighlevel.com/oauth/chooselocation",
       tokenUrl: "https://services.leadconnectorhq.com/oauth/token",
+      // Sub-account-target app installed agency-wide: the agency approves the location scopes in
+      // bulk, and oauth.write lets the resulting company token mint per-location tokens.
       scopes: [
         "contacts.readonly",
-        "contacts.write",
         "opportunities.readonly",
-        "opportunities.write",
         "locations.readonly",
         "oauth.readonly",
         "oauth.write",

@@ -2,11 +2,82 @@ import type {
   AdsPerformancePack,
   BusinessScorecard,
   ClientParticipation,
+  HeatmapGrid,
   IssueSolutionItem,
+  KeywordScanHistory,
   ScorecardMetric,
   SeoPerformancePack,
   StrategicActionStatus,
 } from "@/src/lib/mtos-data";
+
+function rankFill(rank: number | null) {
+  if (rank === null) return "#475569";
+  if (rank <= 3) return "#34d399";
+  if (rank <= 10) return "#fbbf24";
+  if (rank <= 20) return "#fb923c";
+  return "#f87171";
+}
+
+function HeatmapGridSvg({ grid }: { grid: HeatmapGrid }) {
+  const pins = grid.pins;
+  if (!pins.length) {
+    return null;
+  }
+
+  const lats = pins.map((pin) => pin.lat);
+  const lngs = pins.map((pin) => pin.lng);
+  const minLat = Math.min(...lats);
+  const maxLat = Math.max(...lats);
+  const minLng = Math.min(...lngs);
+  const maxLng = Math.max(...lngs);
+  const size = 200;
+  const pad = 14;
+  const scaleX = (lng: number) =>
+    maxLng === minLng ? size / 2 : pad + ((lng - minLng) / (maxLng - minLng)) * (size - pad * 2);
+  const scaleY = (lat: number) =>
+    maxLat === minLat ? size / 2 : size - (pad + ((lat - minLat) / (maxLat - minLat)) * (size - pad * 2));
+  const radius = Math.max(5, Math.floor((size - pad * 2) / (grid.gridSize || 9) / 2.4));
+
+  return (
+    <svg viewBox={`0 0 ${size} ${size}`} className="h-44 w-full rounded-xl bg-black/30" role="img" aria-label={`Heatmap for ${grid.keyword}`}>
+      {pins.map((pin, index) => (
+        <g key={index}>
+          <circle cx={scaleX(pin.lng)} cy={scaleY(pin.lat)} r={radius} fill={rankFill(pin.rank)} fillOpacity={0.9} />
+          <text
+            x={scaleX(pin.lng)}
+            y={scaleY(pin.lat)}
+            textAnchor="middle"
+            dominantBaseline="central"
+            fontSize={radius}
+            fill="#0b1220"
+            fontWeight={700}
+          >
+            {pin.rank === null ? "–" : pin.rank > 20 ? "20+" : pin.rank}
+          </text>
+        </g>
+      ))}
+    </svg>
+  );
+}
+
+function scanTrendArrow(scans: KeywordScanHistory["scans"]) {
+  const latest = scans[0]?.averageRank;
+  const previous = scans[1]?.averageRank;
+  if (latest == null || previous == null) {
+    return { glyph: "", color: "text-slate-400" };
+  }
+  if (latest < previous) return { glyph: "▲ improving", color: "text-emerald-300" };
+  if (latest > previous) return { glyph: "▼ declining", color: "text-rose-300" };
+  return { glyph: "— flat", color: "text-slate-400" };
+}
+
+function formatScanDate(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+  return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
 
 function formatMetric(metric: ScorecardMetric) {
   if (metric.value === null) {
@@ -88,15 +159,102 @@ export function SeoPerformancePanel({ seo }: { seo: SeoPerformancePack }) {
                 <span>{business.reviews ?? "n/a"} reviews</span>
                 <span>{business.keywords.length} keywords tracked</span>
               </div>
-              {business.keywords.length ? (
-                <div className="mt-2 flex flex-wrap gap-1">
-                  {business.keywords.slice(0, 6).map((keyword) => (
-                    <span key={keyword} className="rounded-full border border-white/8 bg-black/20 px-2 py-1 text-[11px] text-slate-300">
-                      {keyword}
-                    </span>
-                  ))}
+            </div>
+          ))}
+        </div>
+      ) : null}
+
+      {seo.keywordScanHistory.length ? (
+        <div className="overflow-x-auto rounded-2xl border border-white/8 bg-black/20">
+          <table className="w-full min-w-[560px] text-left text-sm">
+            <thead>
+              <tr className="border-b border-white/8 text-[11px] uppercase tracking-[0.2em] text-slate-400">
+                <th className="px-4 py-3 font-medium">Keyword</th>
+                <th className="px-4 py-3 font-medium">Avg rank</th>
+                <th className="px-4 py-3 font-medium">Top-3 pins</th>
+                <th className="px-4 py-3 font-medium">Market share</th>
+                <th className="px-4 py-3 font-medium">Trend</th>
+              </tr>
+            </thead>
+            <tbody>
+              {seo.keywordScanHistory.map((entry) => {
+                const latest = entry.scans[0];
+                const previous = entry.scans[1];
+                const trend = scanTrendArrow(entry.scans);
+                return (
+                  <tr key={`${entry.businessName}-${entry.keyword}`} className="border-b border-white/4 text-slate-200">
+                    <td className="px-4 py-3">
+                      <span className="font-medium text-white">{entry.keyword}</span>
+                      {latest?.scanDate ? (
+                        <span className="ml-2 text-xs text-slate-500">scanned {formatScanDate(latest.scanDate)}</span>
+                      ) : null}
+                    </td>
+                    <td className="px-4 py-3">
+                      {latest?.averageRank ?? "n/a"}
+                      {previous?.averageRank != null ? (
+                        <span className="ml-1 text-xs text-slate-500">(was {previous.averageRank})</span>
+                      ) : null}
+                    </td>
+                    <td className="px-4 py-3">
+                      {latest?.top3Pins ?? "n/a"}
+                      {previous?.top3Pins != null ? (
+                        <span className="ml-1 text-xs text-slate-500">(was {previous.top3Pins})</span>
+                      ) : null}
+                    </td>
+                    <td className="px-4 py-3">
+                      {latest?.marketSharePercent != null ? `${latest.marketSharePercent}%` : "n/a"}
+                      {previous?.marketSharePercent != null ? (
+                        <span className="ml-1 text-xs text-slate-500">(was {previous.marketSharePercent}%)</span>
+                      ) : null}
+                    </td>
+                    <td className={`px-4 py-3 text-xs ${trend.color}`}>{trend.glyph}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      ) : null}
+
+      {seo.heatmapGrids.length ? (
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          {seo.heatmapGrids.map((grid) => (
+            <div key={`${grid.keyword}-${grid.scanDate}`} className="rounded-2xl border border-white/8 bg-white/4 p-3">
+              <HeatmapGridSvg grid={grid} />
+              <div className="space-y-1 px-1 pt-3">
+                <p className="text-sm font-semibold text-white">{grid.keyword}</p>
+                <p className="text-xs text-slate-400">
+                  Scanned {formatScanDate(grid.scanDate)} -- {grid.gridSize}x{grid.gridSize} grid
+                </p>
+                <div className="flex flex-wrap gap-2 text-xs text-slate-300">
+                  <span>ARP {grid.averageRankPosition ?? "n/a"}</span>
+                  <span>SoLV {grid.shareOfLocalVoicePercent ?? "n/a"}%</span>
+                  <span>Top-3 {grid.top3Percent ?? "n/a"}%</span>
                 </div>
-              ) : null}
+                {grid.topCompetitors.length ? (
+                  <p className="pt-1 text-[11px] text-slate-500">
+                    Top competitors: {grid.topCompetitors.map((c) => `${c.name} (${c.rating ?? "n/a"}★, ${c.reviews ?? "n/a"} rev)`).join(" · ")}
+                  </p>
+                ) : null}
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : null}
+
+      {seo.checkinBusinesses.length ? (
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          {seo.checkinBusinesses.map((business) => (
+            <div key={business.businessName} className="rounded-2xl border border-white/8 bg-black/20 p-4">
+              <p className="text-[11px] uppercase tracking-[0.2em] text-slate-400">Map Check-Ins</p>
+              <p className="mt-1 text-sm font-semibold text-white">{business.businessName}</p>
+              <div className="mt-2 flex flex-wrap gap-3 text-sm text-slate-200">
+                <span>{business.totalPosts} posts published</span>
+                <span>{business.scheduledPosts} scheduled</span>
+              </div>
+              <p className="mt-1 text-xs text-slate-400">
+                Connected: {business.connectedPlatforms.length ? business.connectedPlatforms.join(", ") : "no platforms connected"}
+              </p>
             </div>
           ))}
         </div>

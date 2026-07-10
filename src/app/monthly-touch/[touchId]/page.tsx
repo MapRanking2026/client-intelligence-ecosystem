@@ -412,7 +412,7 @@ export default async function MonthlyTouchPage({
         <Link
           href={`/monthly-touch/${touch.id}/summary`}
           style={oaklineSummaryButtonStyle}
-          className="inline-flex items-center gap-2 rounded-full border border-white/12 bg-white px-4 py-3 text-sm font-semibold text-[#0c1524] transition hover:bg-[#d7f5ec]"
+          className="inline-flex items-center gap-2 rounded-full border border-white/12 bg-white px-4 py-3 text-sm font-semibold text-[#0d1625] transition hover:bg-[#d7f5ec]"
         >
           Open post-meeting summary
         </Link>

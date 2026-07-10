@@ -108,13 +108,13 @@ export default async function QaMeetingDetailPage({
         subtitle="Move back to the client-level history or into the original Monthly Touch workspace."
       >
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-          <Link href={`/qa/${payload.client.id}`} className="rounded-2xl border border-slate-300/60 bg-white px-4 py-4 text-sm font-semibold text-[#14263d] transition hover:bg-[#d7f5ec]">
+          <Link href={`/qa/${payload.client.id}`} className="rounded-2xl border border-slate-300/60 bg-white px-4 py-4 text-sm font-semibold text-[#0d1625] transition hover:bg-[#d7f5ec]">
             Back to client QA history
           </Link>
-          <Link href={`/monthly-touch/${payload.touch.id}`} className="rounded-2xl border border-slate-300/60 bg-white px-4 py-4 text-sm font-semibold text-[#14263d] transition hover:bg-[#d7f5ec]">
+          <Link href={`/monthly-touch/${payload.touch.id}`} className="rounded-2xl border border-slate-300/60 bg-white px-4 py-4 text-sm font-semibold text-[#0d1625] transition hover:bg-[#d7f5ec]">
             Open Monthly Touch workspace
           </Link>
-          <Link href={`/monthly-touch/${payload.touch.id}/summary`} className="rounded-2xl border border-slate-300/60 bg-white px-4 py-4 text-sm font-semibold text-[#14263d] transition hover:bg-[#d7f5ec]">
+          <Link href={`/monthly-touch/${payload.touch.id}/summary`} className="rounded-2xl border border-slate-300/60 bg-white px-4 py-4 text-sm font-semibold text-[#0d1625] transition hover:bg-[#d7f5ec]">
             Open post-meeting summary
           </Link>
         </div>

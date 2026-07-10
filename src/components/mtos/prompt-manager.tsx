@@ -203,7 +203,7 @@ export function PromptManager() {
                           onClick={() => setSelectedPromptKey(prompt.key)}
                           className={`block w-full rounded-2xl border px-4 py-3 text-left transition ${
                             active
-                              ? "border-[#d7f5ec]/35 bg-[#d7f5ec] text-[#223554]"
+                              ? "border-[#d7f5ec]/35 bg-[#d7f5ec] text-[#0d1625]"
                               : "border-white/8 bg-white/4 text-slate-200 hover:border-white/16 hover:bg-white/8"
                           }`}
                         >
@@ -221,7 +221,7 @@ export function PromptManager() {
                 <button
                   type="button"
                   onClick={() => addPrompt(phaseIndex)}
-                  className="rounded-2xl bg-white px-4 py-2 text-sm font-medium text-[#223554] hover:bg-[#d7f5ec]"
+                  className="rounded-2xl bg-white px-4 py-2 text-sm font-medium text-[#0d1625] hover:bg-[#d7f5ec]"
                 >
                   Add prompt
                 </button>

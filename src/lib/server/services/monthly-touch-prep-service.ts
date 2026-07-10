@@ -359,11 +359,19 @@ function averageAcrossKeywords(
 
 function buildBusinessScorecard(
   rawSnapshots: Map<string, JsonRecord>,
+  clientId: string,
   gbpPerformance: ReturnType<typeof extractGbpPerformanceRows>,
   keywordHistory: KeywordScanHistory[],
   checkinBusinesses: MapCheckinBusinessSummary[],
 ): BusinessScorecard {
-  const crm = rawSnapshots.get("gohighlevel");
+  const crmSnapshot = rawSnapshots.get("gohighlevel");
+  // Agency-mode sync stores per-client lead data; single-location mode stores workspace totals
+  // (which belong to Map Ranking's own sub-account, not any client -- so ignore those).
+  const leadsByClient = (crmSnapshot?.leadsByClient || {}) as JsonRecord;
+  const crm =
+    crmSnapshot?.mode === "agency"
+      ? ((leadsByClient[clientId] || null) as JsonRecord | null)
+      : null;
   const totalLeads = crm && typeof crm.totalLeads === "number" ? crm.totalLeads : null;
   const qualifiedLeads = crm && typeof crm.qualifiedLeads === "number" ? crm.qualifiedLeads : null;
   const bookedJobs = crm && typeof crm.bookedJobs === "number" ? crm.bookedJobs : null;
@@ -577,7 +585,7 @@ function buildDataGaps(
 
   if (scorecard.totalLeads.availability === "unavailable") {
     gaps.push(
-      "No CRM (GoHighLevel) is connected -- lead volume and quality must be assessed live using the lead-quality questions below.",
+      "No per-client GoHighLevel lead data is available -- the current GHL connection is scoped to a single sub-account. Add GOHIGHLEVEL_AGENCY_API_KEY (agency API key or agency private-integration token) and re-sync to pull each client's leads automatically; until then, assess lead volume live using the lead-quality questions below.",
     );
   }
   if (scorecard.costPerLead.availability === "unavailable") {
@@ -1034,7 +1042,13 @@ async function buildPrepPack(
   const checkinBusinesses = extractCheckinBusinesses(rawSnapshots.get("map-checkins"), client.id);
   const { keywordHistory, heatmapGrids } = await fetchLiveRankTrackerEvidence(context, matchedBusinesses);
 
-  const businessScorecard = buildBusinessScorecard(rawSnapshots, gbpPerformance, keywordHistory, checkinBusinesses);
+  const businessScorecard = buildBusinessScorecard(
+    rawSnapshots,
+    client.id,
+    gbpPerformance,
+    keywordHistory,
+    checkinBusinesses,
+  );
   const seoPerformance = buildSeoPerformance(
     matchedBusinesses,
     gbpPerformance,

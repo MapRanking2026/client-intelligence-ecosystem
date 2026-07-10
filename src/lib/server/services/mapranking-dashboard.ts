@@ -212,16 +212,16 @@ export async function fetchCheckinBusinesses(session: DashboardSession) {
   const businesses: JsonRecord[] = [];
   let page = 1;
 
-  // paginate defensively; the API ignores unknown filters so match client-side
-  for (; page <= 10; page += 1) {
+  // paginate defensively (page size capped at 20 by the API); match client-side
+  for (; page <= 50; page += 1) {
     const payload = await postJson(
       `${session.baseUrl}/api/checkin-business/get-business-paginated`,
-      { page, limit: 100 },
+      { page, limit: 20 },
       session.token,
     );
     const rows = Array.isArray(payload.data) ? (payload.data as JsonRecord[]) : [];
     businesses.push(...rows);
-    if (rows.length < 100) {
+    if (rows.length < 20) {
       break;
     }
   }

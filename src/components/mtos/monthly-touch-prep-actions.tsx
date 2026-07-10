@@ -96,7 +96,7 @@ export function MonthlyTouchPrepActions({
           type="button"
           onClick={() => runPrepare("prepare")}
           disabled={isPending}
-          className="inline-flex items-center gap-2 rounded-full border border-white/12 bg-white px-4 py-2 text-sm font-medium text-[#223554] transition hover:bg-[#d7f5ec] disabled:cursor-not-allowed disabled:opacity-60"
+          className="inline-flex items-center gap-2 rounded-full border border-white/12 bg-white px-4 py-2 text-sm font-medium text-[#0d1625] transition hover:bg-[#d7f5ec] disabled:cursor-not-allowed disabled:opacity-60"
         >
           {isPending && activeAction === "prepare" ? (
             <LoaderCircle className="h-4 w-4 animate-spin" />

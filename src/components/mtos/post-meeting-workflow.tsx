@@ -302,7 +302,7 @@ export function PostMeetingWorkflow({ touchId, postMeeting, qaReview }: PostMeet
               type="button"
               onClick={() => run("generate_qa_review", { action: "generate_qa_review" })}
               disabled={isPending}
-              className="mt-3 inline-flex items-center gap-2 rounded-full border border-white/12 bg-white px-4 py-2 text-sm font-medium text-[#223554] transition hover:bg-[#d7f5ec] disabled:cursor-not-allowed disabled:opacity-60"
+              className="mt-3 inline-flex items-center gap-2 rounded-full border border-white/12 bg-white px-4 py-2 text-sm font-medium text-[#0d1625] transition hover:bg-[#d7f5ec] disabled:cursor-not-allowed disabled:opacity-60"
             >
               {isPending && activeAction === "generate_qa_review" ? (
                 <LoaderCircle className="h-4 w-4 animate-spin" />
@@ -315,7 +315,7 @@ export function PostMeetingWorkflow({ touchId, postMeeting, qaReview }: PostMeet
             <div className="mt-3 space-y-3">
               <div className="flex items-center justify-between">
                 <p className="text-sm text-slate-300">Overall grade</p>
-                <span className="rounded-full border border-white/10 bg-white px-3 py-1 text-sm font-semibold text-[#223554]">
+                <span className="rounded-full border border-white/10 bg-white px-3 py-1 text-sm font-semibold text-[#0d1625]">
                   {qaReview.overallGrade}
                 </span>
               </div>
@@ -367,7 +367,7 @@ export function PostMeetingWorkflow({ touchId, postMeeting, qaReview }: PostMeet
                         })
                       }
                       disabled={isPending}
-                      className="inline-flex items-center gap-2 rounded-full border border-white/12 bg-white px-4 py-2 text-sm font-medium text-[#223554] transition hover:bg-[#d7f5ec] disabled:cursor-not-allowed disabled:opacity-60"
+                      className="inline-flex items-center gap-2 rounded-full border border-white/12 bg-white px-4 py-2 text-sm font-medium text-[#0d1625] transition hover:bg-[#d7f5ec] disabled:cursor-not-allowed disabled:opacity-60"
                     >
                       Request changes
                     </button>

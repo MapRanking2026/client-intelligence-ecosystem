@@ -981,18 +981,19 @@ async function syncRotatingTokenProvider(
   if (providerId === "map-checkins") {
     const apiBase = (credentials.apiBaseUrl || refreshedRecord.apiBaseUrl || "https://dashboardapi.mapranking.com").replace(/\/$/, "");
     const checkinBusinesses: Array<Record<string, unknown>> = [];
-    for (let page = 1; page <= 10; page += 1) {
+    // API caps page size at 20
+    for (let page = 1; page <= 50; page += 1) {
       const pagePayload = await fetchJson(`${apiBase}/api/checkin-business/get-business-paginated`, {
         method: "POST",
         headers: {
           "content-type": "application/json",
           ...getBearerHeaders(accessToken),
         },
-        body: JSON.stringify({ page, limit: 100 }),
+        body: JSON.stringify({ page, limit: 20 }),
       });
       const rows = Array.isArray(pagePayload.data) ? (pagePayload.data as Array<Record<string, unknown>>) : [];
       checkinBusinesses.push(...rows);
-      if (rows.length < 100) {
+      if (rows.length < 20) {
         break;
       }
     }
@@ -1106,35 +1107,55 @@ async function listGhlAgencyLocations(agencyKey: string): Promise<GhlAgencyLocat
   }));
 }
 
-async function fetchGhlLocationLeadCounts(agencyKey: string, location: GhlAgencyLocation) {
+interface GhlLeadCounts {
+  contacts: JsonRecord[];
+  opportunities: JsonRecord[];
+  errorMessage?: string;
+}
+
+async function fetchGhlLocationLeadCounts(agencyKey: string, location: GhlAgencyLocation): Promise<GhlLeadCounts> {
   if (agencyKey.startsWith("pit-")) {
     const headers = { ...getBearerHeaders(agencyKey), Version: "2021-07-28" };
-    const contactsPayload = await fetchJson(
-      `https://services.leadconnectorhq.com/contacts/?locationId=${encodeURIComponent(location.id)}&limit=100`,
-      { headers },
-    ).catch(() => ({}) as JsonRecord);
-    const opportunitiesPayload = await fetchJson(
-      `https://services.leadconnectorhq.com/opportunities/search?location_id=${encodeURIComponent(location.id)}&limit=100`,
-      { headers },
-    ).catch(() => ({}) as JsonRecord);
+    try {
+      const contactsPayload = await fetchJson(
+        `https://services.leadconnectorhq.com/contacts/?locationId=${encodeURIComponent(location.id)}&limit=100`,
+        { headers },
+      );
+      const opportunitiesPayload = await fetchJson(
+        `https://services.leadconnectorhq.com/opportunities/search?location_id=${encodeURIComponent(location.id)}&limit=100`,
+        { headers },
+      ).catch(() => ({}) as JsonRecord);
 
-    const contacts = Array.isArray(contactsPayload.contacts) ? (contactsPayload.contacts as JsonRecord[]) : [];
-    const opportunities = Array.isArray(opportunitiesPayload.opportunities)
-      ? (opportunitiesPayload.opportunities as JsonRecord[])
-      : [];
-    return { contacts, opportunities };
+      const contacts = Array.isArray(contactsPayload.contacts) ? (contactsPayload.contacts as JsonRecord[]) : [];
+      const opportunities = Array.isArray(opportunitiesPayload.opportunities)
+        ? (opportunitiesPayload.opportunities as JsonRecord[])
+        : [];
+      return { contacts, opportunities };
+    } catch (error) {
+      return {
+        contacts: [],
+        opportunities: [],
+        errorMessage: error instanceof Error ? error.message : "GoHighLevel contact fetch failed",
+      };
+    }
   }
 
   // v1: each location record carries its own API key for location-scoped endpoints
   if (!location.apiKey) {
-    return { contacts: [], opportunities: [] };
+    return { contacts: [], opportunities: [], errorMessage: "No v1 location API key available" };
   }
   const headers = getBearerHeaders(location.apiKey);
-  const contactsPayload = await fetchJson("https://rest.gohighlevel.com/v1/contacts/?limit=100", { headers }).catch(
-    () => ({}) as JsonRecord,
-  );
-  const contacts = Array.isArray(contactsPayload.contacts) ? (contactsPayload.contacts as JsonRecord[]) : [];
-  return { contacts, opportunities: [] };
+  try {
+    const contactsPayload = await fetchJson("https://rest.gohighlevel.com/v1/contacts/?limit=100", { headers });
+    const contacts = Array.isArray(contactsPayload.contacts) ? (contactsPayload.contacts as JsonRecord[]) : [];
+    return { contacts, opportunities: [] };
+  } catch (error) {
+    return {
+      contacts: [],
+      opportunities: [],
+      errorMessage: error instanceof Error ? error.message : "GoHighLevel contact fetch failed",
+    };
+  }
 }
 
 async function syncGoHighLevelAgency(context: TenantContext, agencyKey: string): Promise<SyncExecutionResult> {
@@ -1150,9 +1171,15 @@ async function syncGoHighLevelAgency(context: TenantContext, agencyKey: string):
   }
 
   const leadsByClient: Record<string, JsonRecord> = {};
+  const fetchErrors: string[] = [];
   // Cap per-sync work; a nightly sync cycles through the rest.
-  for (const { client, location } of matchedPairs.slice(0, 40)) {
-    const { contacts, opportunities } = await fetchGhlLocationLeadCounts(agencyKey, location);
+  const pairsToFetch = matchedPairs.slice(0, 40);
+  for (const { client, location } of pairsToFetch) {
+    const { contacts, opportunities, errorMessage } = await fetchGhlLocationLeadCounts(agencyKey, location);
+    if (errorMessage) {
+      fetchErrors.push(errorMessage);
+      continue;
+    }
     const wonOpportunities = opportunities.filter((item) => String(item.status || "").toLowerCase() === "won");
     leadsByClient[client.id] = {
       locationId: location.id,
@@ -1168,6 +1195,17 @@ async function syncGoHighLevelAgency(context: TenantContext, agencyKey: string):
     };
   }
 
+  // All lead pulls failing means the token itself is under-scoped -- surface that as a sync
+  // failure instead of writing a snapshot full of misleading zeros.
+  if (pairsToFetch.length && !Object.keys(leadsByClient).length) {
+    const scopeProblem = fetchErrors.some((message) => message.toLowerCase().includes("scope"));
+    throw new Error(
+      scopeProblem
+        ? "GoHighLevel agency token is missing scopes: enable 'View Contacts' (contacts.readonly) and 'View Opportunities' (opportunities.readonly) on the private integration, then re-sync."
+        : `GoHighLevel lead pulls failed for every matched location -- first error: ${fetchErrors[0] || "unknown"}`,
+    );
+  }
+
   const counts = createEmptyCounts();
   counts.fetched = locations.length;
   counts.created = Object.keys(leadsByClient).length;
@@ -1176,7 +1214,7 @@ async function syncGoHighLevelAgency(context: TenantContext, agencyKey: string):
     summary: `${formatSummaryCount("agency location", locations.length)} listed, ${formatSummaryCount(
       "location",
       matchedPairs.length,
-    )} matched to MTOS clients, lead data pulled for ${Object.keys(leadsByClient).length}`,
+    )} matched to MTOS clients, lead data pulled for ${Object.keys(leadsByClient).length}${fetchErrors.length ? ` (${fetchErrors.length} failed)` : ""}`,
     counts,
     snapshotPayload: {
       mode: "agency",

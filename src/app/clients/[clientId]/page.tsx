@@ -90,7 +90,7 @@ export default async function ClientWorkspacePage({
               </div>
               <Link
                 href={`/monthly-touch/${touch.id}`}
-                className="inline-flex items-center gap-2 rounded-full border border-white/12 bg-white px-4 py-3 text-sm font-semibold text-[#0c1524] transition hover:bg-[#d7f5ec]"
+                className="inline-flex items-center gap-2 rounded-full border border-white/12 bg-white px-4 py-3 text-sm font-semibold text-[#0d1625] transition hover:bg-[#d7f5ec]"
               >
                 Open monthly touch workspace
                 <ArrowRight className="h-4 w-4" />

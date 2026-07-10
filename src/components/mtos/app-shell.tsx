@@ -52,7 +52,7 @@ export async function AppShell({ title, subtitle, children }: AppShellProps) {
                       <Link
                         key={alert.label}
                         href={alert.href}
-                        className="rounded-2xl border border-white/8 bg-[#d7f5ec] px-3 py-2 text-sm font-medium text-[#223554] transition hover:bg-white"
+                        className="rounded-2xl border border-white/8 bg-[#d7f5ec] px-3 py-2 text-sm font-medium text-[#0d1625] transition hover:bg-white"
                       >
                         {alert.label}
                       </Link>

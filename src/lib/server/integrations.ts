@@ -331,6 +331,8 @@ const providerDefinitions: ProviderDefinition[] = [
         "opportunities.readonly",
         "opportunities.write",
         "locations.readonly",
+        "oauth.readonly",
+        "oauth.write",
       ],
       clientIdEnv: "GOHIGHLEVEL_CLIENT_ID",
       clientSecretEnv: "GOHIGHLEVEL_CLIENT_SECRET",
@@ -1353,6 +1355,9 @@ export async function completeOAuthConnection(
   const realmId = callbackUrl.searchParams.get("realmId") || undefined;
   const workspaceId = callbackUrl.searchParams.get("workspace_id") || undefined;
   const locationId = getStringFromPayload(payload, ["locationId", "location_id"]) || undefined;
+  const companyId = getStringFromPayload(payload, ["companyId", "company_id"]) || undefined;
+  const userType = getStringFromPayload(payload, ["userType", "user_type"]) || undefined;
+  const isAgencyInstall = (userType || "").toLowerCase() === "company";
 
   const record = buildStoredRecord(
     provider,
@@ -1363,13 +1368,17 @@ export async function completeOAuthConnection(
     },
     {
       status: "connected",
-      displayLabel: realmId || workspaceId || locationId || "Authorized account",
-      externalAccountId: realmId || workspaceId || locationId,
+      displayLabel: isAgencyInstall
+        ? `Agency ${companyId || ""}`.trim()
+        : realmId || workspaceId || locationId || "Authorized account",
+      externalAccountId: realmId || workspaceId || (isAgencyInstall ? companyId : locationId),
       scopes: provider.oauth.scopes,
       metadata: {
         ...(realmId ? { realmId } : {}),
         ...(workspaceId ? { workspaceId } : {}),
         ...(locationId ? { locationId } : {}),
+        ...(companyId ? { companyId } : {}),
+        ...(userType ? { userType } : {}),
       },
       lastValidatedAt: now,
       lastRefreshAt: now,
@@ -1381,6 +1390,8 @@ export async function completeOAuthConnection(
       accessToken,
       refreshToken,
       ...(locationId ? { locationId } : {}),
+      ...(companyId ? { companyId } : {}),
+      ...(userType ? { userType } : {}),
     },
   );
 

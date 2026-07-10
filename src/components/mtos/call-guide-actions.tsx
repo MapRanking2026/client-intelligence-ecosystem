@@ -61,7 +61,7 @@ export function CallGuideActions({ touchId, callGuide }: CallGuideActionsProps) 
           type="button"
           onClick={generate}
           disabled={isPending}
-          className="inline-flex items-center gap-2 rounded-full border border-[#d7f5ec]/20 bg-[#d7f5ec] px-4 py-2 text-sm font-semibold text-[#0c1524] transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-60"
+          className="inline-flex items-center gap-2 rounded-full border border-[#d7f5ec]/20 bg-[#d7f5ec] px-4 py-2 text-sm font-semibold text-[#0d1625] transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-60"
         >
           {isPending ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
           {callGuide?.status === "generated" ? "Regenerate guide" : "Generate call guide"}

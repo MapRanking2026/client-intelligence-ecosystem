@@ -64,7 +64,7 @@ export function SidebarNav() {
                 className={cn(
                   "flex items-center gap-3 rounded-2xl px-4 py-3 text-sm transition-all",
                   active
-                    ? "bg-white text-[#0c1524] shadow-lg shadow-white/10"
+                    ? "bg-white text-[#0d1625] shadow-lg shadow-white/10"
                     : "text-slate-300 hover:bg-white/7 hover:text-white",
                 )}
               >

@@ -1079,12 +1079,15 @@ async function syncRotatingTokenProvider(
 interface GhlAgencyLocation {
   id: string;
   name: string;
+  companyId?: string;
   apiKey?: string;
 }
 
-async function listGhlAgencyLocations(agencyKey: string): Promise<GhlAgencyLocation[]> {
-  if (agencyKey.startsWith("pit-")) {
-    // v2 private integration token created at the agency level
+type GhlAgencyMode = "v2" | "v1";
+
+async function listGhlAgencyLocations(agencyKey: string, mode: GhlAgencyMode): Promise<GhlAgencyLocation[]> {
+  if (mode === "v2") {
+    // v2 agency credential: private integration token or company-level OAuth token
     const payload = await fetchJson("https://services.leadconnectorhq.com/locations/search?limit=500", {
       headers: { ...getBearerHeaders(agencyKey), Version: "2021-07-28" },
     });
@@ -1092,6 +1095,7 @@ async function listGhlAgencyLocations(agencyKey: string): Promise<GhlAgencyLocat
     return locations.map((location) => ({
       id: String(location.id || location._id || ""),
       name: String(location.name || ""),
+      companyId: typeof location.companyId === "string" ? location.companyId : undefined,
     }));
   }
 
@@ -1113,24 +1117,59 @@ interface GhlLeadCounts {
   errorMessage?: string;
 }
 
-async function fetchGhlLocationLeadCounts(agencyKey: string, location: GhlAgencyLocation): Promise<GhlLeadCounts> {
-  if (agencyKey.startsWith("pit-")) {
-    const headers = { ...getBearerHeaders(agencyKey), Version: "2021-07-28" };
-    try {
-      const contactsPayload = await fetchJson(
-        `https://services.leadconnectorhq.com/contacts/?locationId=${encodeURIComponent(location.id)}&limit=100`,
-        { headers },
-      );
-      const opportunitiesPayload = await fetchJson(
-        `https://services.leadconnectorhq.com/opportunities/search?location_id=${encodeURIComponent(location.id)}&limit=100`,
-        { headers },
-      ).catch(() => ({}) as JsonRecord);
+async function mintGhlLocationToken(agencyKey: string, location: GhlAgencyLocation) {
+  if (!location.companyId) {
+    return null;
+  }
 
-      const contacts = Array.isArray(contactsPayload.contacts) ? (contactsPayload.contacts as JsonRecord[]) : [];
-      const opportunities = Array.isArray(opportunitiesPayload.opportunities)
-        ? (opportunitiesPayload.opportunities as JsonRecord[])
-        : [];
-      return { contacts, opportunities };
+  const response = await fetch("https://services.leadconnectorhq.com/oauth/locationToken", {
+    method: "POST",
+    headers: {
+      ...getBearerHeaders(agencyKey),
+      Version: "2021-07-28",
+      "content-type": "application/x-www-form-urlencoded",
+    },
+    body: new URLSearchParams({ companyId: location.companyId, locationId: location.id }).toString(),
+  });
+  const payload = (await response.json().catch(() => ({}))) as JsonRecord;
+  if (!response.ok) {
+    return null;
+  }
+  return typeof payload.access_token === "string" ? payload.access_token : null;
+}
+
+async function fetchGhlLeadCountsWithToken(token: string, locationId: string): Promise<GhlLeadCounts> {
+  const headers = { ...getBearerHeaders(token), Version: "2021-07-28" };
+  const contactsPayload = await fetchJson(
+    `https://services.leadconnectorhq.com/contacts/?locationId=${encodeURIComponent(locationId)}&limit=100`,
+    { headers },
+  );
+  const opportunitiesPayload = await fetchJson(
+    `https://services.leadconnectorhq.com/opportunities/search?location_id=${encodeURIComponent(locationId)}&limit=100`,
+    { headers },
+  ).catch(() => ({}) as JsonRecord);
+
+  const contacts = Array.isArray(contactsPayload.contacts) ? (contactsPayload.contacts as JsonRecord[]) : [];
+  const opportunities = Array.isArray(opportunitiesPayload.opportunities)
+    ? (opportunitiesPayload.opportunities as JsonRecord[])
+    : [];
+  return { contacts, opportunities };
+}
+
+async function fetchGhlLocationLeadCounts(
+  agencyKey: string,
+  location: GhlAgencyLocation,
+  mode: GhlAgencyMode,
+): Promise<GhlLeadCounts> {
+  if (mode === "v2") {
+    try {
+      // GHL's intended agency flow: mint a short-lived location token, then read location data.
+      const locationToken = await mintGhlLocationToken(agencyKey, location);
+      if (locationToken) {
+        return await fetchGhlLeadCountsWithToken(locationToken, location.id);
+      }
+      // Fall back to calling directly with the agency token (works if GHL ever allows it).
+      return await fetchGhlLeadCountsWithToken(agencyKey, location.id);
     } catch (error) {
       return {
         contacts: [],
@@ -1158,15 +1197,23 @@ async function fetchGhlLocationLeadCounts(agencyKey: string, location: GhlAgency
   }
 }
 
-async function syncGoHighLevelAgency(context: TenantContext, agencyKey: string): Promise<SyncExecutionResult> {
-  const locations = await listGhlAgencyLocations(agencyKey);
+async function syncGoHighLevelAgency(
+  context: TenantContext,
+  agencyKey: string,
+  mode: GhlAgencyMode,
+  fallbackCompanyId?: string,
+): Promise<SyncExecutionResult> {
+  const locations = await listGhlAgencyLocations(agencyKey, mode);
   const clients = await listFirestoreClients(context.tenantId);
 
   const matchedPairs: Array<{ client: ClientRecord; location: GhlAgencyLocation }> = [];
   for (const client of clients) {
     const match = locations.find((location) => namesLikelyMatch(client.name, location.name));
     if (match) {
-      matchedPairs.push({ client, location: match });
+      matchedPairs.push({
+        client,
+        location: { ...match, companyId: match.companyId || fallbackCompanyId },
+      });
     }
   }
 
@@ -1175,7 +1222,7 @@ async function syncGoHighLevelAgency(context: TenantContext, agencyKey: string):
   // Cap per-sync work; a nightly sync cycles through the rest.
   const pairsToFetch = matchedPairs.slice(0, 40);
   for (const { client, location } of pairsToFetch) {
-    const { contacts, opportunities, errorMessage } = await fetchGhlLocationLeadCounts(agencyKey, location);
+    const { contacts, opportunities, errorMessage } = await fetchGhlLocationLeadCounts(agencyKey, location, mode);
     if (errorMessage) {
       fetchErrors.push(errorMessage);
       continue;
@@ -1201,7 +1248,7 @@ async function syncGoHighLevelAgency(context: TenantContext, agencyKey: string):
     const scopeProblem = fetchErrors.some((message) => message.toLowerCase().includes("scope"));
     throw new Error(
       scopeProblem
-        ? "GoHighLevel agency token is missing scopes: enable 'View Contacts' (contacts.readonly) and 'View Opportunities' (opportunities.readonly) on the private integration, then re-sync."
+        ? "GoHighLevel agency credential is missing scopes: it needs 'oauth.write' (Location Tokens) plus 'contacts.readonly' and 'opportunities.readonly'. Update the marketplace app scopes / private integration, reconnect, then re-sync."
         : `GoHighLevel lead pulls failed for every matched location -- first error: ${fetchErrors[0] || "unknown"}`,
     );
   }
@@ -1224,20 +1271,46 @@ async function syncGoHighLevelAgency(context: TenantContext, agencyKey: string):
   } satisfies SyncExecutionResult;
 }
 
-async function syncGoHighLevel(context: TenantContext, record: IntegrationConnectionRecord, origin?: string) {
-  const agencyKey = getServerEnv().gohighlevelAgencyApiKey;
-  if (agencyKey) {
-    return syncGoHighLevelAgency(context, agencyKey);
+function decodeJwtPayload(token: string): JsonRecord {
+  try {
+    const segments = token.split(".");
+    if (segments.length < 2) {
+      return {};
+    }
+    return JSON.parse(Buffer.from(segments[1], "base64").toString("utf8")) as JsonRecord;
+  } catch {
+    return {};
   }
+}
 
+async function syncGoHighLevel(context: TenantContext, record: IntegrationConnectionRecord, origin?: string) {
   const refreshedRecord = await maybeRefreshConnection(context, record, origin);
   const credentials = getIntegrationCredentials(refreshedRecord);
   const accessToken = credentials.accessToken;
-  const locationId = credentials.locationId || refreshedRecord.externalAccountId;
 
   if (!accessToken) {
     throw new Error("GoHighLevel access token is missing");
   }
+
+  // An agency-level OAuth install ("Company" auth class) can enumerate every sub-account and
+  // mint location tokens, so it is the preferred agency path -- even over an env agency key.
+  const tokenPayload = decodeJwtPayload(accessToken);
+  const isCompanyToken =
+    String(credentials.userType || "").toLowerCase() === "company" ||
+    String(tokenPayload.authClass || "").toLowerCase() === "company";
+  if (isCompanyToken) {
+    const companyId =
+      credentials.companyId ||
+      (typeof tokenPayload.authClassId === "string" ? tokenPayload.authClassId : undefined);
+    return syncGoHighLevelAgency(context, accessToken, "v2", companyId);
+  }
+
+  const agencyKey = getServerEnv().gohighlevelAgencyApiKey;
+  if (agencyKey) {
+    return syncGoHighLevelAgency(context, agencyKey, agencyKey.startsWith("pit-") ? "v2" : "v1");
+  }
+
+  const locationId = credentials.locationId || refreshedRecord.externalAccountId;
   if (!locationId) {
     throw new Error("GoHighLevel sub-account is missing -- reconnect and select a location");
   }

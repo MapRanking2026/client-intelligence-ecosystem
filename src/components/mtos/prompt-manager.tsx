@@ -345,7 +345,7 @@ export function PromptManager() {
         <button
           type="button"
           onClick={addPhase}
-          className="rounded-2xl bg-[#d7f5ec] px-4 py-2 text-sm font-semibold text-[#0c1524]"
+          className="rounded-2xl bg-[#d7f5ec] px-4 py-2 text-sm font-semibold text-[#0d1625]"
         >
           Add stage
         </button>
@@ -355,7 +355,7 @@ export function PromptManager() {
         <button
           onClick={save}
           disabled={saving}
-          className="rounded-2xl bg-[#d7f5ec] px-4 py-2 text-sm font-semibold text-[#0c1524]"
+          className="rounded-2xl bg-[#d7f5ec] px-4 py-2 text-sm font-semibold text-[#0d1625]"
         >
           {saving ? "Saving…" : "Save prompts"}
         </button>

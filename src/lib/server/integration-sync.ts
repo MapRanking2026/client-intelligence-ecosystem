@@ -1112,9 +1112,26 @@ async function listGhlAgencyLocations(agencyKey: string, mode: GhlAgencyMode): P
 }
 
 interface GhlLeadCounts {
-  contacts: JsonRecord[];
-  opportunities: JsonRecord[];
+  newLeads30d: number | null;
+  totalContacts: number | null;
+  pipelineOpportunities: number | null;
+  bookedJobsWon: number | null;
+  sampleContacts: JsonRecord[];
   errorMessage?: string;
+}
+
+const emptyGhlLeadCounts = (errorMessage?: string): GhlLeadCounts => ({
+  newLeads30d: null,
+  totalContacts: null,
+  pipelineOpportunities: null,
+  bookedJobsWon: null,
+  sampleContacts: [],
+  errorMessage,
+});
+
+function readGhlMetaTotal(payload: JsonRecord) {
+  const meta = (payload.meta || {}) as JsonRecord;
+  return typeof meta.total === "number" ? meta.total : null;
 }
 
 async function mintGhlLocationToken(agencyKey: string, location: GhlAgencyLocation) {
@@ -1140,20 +1157,44 @@ async function mintGhlLocationToken(agencyKey: string, location: GhlAgencyLocati
 
 async function fetchGhlLeadCountsWithToken(token: string, locationId: string): Promise<GhlLeadCounts> {
   const headers = { ...getBearerHeaders(token), Version: "2021-07-28" };
+  const encodedLocation = encodeURIComponent(locationId);
+
+  // One small page gives both the true all-time total (meta.total) and a contact sample.
   const contactsPayload = await fetchJson(
-    `https://services.leadconnectorhq.com/contacts/?locationId=${encodeURIComponent(locationId)}&limit=100`,
+    `https://services.leadconnectorhq.com/contacts/?locationId=${encodedLocation}&limit=5`,
     { headers },
   );
+  const sampleContacts = Array.isArray(contactsPayload.contacts) ? (contactsPayload.contacts as JsonRecord[]) : [];
+  const totalContacts = readGhlMetaTotal(contactsPayload);
+
+  const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString();
+  const searchPayload = await fetchJson("https://services.leadconnectorhq.com/contacts/search", {
+    method: "POST",
+    headers: { ...headers, "content-type": "application/json" },
+    body: JSON.stringify({
+      locationId,
+      pageLimit: 1,
+      filters: [{ field: "dateAdded", operator: "range", value: { gte: thirtyDaysAgo } }],
+    }),
+  }).catch(() => ({}) as JsonRecord);
+  const newLeads30d = typeof searchPayload.total === "number" ? searchPayload.total : null;
+
   const opportunitiesPayload = await fetchJson(
-    `https://services.leadconnectorhq.com/opportunities/search?location_id=${encodeURIComponent(locationId)}&limit=100`,
+    `https://services.leadconnectorhq.com/opportunities/search?location_id=${encodedLocation}&limit=1`,
+    { headers },
+  ).catch(() => ({}) as JsonRecord);
+  const wonPayload = await fetchJson(
+    `https://services.leadconnectorhq.com/opportunities/search?location_id=${encodedLocation}&status=won&limit=1`,
     { headers },
   ).catch(() => ({}) as JsonRecord);
 
-  const contacts = Array.isArray(contactsPayload.contacts) ? (contactsPayload.contacts as JsonRecord[]) : [];
-  const opportunities = Array.isArray(opportunitiesPayload.opportunities)
-    ? (opportunitiesPayload.opportunities as JsonRecord[])
-    : [];
-  return { contacts, opportunities };
+  return {
+    newLeads30d,
+    totalContacts,
+    pipelineOpportunities: readGhlMetaTotal(opportunitiesPayload),
+    bookedJobsWon: readGhlMetaTotal(wonPayload),
+    sampleContacts,
+  };
 }
 
 async function fetchGhlLocationLeadCounts(
@@ -1171,29 +1212,27 @@ async function fetchGhlLocationLeadCounts(
       // Fall back to calling directly with the agency token (works if GHL ever allows it).
       return await fetchGhlLeadCountsWithToken(agencyKey, location.id);
     } catch (error) {
-      return {
-        contacts: [],
-        opportunities: [],
-        errorMessage: error instanceof Error ? error.message : "GoHighLevel contact fetch failed",
-      };
+      return emptyGhlLeadCounts(error instanceof Error ? error.message : "GoHighLevel contact fetch failed");
     }
   }
 
   // v1: each location record carries its own API key for location-scoped endpoints
   if (!location.apiKey) {
-    return { contacts: [], opportunities: [], errorMessage: "No v1 location API key available" };
+    return emptyGhlLeadCounts("No v1 location API key available");
   }
   const headers = getBearerHeaders(location.apiKey);
   try {
     const contactsPayload = await fetchJson("https://rest.gohighlevel.com/v1/contacts/?limit=100", { headers });
     const contacts = Array.isArray(contactsPayload.contacts) ? (contactsPayload.contacts as JsonRecord[]) : [];
-    return { contacts, opportunities: [] };
-  } catch (error) {
     return {
-      contacts: [],
-      opportunities: [],
-      errorMessage: error instanceof Error ? error.message : "GoHighLevel contact fetch failed",
+      newLeads30d: null,
+      totalContacts: contacts.length,
+      pipelineOpportunities: null,
+      bookedJobsWon: null,
+      sampleContacts: contacts.slice(0, 5),
     };
+  } catch (error) {
+    return emptyGhlLeadCounts(error instanceof Error ? error.message : "GoHighLevel contact fetch failed");
   }
 }
 
@@ -1222,19 +1261,19 @@ async function syncGoHighLevelAgency(
   // Cap per-sync work; a nightly sync cycles through the rest.
   const pairsToFetch = matchedPairs.slice(0, 40);
   for (const { client, location } of pairsToFetch) {
-    const { contacts, opportunities, errorMessage } = await fetchGhlLocationLeadCounts(agencyKey, location, mode);
-    if (errorMessage) {
-      fetchErrors.push(errorMessage);
+    const counts = await fetchGhlLocationLeadCounts(agencyKey, location, mode);
+    if (counts.errorMessage) {
+      fetchErrors.push(counts.errorMessage);
       continue;
     }
-    const wonOpportunities = opportunities.filter((item) => String(item.status || "").toLowerCase() === "won");
     leadsByClient[client.id] = {
       locationId: location.id,
       locationName: location.name,
-      totalLeads: contacts.length,
-      qualifiedLeads: opportunities.length,
-      bookedJobs: wonOpportunities.length,
-      sampleContacts: contacts.slice(0, 5).map((contact) => ({
+      totalLeads: counts.newLeads30d,
+      totalLeadsAllTime: counts.totalContacts,
+      qualifiedLeads: counts.pipelineOpportunities,
+      bookedJobs: counts.bookedJobsWon,
+      sampleContacts: counts.sampleContacts.map((contact) => ({
         id: contact.id,
         source: contact.source || "unknown",
         dateAdded: contact.dateAdded,

@@ -375,10 +375,6 @@ function buildBusinessScorecard(
   const totalLeads = crm && typeof crm.totalLeads === "number" ? crm.totalLeads : null;
   const qualifiedLeads = crm && typeof crm.qualifiedLeads === "number" ? crm.qualifiedLeads : null;
   const bookedJobs = crm && typeof crm.bookedJobs === "number" ? crm.bookedJobs : null;
-  const sampleContacts = Array.isArray(crm?.sampleContacts) ? (crm!.sampleContacts as JsonRecord[]) : [];
-  const formSubmissions = sampleContacts.length
-    ? sampleContacts.filter((contact) => String(contact.source || "").toLowerCase().includes("form")).length
-    : null;
 
   const gbpTotals = gbpPerformance.reduce(
     (acc, row) => ({
@@ -389,8 +385,8 @@ function buildBusinessScorecard(
   );
 
   return {
-    totalLeads: metric("Total leads", totalLeads, null, "GoHighLevel"),
-    qualifiedLeads: metric("Qualified leads", qualifiedLeads, null, "GoHighLevel"),
+    totalLeads: metric("New leads (last 30 days)", totalLeads, null, "GoHighLevel contacts"),
+    qualifiedLeads: metric("Pipeline opportunities (all time)", qualifiedLeads, null, "GoHighLevel opportunities"),
     costPerLead: metric("Cost per lead", null, null, "Requires Google Ads / Meta Ads sync", "currency"),
     callsAnswered: metric(
       "GBP call clicks",
@@ -399,8 +395,8 @@ function buildBusinessScorecard(
       "Google Business Profile performance",
     ),
     callsMissed: metric("Calls missed", null, null, "Requires CRM call-tracking data"),
-    formSubmissions: metric("Form submissions", formSubmissions, null, "GoHighLevel contact source"),
-    bookedJobs: metric("Booked jobs", bookedJobs, null, "GoHighLevel won opportunities"),
+    formSubmissions: metric("Form submissions", null, null, "Requires per-source contact breakdown"),
+    bookedJobs: metric("Booked jobs (won, all time)", bookedJobs, null, "GoHighLevel won opportunities"),
     shareOfLocalVoice: metric(
       "Market Share (avg across keywords)",
       averageAcrossKeywords(keywordHistory, (scan) => scan.marketSharePercent, "latest"),
@@ -712,7 +708,7 @@ function buildExecutiveBrief(
   ].join(" ");
 
   const scorecardParagraph = scorecard.totalLeads.availability === "available"
-    ? `On the business scorecard: ${scorecard.totalLeads.value} total leads and ${scorecard.qualifiedLeads.value ?? "an unassessed number of"} qualified leads this cycle${scorecard.bookedJobs.availability === "available" ? `, converting to ${scorecard.bookedJobs.value} booked job${scorecard.bookedJobs.value === 1 ? "" : "s"}` : ""}. ${scorecard.callsAnswered.availability === "available" ? `GBP call clicks stand at ${scorecard.callsAnswered.value} (previous period ${scorecard.callsAnswered.previousValue ?? "n/a"}).` : "Call answer/miss data is not connected yet, so phone handling must be assessed live with the client."}`
+    ? `On the business scorecard: ${scorecard.totalLeads.value} new lead${scorecard.totalLeads.value === 1 ? "" : "s"} came in over the last 30 days${scorecard.qualifiedLeads.availability === "available" ? `; the all-time pipeline holds ${scorecard.qualifiedLeads.value} opportunities` : ""}${scorecard.bookedJobs.availability === "available" ? ` with ${scorecard.bookedJobs.value} booked (won) job${scorecard.bookedJobs.value === 1 ? "" : "s"}` : ""}. ${scorecard.callsAnswered.availability === "available" ? `GBP call clicks stand at ${scorecard.callsAnswered.value} (previous period ${scorecard.callsAnswered.previousValue ?? "n/a"}).` : "Call answer/miss data is not connected yet, so phone handling must be assessed live with the client."}`
     : "The business scorecard has no CRM data connected yet -- lead volume, qualified leads, and booked jobs must be gathered live using the lead-quality questions in this pack, per the sales-structure conversation in the SOP.";
 
   const matchedBusiness = seoPerformance.matchedBusinesses[0];

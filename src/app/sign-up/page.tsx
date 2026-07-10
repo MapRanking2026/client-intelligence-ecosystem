@@ -164,6 +164,7 @@ function SignUpContent() {
             <button
               type="submit"
               disabled={isPending}
+              style={{ color: "#0d1625" }}
               className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-[#d7f5ec] px-4 py-3 text-sm font-semibold text-[#0d1625] transition hover:opacity-90 disabled:opacity-60"
             >
               {isPending ? "Creating account..." : "Create account"}
@@ -171,6 +172,7 @@ function SignUpContent() {
 
             <Link
               href={requestedNextPath ? `/sign-in?next=${encodeURIComponent(requestedNextPath)}` : "/sign-in"}
+              style={{ color: "#0d1625" }}
               className="inline-flex w-full items-center justify-center rounded-2xl border border-white/12 bg-white px-4 py-3 text-sm font-semibold text-[#0d1625] transition hover:bg-[#d7f5ec]"
             >
               Back to sign in

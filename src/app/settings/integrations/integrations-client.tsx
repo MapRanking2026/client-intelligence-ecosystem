@@ -535,6 +535,7 @@ export function IntegrationsClient({
                           type="button"
                           disabled={!provider.isConfigured || primaryBusy}
                           onClick={() => handleOAuthConnect(provider)}
+                          style={{ color: "#0d1625" }}
                           className="inline-flex items-center gap-2 rounded-2xl bg-[#d7f5ec] px-4 py-3 text-sm font-semibold text-[#0d1625] transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
                         >
                           {primaryBusy ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
@@ -545,6 +546,7 @@ export function IntegrationsClient({
                           type="button"
                           disabled={primaryBusy}
                           onClick={() => openCredentialModal(provider)}
+                          style={{ color: "#0d1625" }}
                           className="inline-flex items-center gap-2 rounded-2xl bg-[#d7f5ec] px-4 py-3 text-sm font-semibold text-[#0d1625] transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
                         >
                           {primaryBusy ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <DatabaseZap className="h-4 w-4" />}
@@ -557,6 +559,7 @@ export function IntegrationsClient({
                           type="button"
                           disabled={!provider.isConnected || activeAction === `refresh-${provider.id}`}
                           onClick={() => handleRefresh(provider)}
+                          style={{ color: "#0d1625" }}
                           className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-medium text-[#0d1625] transition hover:bg-white/8 disabled:cursor-not-allowed disabled:opacity-50"
                         >
                           {activeAction === `refresh-${provider.id}` ? (
@@ -573,6 +576,7 @@ export function IntegrationsClient({
                           type="button"
                           disabled={!provider.isConnected || activeAction === `sync-${provider.id}`}
                           onClick={() => handleSync(provider)}
+                          style={{ color: "#0d1625" }}
                           className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-medium text-[#0d1625] transition hover:bg-white/8 disabled:cursor-not-allowed disabled:opacity-50"
                         >
                           {activeAction === `sync-${provider.id}` ? (
@@ -588,6 +592,7 @@ export function IntegrationsClient({
                         type="button"
                         disabled={!provider.isConnected || activeAction === `disconnect-${provider.id}`}
                         onClick={() => handleDisconnect(provider)}
+                        style={{ color: "#0d1625" }}
                         className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-medium text-[#0d1625] transition hover:bg-white/8 disabled:cursor-not-allowed disabled:opacity-50"
                       >
                         {activeAction === `disconnect-${provider.id}` ? (
@@ -628,6 +633,7 @@ export function IntegrationsClient({
               <button
                 type="button"
                 onClick={closeCredentialModal}
+                style={{ color: "#0d1625" }}
                 className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-[#0d1625] transition hover:bg-white/8"
               >
                 Close
@@ -672,6 +678,7 @@ export function IntegrationsClient({
                 <button
                   type="button"
                   onClick={closeCredentialModal}
+                  style={{ color: "#0d1625" }}
                   className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-medium text-[#0d1625] transition hover:bg-white/8"
                 >
                   Cancel
@@ -680,6 +687,7 @@ export function IntegrationsClient({
                   type="button"
                   disabled={activeAction === `save-${selectedProvider.id}`}
                   onClick={handleCredentialSave}
+                  style={{ color: "#0d1625" }}
                   className="inline-flex items-center gap-2 rounded-2xl bg-[#d7f5ec] px-4 py-3 text-sm font-semibold text-[#0d1625] transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {activeAction === `save-${selectedProvider.id}` ? (

@@ -96,6 +96,7 @@ export function MonthlyTouchPrepActions({
           type="button"
           onClick={() => runPrepare("prepare")}
           disabled={isPending}
+          style={{ color: "#0d1625" }}
           className="inline-flex items-center gap-2 rounded-full border border-white/12 bg-white px-4 py-2 text-sm font-medium text-[#0d1625] transition hover:bg-[#d7f5ec] disabled:cursor-not-allowed disabled:opacity-60"
         >
           {isPending && activeAction === "prepare" ? (
@@ -109,6 +110,7 @@ export function MonthlyTouchPrepActions({
           type="button"
           onClick={() => runPrepare("prepare_and_generate")}
           disabled={isPending}
+          style={{ color: "#0d1625" }}
           className="inline-flex items-center gap-2 rounded-full border border-[#d7f5ec]/20 bg-[#d7f5ec] px-4 py-2 text-sm font-semibold text-[#0d1625] transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-60"
         >
           {isPending && activeAction === "prepare_and_generate" ? (

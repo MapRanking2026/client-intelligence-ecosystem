@@ -325,15 +325,11 @@ const providerDefinitions: ProviderDefinition[] = [
     oauth: {
       authUrl: "https://marketplace.gohighlevel.com/oauth/chooselocation",
       tokenUrl: "https://services.leadconnectorhq.com/oauth/token",
-      // Sub-account-target app installed agency-wide: the agency approves the location scopes in
-      // bulk, and oauth.write lets the resulting company token mint per-location tokens.
-      scopes: [
-        "contacts.readonly",
-        "opportunities.readonly",
-        "locations.readonly",
-        "oauth.readonly",
-        "oauth.write",
-      ],
+      // Agency install: GHL validates the requested scopes against the Company auth class, which
+      // rejects location-only scopes like contacts.readonly. Request only agency-compatible scopes;
+      // the location tokens minted via /oauth/locationToken inherit the app profile's location
+      // scopes (contacts.readonly, opportunities.readonly), so per-client lead data still flows.
+      scopes: ["locations.readonly", "oauth.readonly", "oauth.write"],
       clientIdEnv: "GOHIGHLEVEL_CLIENT_ID",
       clientSecretEnv: "GOHIGHLEVEL_CLIENT_SECRET",
       authUrlEnv: "GOHIGHLEVEL_AUTH_URL",

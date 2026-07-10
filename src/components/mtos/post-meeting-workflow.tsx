@@ -114,6 +114,7 @@ export function PostMeetingWorkflow({ touchId, postMeeting, qaReview }: PostMeet
             type="button"
             onClick={() => run("analyze_transcript", { action: "analyze_transcript", transcript })}
             disabled={isPending || transcript.trim().length < 40}
+            style={{ color: "#0d1625" }}
             className="mt-3 inline-flex items-center gap-2 rounded-full border border-[#d7f5ec]/20 bg-[#d7f5ec] px-4 py-2 text-sm font-semibold text-[#0d1625] transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-60"
           >
             {isPending && activeAction === "analyze_transcript" ? (
@@ -274,6 +275,7 @@ export function PostMeetingWorkflow({ touchId, postMeeting, qaReview }: PostMeet
                 })
               }
               disabled={isPending || (pendingTickets.length > 0 && Object.keys(ticketDecisions).length < (postMeeting.draftTickets || []).length)}
+              style={{ color: "#0d1625" }}
               className="inline-flex items-center gap-2 rounded-full border border-[#d7f5ec]/20 bg-[#d7f5ec] px-4 py-2 text-sm font-semibold text-[#0d1625] transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-60"
             >
               {isPending && activeAction === "apply_post_meeting_decisions" ? (
@@ -302,6 +304,7 @@ export function PostMeetingWorkflow({ touchId, postMeeting, qaReview }: PostMeet
               type="button"
               onClick={() => run("generate_qa_review", { action: "generate_qa_review" })}
               disabled={isPending}
+              style={{ color: "#0d1625" }}
               className="mt-3 inline-flex items-center gap-2 rounded-full border border-white/12 bg-white px-4 py-2 text-sm font-medium text-[#0d1625] transition hover:bg-[#d7f5ec] disabled:cursor-not-allowed disabled:opacity-60"
             >
               {isPending && activeAction === "generate_qa_review" ? (
@@ -367,6 +370,7 @@ export function PostMeetingWorkflow({ touchId, postMeeting, qaReview }: PostMeet
                         })
                       }
                       disabled={isPending}
+                      style={{ color: "#0d1625" }}
                       className="inline-flex items-center gap-2 rounded-full border border-white/12 bg-white px-4 py-2 text-sm font-medium text-[#0d1625] transition hover:bg-[#d7f5ec] disabled:cursor-not-allowed disabled:opacity-60"
                     >
                       Request changes

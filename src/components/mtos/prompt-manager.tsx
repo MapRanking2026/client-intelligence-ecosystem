@@ -221,6 +221,7 @@ export function PromptManager() {
                 <button
                   type="button"
                   onClick={() => addPrompt(phaseIndex)}
+                  style={{ color: "#0d1625" }}
                   className="rounded-2xl bg-white px-4 py-2 text-sm font-medium text-[#0d1625] hover:bg-[#d7f5ec]"
                 >
                   Add prompt
@@ -351,6 +352,7 @@ export function PromptManager() {
           <button
             type="button"
             onClick={addPhase}
+            style={{ color: "#0d1625" }}
             className="rounded-2xl bg-[#d7f5ec] px-4 py-2 text-sm font-semibold text-[#0d1625]"
           >
             Add stage
@@ -358,6 +360,7 @@ export function PromptManager() {
           <button
             onClick={save}
             disabled={saving}
+            style={{ color: "#0d1625" }}
             className="rounded-2xl bg-[#d7f5ec] px-4 py-2 text-sm font-semibold text-[#0d1625]"
           >
             {saving ? "Saving…" : "Save prompts"}

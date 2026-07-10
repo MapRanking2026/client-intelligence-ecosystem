@@ -169,15 +169,15 @@ export function PromptManager() {
 
   return (
     <div className="space-y-6">
-      <div className="text-sm text-slate-400">
+      <div className="rounded-[24px] border border-white/8 bg-black/20 px-4 py-4 text-sm leading-6 text-slate-300">
         Organize prompts by workflow stage, assign roles, and define execution routing. Use Gemini for simple tasks and Claude for difficult or reasoning-heavy tasks.
       </div>
 
-      <div className="grid gap-6 xl:grid-cols-[420px_minmax(0,1fr)]">
+      <div className="grid gap-6 xl:grid-cols-[470px_minmax(0,1fr)]">
         <div className="space-y-4 rounded-[28px] border border-white/8 bg-white/4 p-4">
           {prompts.length ? (
             prompts.map((phase, phaseIndex) => (
-              <section key={phase.phase} className="space-y-3 rounded-2xl border border-white/8 bg-black/20 p-4">
+              <section key={phase.phase} className="space-y-3 rounded-[26px] border border-white/8 bg-black/20 p-4">
                 <div className="flex items-center gap-2">
                   <input
                     value={phase.phase}
@@ -192,7 +192,7 @@ export function PromptManager() {
                     Remove
                   </button>
                 </div>
-                <div className="space-y-2">
+                <div className="space-y-2 max-h-[260px] overflow-y-auto pr-1">
                   {phase.prompts.length ? (
                     phase.prompts.map((prompt) => {
                       const active = selectedPromptRecord?.prompt.key === prompt.key;
@@ -235,88 +235,93 @@ export function PromptManager() {
         <div className="rounded-[28px] border border-white/8 bg-[linear-gradient(180deg,rgba(255,255,255,0.06),rgba(255,255,255,0.02))] p-5">
           {selectedPromptRecord ? (
             <div className="space-y-4">
-              <div className="grid gap-3 lg:grid-cols-[1fr_auto]">
-                <div className="space-y-2">
-                  <label className="block text-xs uppercase tracking-[0.2em] text-slate-400">Prompt title</label>
-                  <input
-                    value={selectedPromptRecord.prompt.title}
-                    onChange={(event) => updatePrompt(selectedPromptRecord.phaseIndex, selectedPromptRecord.promptIndex, { title: event.target.value })}
-                    className="w-full rounded-2xl border border-white/10 bg-black/15 px-3 py-2 text-sm text-slate-200 outline-none"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label className="block text-xs uppercase tracking-[0.2em] text-slate-400">Prompt key</label>
-                  <input
-                    value={selectedPromptRecord.prompt.key}
-                    onChange={(event) => updatePrompt(selectedPromptRecord.phaseIndex, selectedPromptRecord.promptIndex, { key: event.target.value })}
-                    className="w-full rounded-2xl border border-white/10 bg-black/15 px-3 py-2 text-sm text-slate-200 outline-none"
-                  />
-                </div>
-              </div>
-
-              <div className="grid gap-3 lg:grid-cols-2">
-                <div>
-                  <label className="block text-xs uppercase tracking-[0.2em] text-slate-400">Role</label>
-                  <select
-                    value={selectedPromptRecord.prompt.role}
-                    onChange={(event) => updatePrompt(selectedPromptRecord.phaseIndex, selectedPromptRecord.promptIndex, { role: event.target.value as PromptRole })}
-                    className="w-full rounded-2xl border border-white/10 bg-black/15 px-3 py-2 text-sm text-slate-200 outline-none"
-                  >
-                    {promptRoles.map((role) => (
-                      <option key={role} value={role}>
-                        {role}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs uppercase tracking-[0.2em] text-slate-400">Description</label>
-                  <input
-                    value={selectedPromptRecord.prompt.description ?? ""}
-                    onChange={(event) => updatePrompt(selectedPromptRecord.phaseIndex, selectedPromptRecord.promptIndex, { description: event.target.value })}
-                    className="w-full rounded-2xl border border-white/10 bg-black/15 px-3 py-2 text-sm text-slate-200 outline-none"
-                  />
+              <div className="rounded-[24px] border border-white/8 bg-black/20 p-4">
+                <div className="grid gap-3 lg:grid-cols-[1fr_auto]">
+                  <div className="space-y-2">
+                    <label className="block text-xs uppercase tracking-[0.2em] text-slate-400">Prompt title</label>
+                    <input
+                      value={selectedPromptRecord.prompt.title}
+                      onChange={(event) => updatePrompt(selectedPromptRecord.phaseIndex, selectedPromptRecord.promptIndex, { title: event.target.value })}
+                      className="w-full rounded-2xl border border-white/10 bg-black/15 px-3 py-2 text-sm text-slate-200 outline-none"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="block text-xs uppercase tracking-[0.2em] text-slate-400">Prompt key</label>
+                    <input
+                      value={selectedPromptRecord.prompt.key}
+                      onChange={(event) => updatePrompt(selectedPromptRecord.phaseIndex, selectedPromptRecord.promptIndex, { key: event.target.value })}
+                      className="w-full rounded-2xl border border-white/10 bg-black/15 px-3 py-2 text-sm text-slate-200 outline-none"
+                    />
+                  </div>
                 </div>
               </div>
 
-              <div className="grid gap-3 lg:grid-cols-2">
-                <div>
-                  <label className="block text-xs uppercase tracking-[0.2em] text-slate-400">Provider</label>
-                  <select
-                    value={selectedPromptRecord.prompt.provider ?? "gemini"}
-                    onChange={(event) => updatePrompt(selectedPromptRecord.phaseIndex, selectedPromptRecord.promptIndex, { provider: event.target.value as PromptProvider })}
-                    className="w-full rounded-2xl border border-white/10 bg-black/15 px-3 py-2 text-sm text-slate-200 outline-none"
-                  >
-                    {promptProviders.map((provider) => (
-                      <option key={provider} value={provider}>
-                        {provider}
-                      </option>
-                    ))}
-                  </select>
+              <div className="grid gap-4 xl:grid-cols-[0.78fr_minmax(0,1.22fr)]">
+                <div className="rounded-[24px] border border-white/8 bg-black/20 p-4">
+                  <div className="grid gap-3">
+                    <div>
+                      <label className="block text-xs uppercase tracking-[0.2em] text-slate-400">Role</label>
+                      <select
+                        value={selectedPromptRecord.prompt.role}
+                        onChange={(event) => updatePrompt(selectedPromptRecord.phaseIndex, selectedPromptRecord.promptIndex, { role: event.target.value as PromptRole })}
+                        className="w-full rounded-2xl border border-white/10 bg-black/15 px-3 py-2 text-sm text-slate-200 outline-none"
+                      >
+                        {promptRoles.map((role) => (
+                          <option key={role} value={role}>
+                            {role}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs uppercase tracking-[0.2em] text-slate-400">Provider</label>
+                      <select
+                        value={selectedPromptRecord.prompt.provider ?? "gemini"}
+                        onChange={(event) => updatePrompt(selectedPromptRecord.phaseIndex, selectedPromptRecord.promptIndex, { provider: event.target.value as PromptProvider })}
+                        className="w-full rounded-2xl border border-white/10 bg-black/15 px-3 py-2 text-sm text-slate-200 outline-none"
+                      >
+                        {promptProviders.map((provider) => (
+                          <option key={provider} value={provider}>
+                            {provider}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs uppercase tracking-[0.2em] text-slate-400">Difficulty</label>
+                      <select
+                        value={selectedPromptRecord.prompt.difficulty ?? "simple"}
+                        onChange={(event) => updatePrompt(selectedPromptRecord.phaseIndex, selectedPromptRecord.promptIndex, { difficulty: event.target.value as PromptTaskDifficulty })}
+                        className="w-full rounded-2xl border border-white/10 bg-black/15 px-3 py-2 text-sm text-slate-200 outline-none"
+                      >
+                        {promptDifficulties.map((difficulty) => (
+                          <option key={difficulty} value={difficulty}>
+                            {difficulty}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs uppercase tracking-[0.2em] text-slate-400">Description</label>
+                      <input
+                        value={selectedPromptRecord.prompt.description ?? ""}
+                        onChange={(event) => updatePrompt(selectedPromptRecord.phaseIndex, selectedPromptRecord.promptIndex, { description: event.target.value })}
+                        className="w-full rounded-2xl border border-white/10 bg-black/15 px-3 py-2 text-sm text-slate-200 outline-none"
+                      />
+                    </div>
+                  </div>
                 </div>
-                <div>
-                  <label className="block text-xs uppercase tracking-[0.2em] text-slate-400">Difficulty</label>
-                  <select
-                    value={selectedPromptRecord.prompt.difficulty ?? "simple"}
-                    onChange={(event) => updatePrompt(selectedPromptRecord.phaseIndex, selectedPromptRecord.promptIndex, { difficulty: event.target.value as PromptTaskDifficulty })}
-                    className="w-full rounded-2xl border border-white/10 bg-black/15 px-3 py-2 text-sm text-slate-200 outline-none"
-                  >
-                    {promptDifficulties.map((difficulty) => (
-                      <option key={difficulty} value={difficulty}>
-                        {difficulty}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
 
-              <div className="space-y-2">
-                <label className="block text-xs uppercase tracking-[0.2em] text-slate-400">Prompt text</label>
-                <textarea
-                  value={selectedPromptRecord.prompt.prompt}
-                  onChange={(event) => updatePrompt(selectedPromptRecord.phaseIndex, selectedPromptRecord.promptIndex, { prompt: event.target.value })}
-                  className="min-h-[560px] w-full rounded-2xl border border-white/10 bg-black/15 px-4 py-3 text-sm leading-6 text-slate-200 outline-none"
-                />
+                <div className="rounded-[24px] border border-white/8 bg-black/20 p-4">
+                  <div className="space-y-2">
+                    <label className="block text-xs uppercase tracking-[0.2em] text-slate-400">Prompt text</label>
+                    <textarea
+                      value={selectedPromptRecord.prompt.prompt}
+                      onChange={(event) => updatePrompt(selectedPromptRecord.phaseIndex, selectedPromptRecord.promptIndex, { prompt: event.target.value })}
+                      className="min-h-[560px] w-full rounded-2xl border border-white/10 bg-black/15 px-4 py-3 text-sm leading-6 text-slate-200 outline-none"
+                    />
+                  </div>
+                </div>
               </div>
 
               <div className="flex justify-end">
@@ -335,27 +340,36 @@ export function PromptManager() {
         </div>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
-        <input
-          value={newPhase}
-          onChange={(event) => setNewPhase(event.target.value)}
-          placeholder="New phase name"
-          className="rounded-2xl border border-white/10 bg-black/15 px-3 py-2 text-sm text-slate-200 outline-none"
-        />
-        <button
-          type="button"
-          onClick={addPhase}
-          className="rounded-2xl bg-[#d7f5ec] px-4 py-2 text-sm font-semibold text-[#0d1625]"
-        >
-          Add stage
-        </button>
+      <div className="rounded-[28px] border border-white/8 bg-black/20 p-4">
+        <div className="grid gap-3 sm:grid-cols-[1fr_auto_auto]">
+          <input
+            value={newPhase}
+            onChange={(event) => setNewPhase(event.target.value)}
+            placeholder="New phase name"
+            className="rounded-2xl border border-white/10 bg-black/15 px-3 py-2 text-sm text-slate-200 outline-none"
+          />
+          <button
+            type="button"
+            onClick={addPhase}
+            className="rounded-2xl bg-[#d7f5ec] px-4 py-2 text-sm font-semibold text-[#0d1625]"
+          >
+            Add stage
+          </button>
+          <button
+            onClick={save}
+            disabled={saving}
+            className="rounded-2xl bg-[#d7f5ec] px-4 py-2 text-sm font-semibold text-[#0d1625]"
+          >
+            {saving ? "Saving…" : "Save prompts"}
+          </button>
+        </div>
       </div>
 
       <div className="flex items-center gap-2">
         <button
           onClick={save}
           disabled={saving}
-          className="rounded-2xl bg-[#d7f5ec] px-4 py-2 text-sm font-semibold text-[#0d1625]"
+          className="hidden rounded-2xl bg-[#d7f5ec] px-4 py-2 text-sm font-semibold text-[#0d1625]"
         >
           {saving ? "Saving…" : "Save prompts"}
         </button>

@@ -16,14 +16,15 @@ import type {
   MonthlyTouchPrepPack,
   MonthlyTouchRecord,
   OpportunityRecord,
+  RankTrackerProfileEvidence,
   RecommendationItem,
   ScorecardMetric,
   SeoPerformancePack,
   StrategicActionStatus,
 } from "@/src/lib/mtos-data";
 import {
-  fetchHeatmapGrids,
-  fetchKeywordScanHistory,
+  fetchBusinessKeywordScanHistory,
+  fetchHeatmapComparisons,
   openDashboardSession,
 } from "@/src/lib/server/services/mapranking-dashboard";
 import { getMtosDataSource } from "@/src/lib/server/data/seed-mtos-data-source";
@@ -424,6 +425,7 @@ function buildBusinessScorecard(
 
 function buildSeoPerformance(
   matchedBusinesses: ReturnType<typeof extractMatchedBusinesses>,
+  profiles: RankTrackerProfileEvidence[],
   gbpPerformance: ReturnType<typeof extractGbpPerformanceRows>,
   keywordHistory: KeywordScanHistory[],
   heatmapGrids: HeatmapGrid[],
@@ -431,16 +433,24 @@ function buildSeoPerformance(
   clientName: string,
 ): SeoPerformancePack {
   const notes: string[] = [];
+  const inactiveProfiles = profiles.filter((profile) => profile.status === "inactive");
+  const activeProfiles = profiles.filter((profile) => profile.status === "active");
+
   if (!matchedBusinesses.length) {
     notes.push(
       `No Rank Tracker business record matched "${clientName}" -- confirm the business name in Rank Tracker matches this client exactly, or check for a typo/suffix mismatch.`,
     );
-  } else if (matchedBusinesses.length > 1) {
+  } else if (activeProfiles.length > 1) {
     notes.push(
-      `${matchedBusinesses.length} businesses named "${clientName}" were found in Rank Tracker -- verify each is actually a location for this client (a shared name can also mean two unrelated businesses).`,
+      `${activeProfiles.length} active profiles named "${clientName}" are tracked in Rank Tracker -- each is shown separately below with its own keyword scans and heatmap comparisons.`,
     );
   }
-  if (matchedBusinesses.length && !keywordHistory.length) {
+  for (const profile of inactiveProfiles) {
+    notes.push(
+      `Profile "${profile.business.businessName}" (${profile.business.address || "no address"}) appears SUSPENDED or invisible on Maps: ${profile.statusNote || "no reviews and no grid visibility."}`,
+    );
+  }
+  if (matchedBusinesses.length && !keywordHistory.length && !inactiveProfiles.length) {
     notes.push(
       "The matched Rank Tracker business has no completed keyword scans yet -- ask the SEO team to verify the scan schedule (scans should run 2 days before the touch).",
     );
@@ -457,6 +467,7 @@ function buildSeoPerformance(
   return {
     heatmaps: [],
     matchedBusinesses,
+    profiles,
     keywordScanHistory: keywordHistory,
     heatmapGrids,
     checkinBusinesses,
@@ -992,11 +1003,32 @@ async function generateClaudeTouchOutput(
   } satisfies ClaudeTouchOutput;
 }
 
+function isProfileInactive(
+  business: ReturnType<typeof extractMatchedBusinesses>[number],
+  keywordScans: KeywordScanHistory[],
+) {
+  const noReviewPresence = (business.rating ?? 0) === 0 && (business.reviews ?? 0) === 0;
+  const latestScans = keywordScans
+    .map((entry) => entry.scans[0])
+    .filter((scan): scan is KeywordScanHistory["scans"][number] => Boolean(scan));
+  const noMapPresence =
+    latestScans.length > 0 &&
+    latestScans.every(
+      (scan) => (scan.marketSharePercent ?? 0) === 0 && (scan.averageRank ?? 21) >= 20,
+    );
+
+  return noReviewPresence && (noMapPresence || !latestScans.length);
+}
+
 async function fetchLiveRankTrackerEvidence(
   context: TenantContext,
   matchedBusinesses: ReturnType<typeof extractMatchedBusinesses>,
 ) {
-  const empty = { keywordHistory: [] as KeywordScanHistory[], heatmapGrids: [] as HeatmapGrid[] };
+  const empty = {
+    profiles: [] as RankTrackerProfileEvidence[],
+    keywordHistory: [] as KeywordScanHistory[],
+    heatmapGrids: [] as HeatmapGrid[],
+  };
   if (!matchedBusinesses.length) {
     return empty;
   }
@@ -1007,15 +1039,43 @@ async function fetchLiveRankTrackerEvidence(
       return empty;
     }
 
-    const keywordHistory = await fetchKeywordScanHistory(
-      session,
-      matchedBusinesses.map((business) => ({
+    const profiles: RankTrackerProfileEvidence[] = [];
+    for (const business of matchedBusinesses.slice(0, 4)) {
+      const keywordScans = await fetchBusinessKeywordScanHistory(session, {
         businessId: business.businessId,
         businessName: business.businessName,
-      })),
-    );
-    const heatmapGrids = await fetchHeatmapGrids(session, keywordHistory);
-    return { keywordHistory, heatmapGrids };
+      });
+
+      if (isProfileInactive(business, keywordScans)) {
+        profiles.push({
+          business,
+          status: "inactive",
+          statusNote:
+            "No reviews and no visibility anywhere on the scan grid -- the profile appears suspended, unverified, or brand new. Verify its status in Google Business Profile before the call.",
+          keywordScans,
+          heatmapComparisons: [],
+        });
+        continue;
+      }
+
+      const heatmapComparisons = await fetchHeatmapComparisons(session, keywordScans);
+      profiles.push({
+        business,
+        status: "active",
+        keywordScans,
+        heatmapComparisons,
+      });
+    }
+
+    const activeProfiles = profiles.filter((profile) => profile.status === "active");
+    return {
+      profiles,
+      // Aggregates feed the scorecard and executive brief; only active profiles count.
+      keywordHistory: activeProfiles.flatMap((profile) => profile.keywordScans),
+      heatmapGrids: activeProfiles.flatMap((profile) =>
+        profile.heatmapComparisons.map((comparison) => comparison.current),
+      ),
+    };
   } catch (error) {
     console.warn(
       `Rank Tracker live evidence fetch failed: ${error instanceof Error ? error.message : "unknown error"}`,
@@ -1036,7 +1096,7 @@ async function buildPrepPack(
   const matchedBusinesses = extractMatchedBusinesses(rawSnapshots.get("rank-tracker"), client.id);
   const gbpPerformance = extractGbpPerformanceRows(rawSnapshots.get("google-business-profile"), client.id);
   const checkinBusinesses = extractCheckinBusinesses(rawSnapshots.get("map-checkins"), client.id);
-  const { keywordHistory, heatmapGrids } = await fetchLiveRankTrackerEvidence(context, matchedBusinesses);
+  const { profiles, keywordHistory, heatmapGrids } = await fetchLiveRankTrackerEvidence(context, matchedBusinesses);
 
   const businessScorecard = buildBusinessScorecard(
     rawSnapshots,
@@ -1047,6 +1107,7 @@ async function buildPrepPack(
   );
   const seoPerformance = buildSeoPerformance(
     matchedBusinesses,
+    profiles,
     gbpPerformance,
     keywordHistory,
     heatmapGrids,

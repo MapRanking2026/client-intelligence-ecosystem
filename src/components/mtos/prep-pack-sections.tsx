@@ -2,9 +2,11 @@ import type {
   AdsPerformancePack,
   BusinessScorecard,
   ClientParticipation,
+  HeatmapComparison,
   HeatmapGrid,
   IssueSolutionItem,
   KeywordScanHistory,
+  RankTrackerProfileEvidence,
   ScorecardMetric,
   SeoPerformancePack,
   StrategicActionStatus,
@@ -145,102 +147,226 @@ export function ScorecardGrid({ scorecard }: { scorecard: BusinessScorecard }) {
   );
 }
 
+function KeywordScanTable({ entries, showBusiness }: { entries: KeywordScanHistory[]; showBusiness?: boolean }) {
+  if (!entries.length) {
+    return null;
+  }
+
+  return (
+    <div className="overflow-x-auto rounded-2xl border border-white/8 bg-black/20">
+      <table className="w-full min-w-[560px] text-left text-sm">
+        <thead>
+          <tr className="border-b border-white/8 text-[11px] uppercase tracking-[0.2em] text-slate-400">
+            <th className="px-4 py-3 font-medium">Keyword</th>
+            <th className="px-4 py-3 font-medium">Avg rank</th>
+            <th className="px-4 py-3 font-medium">Top-3 pins</th>
+            <th className="px-4 py-3 font-medium">Market share</th>
+            <th className="px-4 py-3 font-medium">Trend</th>
+          </tr>
+        </thead>
+        <tbody>
+          {entries.map((entry) => {
+            const latest = entry.scans[0];
+            const previous = entry.scans[1];
+            const trend = scanTrendArrow(entry.scans);
+            return (
+              <tr key={`${entry.businessName}-${entry.keyword}`} className="border-b border-white/4 text-slate-200">
+                <td className="px-4 py-3">
+                  <span className="font-medium text-white">{entry.keyword}</span>
+                  {showBusiness ? <span className="ml-2 text-xs text-slate-500">{entry.businessName}</span> : null}
+                  {latest?.scanDate ? (
+                    <span className="ml-2 text-xs text-slate-500">scanned {formatScanDate(latest.scanDate)}</span>
+                  ) : null}
+                </td>
+                <td className="px-4 py-3">
+                  {latest?.averageRank ?? "n/a"}
+                  {previous?.averageRank != null ? (
+                    <span className="ml-1 text-xs text-slate-500">(was {previous.averageRank})</span>
+                  ) : null}
+                </td>
+                <td className="px-4 py-3">
+                  {latest?.top3Pins ?? "n/a"}
+                  {previous?.top3Pins != null ? (
+                    <span className="ml-1 text-xs text-slate-500">(was {previous.top3Pins})</span>
+                  ) : null}
+                </td>
+                <td className="px-4 py-3">
+                  {latest?.marketSharePercent != null ? `${latest.marketSharePercent}%` : "n/a"}
+                  {previous?.marketSharePercent != null ? (
+                    <span className="ml-1 text-xs text-slate-500">(was {previous.marketSharePercent}%)</span>
+                  ) : null}
+                </td>
+                <td className={`px-4 py-3 text-xs ${trend.color}`}>{trend.glyph}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function comparisonDelta(current: number | null, previous: number | null, lowerIsBetter = false) {
+  if (current === null || previous === null) {
+    return null;
+  }
+  const diff = Math.round((current - previous) * 10) / 10;
+  if (diff === 0) {
+    return { text: "flat", color: "text-slate-400" };
+  }
+  const improved = lowerIsBetter ? diff < 0 : diff > 0;
+  return {
+    text: `${diff > 0 ? "+" : ""}${diff}`,
+    color: improved ? "text-emerald-300" : "text-rose-300",
+  };
+}
+
+function HeatmapComparisonCard({ comparison }: { comparison: HeatmapComparison }) {
+  const { current, previous } = comparison;
+  const solvDelta = comparisonDelta(current.shareOfLocalVoicePercent, previous?.shareOfLocalVoicePercent ?? null);
+  const arpDelta = comparisonDelta(current.averageRankPosition, previous?.averageRankPosition ?? null, true);
+
+  return (
+    <div className="rounded-2xl border border-white/8 bg-white/4 p-3">
+      <p className="px-1 text-sm font-semibold text-white">{comparison.keyword}</p>
+      <div className={`mt-2 grid gap-2 ${previous ? "grid-cols-2" : "grid-cols-1"}`}>
+        {previous ? (
+          <div>
+            <HeatmapGridSvg grid={previous} />
+            <p className="mt-1 px-1 text-[11px] uppercase tracking-[0.18em] text-slate-500">
+              Previous -- {formatScanDate(previous.scanDate)}
+            </p>
+            <p className="px-1 text-xs text-slate-400">
+              ARP {previous.averageRankPosition ?? "n/a"} · SoLV {previous.shareOfLocalVoicePercent ?? "n/a"}%
+            </p>
+          </div>
+        ) : null}
+        <div>
+          <HeatmapGridSvg grid={current} />
+          <p className="mt-1 px-1 text-[11px] uppercase tracking-[0.18em] text-slate-400">
+            Current -- {formatScanDate(current.scanDate)}
+          </p>
+          <p className="px-1 text-xs text-slate-300">
+            ARP {current.averageRankPosition ?? "n/a"}
+            {arpDelta ? <span className={`ml-1 ${arpDelta.color}`}>({arpDelta.text})</span> : null}
+            {" · "}SoLV {current.shareOfLocalVoicePercent ?? "n/a"}%
+            {solvDelta ? <span className={`ml-1 ${solvDelta.color}`}>({solvDelta.text})</span> : null}
+          </p>
+        </div>
+      </div>
+      {!previous ? (
+        <p className="mt-1 px-1 text-[11px] text-slate-500">No earlier scan available for comparison yet.</p>
+      ) : null}
+      {current.topCompetitors.length ? (
+        <p className="mt-2 px-1 text-[11px] text-slate-500">
+          Top competitors: {current.topCompetitors.map((c) => `${c.name} (${c.rating ?? "n/a"}★, ${c.reviews ?? "n/a"} rev)`).join(" · ")}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+function ProfileEvidenceBlock({ profile }: { profile: RankTrackerProfileEvidence }) {
+  const { business } = profile;
+  return (
+    <div className="space-y-3 rounded-[24px] border border-white/8 bg-black/20 p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-sm font-semibold text-white">{business.businessName}</p>
+          <p className="mt-1 text-xs text-slate-400">{business.address || "Address not on file"}</p>
+        </div>
+        <div className="flex flex-wrap items-center gap-3 text-xs text-slate-300">
+          <span>{business.rating ?? "n/a"}★ rating</span>
+          <span>{business.reviews ?? "n/a"} reviews</span>
+          <span>{profile.keywordScans.length} keywords tracked</span>
+          <span className="rounded-full border border-emerald-400/25 bg-emerald-500/12 px-2 py-1 font-semibold uppercase tracking-[0.18em] text-emerald-200">
+            Active
+          </span>
+        </div>
+      </div>
+      <KeywordScanTable entries={profile.keywordScans} />
+      {profile.heatmapComparisons.length ? (
+        <div className="grid gap-3 xl:grid-cols-2">
+          {profile.heatmapComparisons.map((comparison) => (
+            <HeatmapComparisonCard key={`${comparison.keyword}-${comparison.current.scanDate}`} comparison={comparison} />
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export function SeoPerformancePanel({ seo }: { seo: SeoPerformancePack }) {
+  const profiles = seo.profiles || [];
+  const activeProfiles = profiles.filter((profile) => profile.status === "active");
+  const inactiveProfiles = profiles.filter((profile) => profile.status === "inactive");
+  const hasProfileView = profiles.length > 0;
+
   return (
     <div className="space-y-4">
-      {seo.matchedBusinesses.length ? (
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-          {seo.matchedBusinesses.map((business) => (
-            <div key={`${business.businessName}-${business.placeId}`} className="rounded-2xl border border-white/8 bg-white/4 p-4">
-              <p className="text-sm font-semibold text-white">{business.businessName}</p>
-              <p className="mt-1 text-xs text-slate-400">{business.address || "Address not on file"}</p>
-              <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-slate-300">
-                <span>{business.rating ?? "n/a"}★ rating</span>
-                <span>{business.reviews ?? "n/a"} reviews</span>
-                <span>{business.keywords.length} keywords tracked</span>
-              </div>
-            </div>
+      {inactiveProfiles.length ? (
+        <div className="space-y-2 rounded-[24px] border border-rose-400/15 bg-rose-500/8 p-4">
+          <p className="text-[11px] uppercase tracking-[0.24em] text-rose-200">Suspended / inactive profiles</p>
+          {inactiveProfiles.map((profile) => (
+            <p key={`${profile.business.businessName}-${profile.business.placeId}`} className="text-sm text-rose-100">
+              <span className="font-semibold">{profile.business.businessName}</span>
+              {profile.business.address ? ` — ${profile.business.address}` : ""}: {profile.statusNote}
+            </p>
           ))}
         </div>
       ) : null}
 
-      {seo.keywordScanHistory.length ? (
-        <div className="overflow-x-auto rounded-2xl border border-white/8 bg-black/20">
-          <table className="w-full min-w-[560px] text-left text-sm">
-            <thead>
-              <tr className="border-b border-white/8 text-[11px] uppercase tracking-[0.2em] text-slate-400">
-                <th className="px-4 py-3 font-medium">Keyword</th>
-                <th className="px-4 py-3 font-medium">Avg rank</th>
-                <th className="px-4 py-3 font-medium">Top-3 pins</th>
-                <th className="px-4 py-3 font-medium">Market share</th>
-                <th className="px-4 py-3 font-medium">Trend</th>
-              </tr>
-            </thead>
-            <tbody>
-              {seo.keywordScanHistory.map((entry) => {
-                const latest = entry.scans[0];
-                const previous = entry.scans[1];
-                const trend = scanTrendArrow(entry.scans);
-                return (
-                  <tr key={`${entry.businessName}-${entry.keyword}`} className="border-b border-white/4 text-slate-200">
-                    <td className="px-4 py-3">
-                      <span className="font-medium text-white">{entry.keyword}</span>
-                      {latest?.scanDate ? (
-                        <span className="ml-2 text-xs text-slate-500">scanned {formatScanDate(latest.scanDate)}</span>
-                      ) : null}
-                    </td>
-                    <td className="px-4 py-3">
-                      {latest?.averageRank ?? "n/a"}
-                      {previous?.averageRank != null ? (
-                        <span className="ml-1 text-xs text-slate-500">(was {previous.averageRank})</span>
-                      ) : null}
-                    </td>
-                    <td className="px-4 py-3">
-                      {latest?.top3Pins ?? "n/a"}
-                      {previous?.top3Pins != null ? (
-                        <span className="ml-1 text-xs text-slate-500">(was {previous.top3Pins})</span>
-                      ) : null}
-                    </td>
-                    <td className="px-4 py-3">
-                      {latest?.marketSharePercent != null ? `${latest.marketSharePercent}%` : "n/a"}
-                      {previous?.marketSharePercent != null ? (
-                        <span className="ml-1 text-xs text-slate-500">(was {previous.marketSharePercent}%)</span>
-                      ) : null}
-                    </td>
-                    <td className={`px-4 py-3 text-xs ${trend.color}`}>{trend.glyph}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      ) : null}
-
-      {seo.heatmapGrids.length ? (
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-          {seo.heatmapGrids.map((grid) => (
-            <div key={`${grid.keyword}-${grid.scanDate}`} className="rounded-2xl border border-white/8 bg-white/4 p-3">
-              <HeatmapGridSvg grid={grid} />
-              <div className="space-y-1 px-1 pt-3">
-                <p className="text-sm font-semibold text-white">{grid.keyword}</p>
-                <p className="text-xs text-slate-400">
-                  Scanned {formatScanDate(grid.scanDate)} -- {grid.gridSize}x{grid.gridSize} grid
-                </p>
-                <div className="flex flex-wrap gap-2 text-xs text-slate-300">
-                  <span>ARP {grid.averageRankPosition ?? "n/a"}</span>
-                  <span>SoLV {grid.shareOfLocalVoicePercent ?? "n/a"}%</span>
-                  <span>Top-3 {grid.top3Percent ?? "n/a"}%</span>
+      {hasProfileView ? (
+        activeProfiles.map((profile) => (
+          <ProfileEvidenceBlock key={`${profile.business.businessId}`} profile={profile} />
+        ))
+      ) : (
+        <>
+          {seo.matchedBusinesses.length ? (
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+              {seo.matchedBusinesses.map((business) => (
+                <div key={`${business.businessName}-${business.placeId}`} className="rounded-2xl border border-white/8 bg-white/4 p-4">
+                  <p className="text-sm font-semibold text-white">{business.businessName}</p>
+                  <p className="mt-1 text-xs text-slate-400">{business.address || "Address not on file"}</p>
+                  <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-slate-300">
+                    <span>{business.rating ?? "n/a"}★ rating</span>
+                    <span>{business.reviews ?? "n/a"} reviews</span>
+                    <span>{business.keywords.length} keywords tracked</span>
+                  </div>
                 </div>
-                {grid.topCompetitors.length ? (
-                  <p className="pt-1 text-[11px] text-slate-500">
-                    Top competitors: {grid.topCompetitors.map((c) => `${c.name} (${c.rating ?? "n/a"}★, ${c.reviews ?? "n/a"} rev)`).join(" · ")}
-                  </p>
-                ) : null}
-              </div>
+              ))}
             </div>
-          ))}
-        </div>
-      ) : null}
+          ) : null}
+
+          <KeywordScanTable entries={seo.keywordScanHistory} showBusiness />
+
+          {seo.heatmapGrids.length ? (
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+              {seo.heatmapGrids.map((grid) => (
+                <div key={`${grid.keyword}-${grid.scanDate}`} className="rounded-2xl border border-white/8 bg-white/4 p-3">
+                  <HeatmapGridSvg grid={grid} />
+                  <div className="space-y-1 px-1 pt-3">
+                    <p className="text-sm font-semibold text-white">{grid.keyword}</p>
+                    <p className="text-xs text-slate-400">
+                      Scanned {formatScanDate(grid.scanDate)} -- {grid.gridSize}x{grid.gridSize} grid
+                    </p>
+                    <div className="flex flex-wrap gap-2 text-xs text-slate-300">
+                      <span>ARP {grid.averageRankPosition ?? "n/a"}</span>
+                      <span>SoLV {grid.shareOfLocalVoicePercent ?? "n/a"}%</span>
+                      <span>Top-3 {grid.top3Percent ?? "n/a"}%</span>
+                    </div>
+                    {grid.topCompetitors.length ? (
+                      <p className="pt-1 text-[11px] text-slate-500">
+                        Top competitors: {grid.topCompetitors.map((c) => `${c.name} (${c.rating ?? "n/a"}★, ${c.reviews ?? "n/a"} rev)`).join(" · ")}
+                      </p>
+                    ) : null}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : null}
+        </>
+      )}
 
       {seo.checkinBusinesses.length ? (
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">

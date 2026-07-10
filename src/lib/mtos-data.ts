@@ -156,9 +156,24 @@ export interface MapCheckinBusinessSummary {
   connectedPlatforms: string[];
 }
 
+export interface HeatmapComparison {
+  keyword: string;
+  current: HeatmapGrid;
+  previous?: HeatmapGrid;
+}
+
+export interface RankTrackerProfileEvidence {
+  business: MatchedRankTrackerBusiness;
+  status: "active" | "inactive";
+  statusNote?: string;
+  keywordScans: KeywordScanHistory[];
+  heatmapComparisons: HeatmapComparison[];
+}
+
 export interface SeoPerformancePack {
   heatmaps: SeoHeatmapRow[];
   matchedBusinesses: MatchedRankTrackerBusiness[];
+  profiles?: RankTrackerProfileEvidence[];
   keywordScanHistory: KeywordScanHistory[];
   heatmapGrids: HeatmapGrid[];
   checkinBusinesses: MapCheckinBusinessSummary[];

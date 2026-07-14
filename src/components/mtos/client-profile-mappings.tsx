@@ -35,6 +35,7 @@ function ProviderMappingBlock({
   onRemove: (id: string) => void;
 }) {
   const [query, setQuery] = useState("");
+  const searchPlaceholder = `Search ${provider.candidates.length} profiles to pin...`;
   const candidateById = useMemo(
     () => new Map(provider.candidates.map((candidate) => [candidate.id, candidate])),
     [provider.candidates],
@@ -56,6 +57,8 @@ function ProviderMappingBlock({
       )
       .slice(0, 6);
   }, [query, provider.candidates, autoSet, manualSet]);
+
+  const showSearchInput = provider.candidates.length > 0 || provider.providerId === "googleBusinessProfile";
 
   return (
     <div className="rounded-2xl border border-white/8 bg-black/20 p-4">
@@ -112,12 +115,12 @@ function ProviderMappingBlock({
         ) : null}
       </div>
 
-      {provider.candidates.length ? (
+      {showSearchInput ? (
         <div className="mt-3">
           <input
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder={`Search ${provider.candidates.length} profiles to pin...`}
+            placeholder={searchPlaceholder}
             className="w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-slate-200 placeholder:text-slate-600 focus:border-white/25 focus:outline-none"
           />
           {searchResults.length ? (

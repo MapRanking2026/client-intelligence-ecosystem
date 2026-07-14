@@ -31,6 +31,7 @@ import {
 } from "@/src/lib/server/firebase/collections";
 import { getFirebaseAdminDb } from "@/src/lib/server/firebase/admin";
 import { getServerEnv } from "@/src/lib/server/env";
+import { namesLikelyMatch, normalizeText } from "@/src/lib/server/name-matching";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -69,10 +70,6 @@ function createEmptyCounts(): IntegrationSyncCounts {
     skipped: 0,
     failed: 0,
   };
-}
-
-function normalizeText(value: string) {
-  return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 }
 
 function toSlug(value: string) {
@@ -629,38 +626,20 @@ async function syncClickUp(context: TenantContext, record: IntegrationConnection
   } satisfies SyncExecutionResult;
 }
 
-function stripBusinessNameNoise(value: string) {
-  return value
-    .replace(/\([^)]*\)/g, " ")
-    .replace(/\b(llc|inc|corp|co|ltd|usa|dba)\b/gi, " ")
-    .trim();
-}
-
-function namesLikelyMatch(clientName: string, candidateName: string) {
-  const normalizedClient = normalizeText(stripBusinessNameNoise(clientName));
-  const normalizedCandidate = normalizeText(stripBusinessNameNoise(candidateName));
-
-  if (!normalizedClient || !normalizedCandidate) {
-    return false;
-  }
-
-  if (normalizedClient === normalizedCandidate) {
-    return true;
-  }
-
-  const [shorter, longer] =
-    normalizedClient.length <= normalizedCandidate.length
-      ? [normalizedClient, normalizedCandidate]
-      : [normalizedCandidate, normalizedClient];
-
-  return shorter.length >= 6 && longer.includes(shorter);
-}
-
 function matchLocationsToClients(clients: ClientRecord[], locations: Array<Record<string, unknown>>) {
   const byClient: Record<string, Array<Record<string, unknown>>> = {};
 
   for (const client of clients) {
-    const matches = locations.filter((location) => namesLikelyMatch(client.name, String(location.title || "")));
+    const manualIds = new Set(client.integrationMappings?.googleBusinessProfile || []);
+    // Manual pins are additive: auto name matches always stay in.
+    const matches = locations.filter((location) => {
+      const locationId = String(location.name || "").split("/").filter(Boolean).pop() || "";
+      return (
+        namesLikelyMatch(client.name, String(location.title || "")) ||
+        manualIds.has(locationId) ||
+        manualIds.has(String(location.name || ""))
+      );
+    });
     if (matches.length) {
       byClient[client.id] = matches;
     }
@@ -673,8 +652,15 @@ function matchBusinessesToClients(clients: ClientRecord[], businesses: Array<Rec
   const byClient: Record<string, Array<Record<string, unknown>>> = {};
 
   for (const client of clients) {
-    const matches = businesses.filter((business) =>
-      namesLikelyMatch(client.name, String(business.business_name || "")),
+    const manualIds = new Set([
+      ...(client.integrationMappings?.rankTracker || []),
+      ...(client.integrationMappings?.mapCheckins || []),
+    ]);
+    // Manual pins are additive: auto name matches always stay in.
+    const matches = businesses.filter(
+      (business) =>
+        namesLikelyMatch(client.name, String(business.business_name || "")) ||
+        manualIds.has(String(business._id || "")),
     );
     if (matches.length) {
       byClient[client.id] = matches;
@@ -1247,7 +1233,11 @@ async function syncGoHighLevelAgency(
 
   const matchedPairs: Array<{ client: ClientRecord; location: GhlAgencyLocation }> = [];
   for (const client of clients) {
-    const match = locations.find((location) => namesLikelyMatch(client.name, location.name));
+    const manualIds = new Set(client.integrationMappings?.gohighlevel || []);
+    // Manual pins are additive: auto name matches always stay in.
+    const match = locations.find(
+      (location) => namesLikelyMatch(client.name, location.name) || manualIds.has(location.id),
+    );
     if (match) {
       matchedPairs.push({
         client,
@@ -1305,6 +1295,8 @@ async function syncGoHighLevelAgency(
     snapshotPayload: {
       mode: "agency",
       totalLocations: locations.length,
+      // Compact candidate index so the client-mapping UI can offer every location for manual pinning.
+      locationIndex: locations.map((location) => ({ id: location.id, name: location.name })),
       leadsByClient,
     },
   } satisfies SyncExecutionResult;

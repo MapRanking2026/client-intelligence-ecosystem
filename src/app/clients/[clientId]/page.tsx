@@ -3,9 +3,11 @@ import { notFound } from "next/navigation";
 import { ArrowRight, BookOpenText, CalendarDays, MessageSquareQuote } from "lucide-react";
 
 import { AppShell } from "@/src/components/mtos/app-shell";
+import { ClientProfileMappings } from "@/src/components/mtos/client-profile-mappings";
 import { ScorePill } from "@/src/components/mtos/score-pill";
 import { SectionCard } from "@/src/components/mtos/section-card";
 import { resolveTenantContext } from "@/src/lib/auth/resolve-tenant-context";
+import { getClientMappingView } from "@/src/lib/server/services/client-mappings-service";
 import { getClientWorkspaceView } from "@/src/lib/server/services/clients-service";
 import { healthTone } from "@/src/lib/utils";
 
@@ -15,13 +17,15 @@ export default async function ClientWorkspacePage({
   params: Promise<{ clientId: string }>;
 }) {
   const { clientId } = await params;
-  const payload = await getClientWorkspaceView(await resolveTenantContext(), clientId);
+  const context = await resolveTenantContext();
+  const payload = await getClientWorkspaceView(context, clientId);
 
   if (!payload) {
     notFound();
   }
 
   const { client, touch, commitments: clientCommitments, opportunities: clientOpportunities } = payload;
+  const mappingView = await getClientMappingView(context, clientId);
 
   return (
     <AppShell
@@ -168,6 +172,16 @@ export default async function ClientWorkspacePage({
           </div>
         </SectionCard>
       </div>
+
+      {mappingView ? (
+        <SectionCard
+          eyebrow="Data connections"
+          title="Profile mappings"
+          subtitle="Verify which integration profiles belong to this client. Automatic name matching runs first; pin profiles manually when a name doesn't line up so the prep pack can pull their data."
+        >
+          <ClientProfileMappings clientId={client.id} providers={mappingView.providers} />
+        </SectionCard>
+      ) : null}
     </AppShell>
   );
 }

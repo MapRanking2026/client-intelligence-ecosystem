@@ -285,6 +285,14 @@ export interface ClientRecord {
     resultsSoFar: string;
     nextSteps: string;
   };
+  // Manually pinned integration profiles. Always ADDITIVE to automatic name matching --
+  // effective profiles = auto matches UNION these ids.
+  integrationMappings?: {
+    rankTracker?: string[];
+    mapCheckins?: string[];
+    googleBusinessProfile?: string[];
+    gohighlevel?: string[];
+  };
   participationChecklist?: {
     offersProvided: boolean;
     freshPhotos: boolean;

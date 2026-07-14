@@ -290,11 +290,40 @@ export async function fetchCheckinBusinesses(session: DashboardSession) {
   }
 
   return businesses.map((row) => ({
+    businessId: String(row._id || ""),
     businessName: String(row.business_name || ""),
+    address: String(row.address || ""),
     totalPosts: toNumber(row.totalPosts) ?? 0,
     scheduledPosts: toNumber(row.scheduledPosts) ?? 0,
     connectedPlatforms: Object.entries((row.integration_status || {}) as Record<string, unknown>)
       .filter(([, connected]) => connected === true)
       .map(([platform]) => platform),
+  }));
+}
+
+export interface DashboardBusinessSummary {
+  businessId: string;
+  businessName: string;
+  address: string;
+  rating: number | null;
+  reviews: number | null;
+  placeId: string;
+  keywords: string[];
+}
+
+export async function fetchAllBusinesses(session: DashboardSession): Promise<DashboardBusinessSummary[]> {
+  const payload = await fetch(`${session.baseUrl}/api/business/get-business`, {
+    headers: { authorization: `Bearer ${session.token}`, accept: "application/json" },
+  }).then((response) => response.json() as Promise<JsonRecord>);
+
+  const rows = Array.isArray(payload.data) ? (payload.data as JsonRecord[]) : [];
+  return rows.map((row) => ({
+    businessId: String(row._id || ""),
+    businessName: String(row.business_name || ""),
+    address: String(row.formatted_address || row.address || ""),
+    rating: toNumber(row.rating),
+    reviews: toNumber(row.reviews),
+    placeId: String(row.place_id || ""),
+    keywords: Array.from(new Set(Array.isArray(row.keywords) ? (row.keywords as unknown[]).map(String) : [])),
   }));
 }

@@ -23,10 +23,13 @@ import type {
   StrategicActionStatus,
 } from "@/src/lib/mtos-data";
 import {
+  fetchAllBusinesses,
   fetchBusinessKeywordScanHistory,
+  fetchCheckinBusinesses,
   fetchHeatmapComparisons,
   openDashboardSession,
 } from "@/src/lib/server/services/mapranking-dashboard";
+import { namesLikelyMatch } from "@/src/lib/server/name-matching";
 import { getMtosDataSource } from "@/src/lib/server/data/seed-mtos-data-source";
 import {
   integrationSnapshotsCollectionPath,
@@ -1022,21 +1025,53 @@ function isProfileInactive(
 
 async function fetchLiveRankTrackerEvidence(
   context: TenantContext,
-  matchedBusinesses: ReturnType<typeof extractMatchedBusinesses>,
+  client: ClientRecord,
+  snapshotMatches: ReturnType<typeof extractMatchedBusinesses>,
+  snapshotCheckins: MapCheckinBusinessSummary[],
 ) {
   const empty = {
     profiles: [] as RankTrackerProfileEvidence[],
     keywordHistory: [] as KeywordScanHistory[],
     heatmapGrids: [] as HeatmapGrid[],
+    checkinBusinesses: snapshotCheckins,
   };
-  if (!matchedBusinesses.length) {
-    return empty;
-  }
 
   try {
     const session = await openDashboardSession(context);
     if (!session) {
       return empty;
+    }
+
+    // Match live against the current business list so brand-new clients and manual pins take
+    // effect immediately -- automatic name matching first, manual pins layered on top.
+    const manualIds = new Set(client.integrationMappings?.rankTracker || []);
+    const allBusinesses = await fetchAllBusinesses(session);
+    let matchedBusinesses: ReturnType<typeof extractMatchedBusinesses> = allBusinesses.filter(
+      (business) =>
+        namesLikelyMatch(client.name, business.businessName) || manualIds.has(business.businessId),
+    );
+    if (!matchedBusinesses.length) {
+      matchedBusinesses = snapshotMatches;
+    }
+
+    // Same live-first approach for Map Check-Ins.
+    let checkinBusinesses = snapshotCheckins;
+    try {
+      const manualCheckinIds = new Set(client.integrationMappings?.mapCheckins || []);
+      const allCheckins = await fetchCheckinBusinesses(session);
+      const liveCheckins = allCheckins.filter(
+        (business) =>
+          namesLikelyMatch(client.name, business.businessName) || manualCheckinIds.has(business.businessId),
+      );
+      if (liveCheckins.length) {
+        checkinBusinesses = liveCheckins;
+      }
+    } catch {
+      // keep snapshot fallback
+    }
+
+    if (!matchedBusinesses.length) {
+      return { ...empty, checkinBusinesses };
     }
 
     const profiles: RankTrackerProfileEvidence[] = [];
@@ -1075,6 +1110,7 @@ async function fetchLiveRankTrackerEvidence(
       heatmapGrids: activeProfiles.flatMap((profile) =>
         profile.heatmapComparisons.map((comparison) => comparison.current),
       ),
+      checkinBusinesses,
     };
   } catch (error) {
     console.warn(
@@ -1093,10 +1129,16 @@ async function buildPrepPack(
   integrationSources: MonthlyTouchPrepPack["integrationSources"],
   rawSnapshots: Map<string, JsonRecord>,
 ) {
-  const matchedBusinesses = extractMatchedBusinesses(rawSnapshots.get("rank-tracker"), client.id);
+  const snapshotMatches = extractMatchedBusinesses(rawSnapshots.get("rank-tracker"), client.id);
   const gbpPerformance = extractGbpPerformanceRows(rawSnapshots.get("google-business-profile"), client.id);
-  const checkinBusinesses = extractCheckinBusinesses(rawSnapshots.get("map-checkins"), client.id);
-  const { profiles, keywordHistory, heatmapGrids } = await fetchLiveRankTrackerEvidence(context, matchedBusinesses);
+  const snapshotCheckins = extractCheckinBusinesses(rawSnapshots.get("map-checkins"), client.id);
+  const { profiles, keywordHistory, heatmapGrids, checkinBusinesses } = await fetchLiveRankTrackerEvidence(
+    context,
+    client,
+    snapshotMatches,
+    snapshotCheckins,
+  );
+  const matchedBusinesses = profiles.length ? profiles.map((profile) => profile.business) : snapshotMatches;
 
   const businessScorecard = buildBusinessScorecard(
     rawSnapshots,

@@ -10,6 +10,7 @@ const saveSchema = z.object({
     mapCheckins: z.array(z.string()).optional(),
     googleBusinessProfile: z.array(z.string()).optional(),
     gohighlevel: z.array(z.string()).optional(),
+    googleAds: z.array(z.string()).optional(),
   }),
 });
 

@@ -376,9 +376,13 @@ function buildBusinessScorecard(
     crmSnapshot?.mode === "agency"
       ? ((leadsByClient[clientId] || null) as JsonRecord | null)
       : null;
+  const googleAdsSnapshot = rawSnapshots.get("google-ads");
+  const googleAdsByClient = (googleAdsSnapshot?.adsByClient || {}) as JsonRecord;
+  const googleAds = (googleAdsByClient[clientId] || null) as JsonRecord | null;
   const totalLeads = crm && typeof crm.totalLeads === "number" ? crm.totalLeads : null;
   const qualifiedLeads = crm && typeof crm.qualifiedLeads === "number" ? crm.qualifiedLeads : null;
   const bookedJobs = crm && typeof crm.bookedJobs === "number" ? crm.bookedJobs : null;
+  const googleAdsCostPerLead = googleAds && typeof googleAds.costPerLead === "number" ? googleAds.costPerLead : null;
 
   const gbpTotals = gbpPerformance.reduce(
     (acc, row) => ({
@@ -391,7 +395,13 @@ function buildBusinessScorecard(
   return {
     totalLeads: metric("New leads (last 30 days)", totalLeads, null, "GoHighLevel contacts"),
     qualifiedLeads: metric("Pipeline opportunities (all time)", qualifiedLeads, null, "GoHighLevel opportunities"),
-    costPerLead: metric("Cost per lead", null, null, "Requires Google Ads / Meta Ads sync", "currency"),
+    costPerLead: metric(
+      "Cost per lead",
+      googleAdsCostPerLead,
+      null,
+      googleAdsCostPerLead !== null ? "Google Ads campaign metrics" : "Requires Google Ads / Meta Ads sync",
+      "currency",
+    ),
     callsAnswered: metric(
       "GBP call clicks",
       gbpPerformance.length ? gbpTotals.calls : null,
@@ -484,18 +494,24 @@ function buildSeoPerformance(
   };
 }
 
-function buildAdsPerformance(): AdsPerformancePack[] {
+function buildAdsPerformanceFromSnapshots(rawSnapshots: Map<string, JsonRecord>, clientId: string): AdsPerformancePack[] {
+  const googleAdsSnapshot = rawSnapshots.get("google-ads");
+  const adsByClient = (googleAdsSnapshot?.adsByClient || {}) as JsonRecord;
+  const googleAds = (adsByClient[clientId] || null) as JsonRecord | null;
+
   return [
     {
       channel: "Google Ads",
-      connected: false,
-      spend: null,
-      leads: null,
-      costPerLead: null,
-      ctr: null,
-      conversionRate: null,
+      connected: Boolean(googleAds && !googleAds.error),
+      spend: googleAds && typeof googleAds.spend === "number" ? googleAds.spend : null,
+      leads: googleAds && typeof googleAds.conversions === "number" ? googleAds.conversions : null,
+      costPerLead: googleAds && typeof googleAds.costPerLead === "number" ? googleAds.costPerLead : null,
+      ctr: googleAds && typeof googleAds.ctr === "number" ? googleAds.ctr : null,
+      conversionRate: googleAds && typeof googleAds.conversionRate === "number" ? googleAds.conversionRate : null,
       benchmarkNote:
-        "Connect Google Ads to compare CTR and CPL against the 5% CTR / 10% conversion Search benchmark (3% / 3% for PMax) from the Ads prep SOP.",
+        googleAds && typeof googleAds.error === "string"
+          ? googleAds.error
+          : "Use Google Ads spend, CTR, and CPL alongside lead quality to judge whether paid search is producing profitable opportunities.",
     },
     {
       channel: "Meta Ads",
@@ -1156,7 +1172,7 @@ async function buildPrepPack(
     checkinBusinesses,
     client.name,
   );
-  const adsPerformance = buildAdsPerformance();
+  const adsPerformance = buildAdsPerformanceFromSnapshots(rawSnapshots, client.id);
   const strategicAction = buildStrategicActionStatus(client);
   const clientParticipation = buildClientParticipation(client);
   const issuesAndSolutions = buildIssuesWithSolutions(client, openCommitments);

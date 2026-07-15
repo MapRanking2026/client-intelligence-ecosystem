@@ -10,7 +10,7 @@ interface MappingCandidate {
 }
 
 interface ProviderMappingView {
-  providerId: "rankTracker" | "mapCheckins" | "googleBusinessProfile" | "gohighlevel";
+  providerId: "rankTracker" | "mapCheckins" | "googleBusinessProfile" | "gohighlevel" | "googleAds";
   label: string;
   note?: string;
   candidates: MappingCandidate[];

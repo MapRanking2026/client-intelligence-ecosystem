@@ -62,6 +62,14 @@ interface GoogleCalendarEvent {
   status?: string;
 }
 
+interface GoogleAdsAccessibleCustomer {
+  resourceName?: string;
+  id?: string;
+  descriptiveName?: string;
+  currencyCode?: string;
+  manager?: boolean;
+}
+
 function createEmptyCounts(): IntegrationSyncCounts {
   return {
     fetched: 0,
@@ -935,6 +943,160 @@ async function syncSearchConsole(context: TenantContext, record: IntegrationConn
   } satisfies SyncExecutionResult;
 }
 
+function normalizeGoogleAdsCustomerId(value: string) {
+  return value.replace(/[^0-9]/g, "");
+}
+
+async function fetchGoogleAdsRows(
+  customerId: string,
+  query: string,
+  accessToken: string,
+  developerToken: string,
+  loginCustomerId?: string,
+) {
+  const headers: Record<string, string> = {
+    ...getBearerHeaders(accessToken),
+    "content-type": "application/json",
+    "developer-token": developerToken,
+  };
+  if (loginCustomerId) {
+    headers["login-customer-id"] = loginCustomerId;
+  }
+
+  const payload = await fetchJson(
+    `https://googleads.googleapis.com/v20/customers/${customerId}/googleAds:searchStream`,
+    {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ query }),
+    },
+  );
+
+  const batches = Array.isArray(payload)
+    ? (payload as JsonRecord[])
+    : Array.isArray((payload as JsonRecord).results)
+      ? [payload as JsonRecord]
+      : [payload as JsonRecord];
+
+  return batches.flatMap((batch) =>
+    Array.isArray(batch.results) ? (batch.results as JsonRecord[]) : [],
+  );
+}
+
+async function syncGoogleAds(context: TenantContext, record: IntegrationConnectionRecord, origin?: string) {
+  const refreshedRecord = await maybeRefreshConnection(context, record, origin);
+  const credentials = getIntegrationCredentials(refreshedRecord);
+  const accessToken = credentials.accessToken;
+  const developerToken = process.env.GOOGLE_ADS_DEVELOPER_TOKEN?.trim() || process.env.GOOGLE_ADS_API_KEY?.trim() || "";
+  const loginCustomerId = normalizeGoogleAdsCustomerId(
+    credentials.managerCustomerId ||
+      refreshedRecord.externalAccountId ||
+      process.env.GOOGLE_ADS_MCC_ID ||
+      "",
+  );
+
+  if (!accessToken) {
+    throw new Error("Google Ads access token is missing");
+  }
+  if (!developerToken) {
+    throw new Error("Google Ads developer token is missing");
+  }
+  if (!loginCustomerId) {
+    throw new Error("Google Ads MCC / login customer ID is missing");
+  }
+
+  const customerRows = await fetchGoogleAdsRows(
+    loginCustomerId,
+    `SELECT customer_client.id, customer_client.descriptive_name, customer_client.currency_code, customer_client.manager, customer_client.status FROM customer_client WHERE customer_client.level <= 1`,
+    accessToken,
+    developerToken,
+    loginCustomerId,
+  );
+
+  const customers = customerRows
+    .map((row) => (row.customerClient || row.customer_client || {}) as GoogleAdsAccessibleCustomer)
+    .filter((customer) => customer.id && !customer.manager)
+    .map((customer) => ({
+      customerId: normalizeGoogleAdsCustomerId(String(customer.id || "")),
+      descriptiveName: String(customer.descriptiveName || "Unnamed account"),
+      currencyCode: String(customer.currencyCode || ""),
+      manager: Boolean(customer.manager),
+    }))
+    .filter((customer) => customer.customerId);
+
+  const clients = await listFirestoreClients(context.tenantId);
+  const matchedPairs = clients
+    .map((client) => {
+      const manualIds = new Set(client.integrationMappings?.googleAds || []);
+      const match = customers.find(
+        (customer) =>
+          namesLikelyMatch(client.name, customer.descriptiveName) || manualIds.has(customer.customerId),
+      );
+      return match ? { client, customer: match } : null;
+    })
+    .filter((value): value is { client: ClientRecord; customer: (typeof customers)[number] } => Boolean(value));
+
+  const adsByClient: Record<string, JsonRecord> = {};
+  for (const { client, customer } of matchedPairs.slice(0, 40)) {
+    try {
+      const metricsRows = await fetchGoogleAdsRows(
+        customer.customerId,
+        `SELECT metrics.cost_micros, metrics.clicks, metrics.impressions, metrics.ctr, metrics.conversions, metrics.conversions_value FROM customer WHERE segments.date DURING LAST_30_DAYS`,
+        accessToken,
+        developerToken,
+        loginCustomerId,
+      );
+      const totals = metricsRows.reduce<{ costMicros: number; clicks: number; impressions: number; conversions: number; conversionsValue: number }>(
+        (accumulator, row) => {
+          const metrics = (row.metrics || {}) as JsonRecord;
+          accumulator.costMicros += Number(metrics.costMicros || metrics.cost_micros) || 0;
+          accumulator.clicks += Number(metrics.clicks) || 0;
+          accumulator.impressions += Number(metrics.impressions) || 0;
+          accumulator.conversions += Number(metrics.conversions) || 0;
+          accumulator.conversionsValue += Number(metrics.conversionsValue || metrics.conversions_value) || 0;
+          return accumulator;
+        },
+        { costMicros: 0, clicks: 0, impressions: 0, conversions: 0, conversionsValue: 0 },
+      );
+
+      adsByClient[client.id] = {
+        customerId: customer.customerId,
+        descriptiveName: customer.descriptiveName,
+        currencyCode: customer.currencyCode,
+        spend: Math.round((totals.costMicros / 1_000_000) * 100) / 100,
+        clicks: totals.clicks,
+        impressions: totals.impressions,
+        ctr: totals.impressions ? Math.round((totals.clicks / totals.impressions) * 10000) / 100 : null,
+        conversions: totals.conversions,
+        conversionValue: Math.round(totals.conversionsValue * 100) / 100,
+        costPerLead: totals.conversions ? Math.round((totals.costMicros / 1_000_000 / totals.conversions) * 100) / 100 : null,
+        conversionRate: totals.clicks ? Math.round((totals.conversions / totals.clicks) * 10000) / 100 : null,
+      };
+    } catch (error) {
+      adsByClient[client.id] = {
+        customerId: customer.customerId,
+        descriptiveName: customer.descriptiveName,
+        currencyCode: customer.currencyCode,
+        error: error instanceof Error ? error.message : "Google Ads metrics unavailable",
+      };
+    }
+  }
+
+  const counts = createEmptyCounts();
+  counts.fetched = customers.length;
+  counts.created = Object.keys(adsByClient).length;
+
+  return {
+    summary: `${formatSummaryCount("Google Ads account", customers.length)} listed, ${formatSummaryCount("account", matchedPairs.length)} matched to MTOS clients, metrics captured for ${Object.keys(adsByClient).length}`,
+    counts,
+    snapshotPayload: {
+      loginCustomerId,
+      customerIndex: customers,
+      adsByClient,
+    },
+  } satisfies SyncExecutionResult;
+}
+
 function getArrayCount(payload: JsonRecord, keys: string[]) {
   for (const key of keys) {
     const value = payload[key];
@@ -1418,6 +1580,8 @@ async function runProviderSync(
       return syncGoogleCalendar(context, record, origin);
     case "google-business-profile":
       return syncGoogleBusinessProfile(context, record);
+    case "google-ads":
+      return syncGoogleAds(context, record, origin);
     case "google-search-console":
       return syncSearchConsole(context, record);
     case "rank-tracker":

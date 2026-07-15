@@ -292,6 +292,7 @@ export interface ClientRecord {
     mapCheckins?: string[];
     googleBusinessProfile?: string[];
     gohighlevel?: string[];
+    googleAds?: string[];
   };
   participationChecklist?: {
     offersProvided: boolean;

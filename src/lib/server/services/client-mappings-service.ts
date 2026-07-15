@@ -13,7 +13,7 @@ import {
 
 type JsonRecord = Record<string, unknown>;
 
-export type MappingProviderId = "rankTracker" | "mapCheckins" | "googleBusinessProfile" | "gohighlevel";
+export type MappingProviderId = "rankTracker" | "mapCheckins" | "googleBusinessProfile" | "gohighlevel" | "googleAds";
 
 export interface MappingCandidate {
   id: string;
@@ -152,6 +152,27 @@ export async function getClientMappingView(
     manualIds: mappings.gohighlevel || [],
   });
 
+  const googleAdsPayload = await readSnapshotPayload(context.tenantId, "google-ads");
+  const googleAdsCustomers = Array.isArray(googleAdsPayload?.customerIndex)
+    ? (googleAdsPayload!.customerIndex as JsonRecord[])
+    : [];
+  providers.push({
+    providerId: "googleAds",
+    label: "Google Ads",
+    note: googleAdsCustomers.length
+      ? "Spend and conversion data for newly pinned Google Ads accounts appears after the next Google Ads sync."
+      : "No Google Ads customer list yet -- connect and run a Google Ads sync in Settings > Integrations to load candidates.",
+    candidates: googleAdsCustomers.map((customer) => ({
+      id: String(customer.customerId || customer.id || ""),
+      label: String(customer.descriptiveName || customer.name || "Unnamed account"),
+      detail: String(customer.currencyCode || customer.manager ? `Manager: ${customer.manager}` : customer.id || ""),
+    })),
+    autoMatchedIds: googleAdsCustomers
+      .filter((customer) => namesLikelyMatch(client.name, String(customer.descriptiveName || customer.name || "")))
+      .map((customer) => String(customer.customerId || customer.id || "")),
+    manualIds: mappings.googleAds || [],
+  });
+
   return {
     clientId: client.id,
     clientName: client.name,
@@ -159,7 +180,7 @@ export async function getClientMappingView(
   };
 }
 
-const mappingKeys: MappingProviderId[] = ["rankTracker", "mapCheckins", "googleBusinessProfile", "gohighlevel"];
+const mappingKeys: MappingProviderId[] = ["rankTracker", "mapCheckins", "googleBusinessProfile", "gohighlevel", "googleAds"];
 
 export async function saveClientMappings(
   context: TenantContext,

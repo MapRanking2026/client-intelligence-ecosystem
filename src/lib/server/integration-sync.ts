@@ -1590,6 +1590,8 @@ async function runProviderSync(
       return syncRotatingTokenProvider(context, "map-checkins", record, origin);
     case "gohighlevel":
       return syncGoHighLevel(context, record, origin);
+    case "google-ads":
+      return syncGoogleAds(context, record, origin);
     default:
       throw new Error(`${getIntegrationDefinition(providerId).name} sync is not implemented in this slice`);
   }

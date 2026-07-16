@@ -81,6 +81,27 @@ function round1(value: number | null) {
   return value === null ? null : Math.round(value * 10) / 10;
 }
 
+// Cap keywords per profile so a keyword-heavy client can't stall the prep run.
+const MAX_KEYWORDS_PER_PROFILE = 14;
+
+function scanPointFromHistory(entry: JsonRecord): KeywordScanPoint | null {
+  const reportId = String(entry.report_id || "");
+  const scanDate = String(entry.timestamp || "");
+  if (!reportId || !scanDate || String(entry.status || "") !== "completed") {
+    return null;
+  }
+  const score = (entry.score || {}) as JsonRecord;
+  const marketShare = toNumber(score.marketShare);
+  return {
+    scanDate,
+    averageRank: round1(toNumber(score.avg)),
+    top3Pins: toNumber(score.high),
+    marketSharePercent: marketShare === null ? null : Math.round(marketShare * 1000) / 10,
+    notRankingPins: toNumber(score.not_ranking),
+    reportId,
+  };
+}
+
 export async function fetchBusinessKeywordScanHistory(
   session: DashboardSession,
   business: { businessId: string; businessName: string },
@@ -89,7 +110,6 @@ export async function fetchBusinessKeywordScanHistory(
     return [];
   }
 
-  const byKeyword = new Map<string, KeywordScanHistory>();
   const payload = await postJson(
     `${session.baseUrl}/api/heatmap/keyword-history`,
     { business_id: business.businessId },
@@ -97,39 +117,78 @@ export async function fetchBusinessKeywordScanHistory(
   );
   const rows = Array.isArray(payload.data) ? (payload.data as JsonRecord[]) : [];
 
+  // keyword-history returns one row per heatmap CONFIG (a keyword can have several config
+  // versions), and its created_at / report_id reflect the config, not each monthly scan. The
+  // real per-month scans live in each config's `history` array, fetched via get-heatmap.
+  const configsByKeyword = new Map<string, Array<{ heatmapId: string; createdAt: string }>>();
   for (const row of rows) {
     const keyword = String(row.keyword || "").trim();
-    if (!keyword) {
+    const heatmapId = String(row.heatmap_id || "");
+    if (!keyword || !heatmapId) {
       continue;
     }
-
-    const score = (row.score || {}) as JsonRecord;
-    const marketShare = toNumber(score.marketShare);
-    const scan: KeywordScanPoint = {
-      scanDate: String(row.created_at || ""),
-      averageRank: round1(toNumber(score.avg)),
-      top3Pins: toNumber(score.high),
-      marketSharePercent: marketShare === null ? null : Math.round(marketShare * 1000) / 10,
-      notRankingPins: toNumber(score.not_ranking),
-      reportId: String(row.report_id || ""),
-    };
-
-    const entry = byKeyword.get(keyword) || {
-      keyword,
-      businessName: business.businessName,
-      scans: [],
-    };
-    entry.scans.push(scan);
-    byKeyword.set(keyword, entry);
+    const list = configsByKeyword.get(keyword) || [];
+    list.push({ heatmapId, createdAt: String(row.created_at || "") });
+    configsByKeyword.set(keyword, list);
   }
 
-  return Array.from(byKeyword.values()).map((entry) => ({
-    ...entry,
-    // newest first, keep enough history for a 3-month trend read
-    scans: entry.scans
+  // For each keyword, pull the two most-recently-created configs -- the active one plus the prior
+  // one, so the previous-month scan is still available right after a config is recreated.
+  const fetchTargets: Array<{ keyword: string; heatmapId: string }> = [];
+  for (const [keyword, configs] of Array.from(configsByKeyword.entries()).slice(0, MAX_KEYWORDS_PER_PROFILE)) {
+    const newest = [...configs].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 2);
+    for (const config of newest) {
+      fetchTargets.push({ keyword, heatmapId: config.heatmapId });
+    }
+  }
+
+  const histories = await mapWithConcurrency(fetchTargets, 6, async (target) => {
+    try {
+      const heatmap = await postJson(
+        `${session.baseUrl}/api/heatmap/get-heatmap`,
+        { heatmapId: target.heatmapId },
+        session.token,
+      );
+      const history = Array.isArray((heatmap.data as JsonRecord | undefined)?.history)
+        ? (((heatmap.data as JsonRecord).history as JsonRecord[]))
+        : [];
+      return { keyword: target.keyword, history };
+    } catch {
+      return { keyword: target.keyword, history: [] as JsonRecord[] };
+    }
+  });
+
+  const scansByKeyword = new Map<string, KeywordScanPoint[]>();
+  for (const { keyword, history } of histories) {
+    const list = scansByKeyword.get(keyword) || [];
+    for (const entry of history) {
+      const scan = scanPointFromHistory(entry);
+      if (scan) {
+        list.push(scan);
+      }
+    }
+    scansByKeyword.set(keyword, list);
+  }
+
+  const results: KeywordScanHistory[] = [];
+  for (const [keyword, scans] of scansByKeyword) {
+    const seen = new Set<string>();
+    const deduped = scans
+      .filter((scan) => {
+        if (seen.has(scan.reportId)) {
+          return false;
+        }
+        seen.add(scan.reportId);
+        return true;
+      })
+      // newest first -- the two most recent are the current + previous month comparison
       .sort((a, b) => b.scanDate.localeCompare(a.scanDate))
-      .slice(0, 4),
-  }));
+      .slice(0, 4);
+    if (deduped.length) {
+      results.push({ keyword, businessName: business.businessName, scans: deduped });
+    }
+  }
+  return results;
 }
 
 export async function fetchKeywordScanHistory(

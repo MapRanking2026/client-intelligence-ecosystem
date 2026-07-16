@@ -60,6 +60,7 @@ const syncEnabledProviders = new Set<IntegrationProviderId>([
   "rank-tracker",
   "map-checkins",
   "gohighlevel",
+  "google-ads",
 ]);
 
 const rotatingTokenFields: IntegrationFieldDefinition[] = [

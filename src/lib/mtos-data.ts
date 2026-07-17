@@ -245,7 +245,30 @@ export interface MonthlyTouchPrepPack {
   leadQualityQuestions: string[];
   recapQuestions: { question: string; answer: string }[];
   dataGaps: string[];
+  clickupContext?: ClickupClientContext;
   claude: PrepPackClaudeState;
+}
+
+export interface ClickupBookPage {
+  pageName: string;
+  content: string;
+}
+
+export interface ClickupChatMessage {
+  author: string;
+  authorIsInternal: boolean;
+  date: string;
+  text: string;
+}
+
+export interface ClickupClientContext {
+  matched: boolean;
+  folderName: string;
+  // Key Client's Book pages (business intelligence, offers, competitors, latest meeting/pre-touch notes).
+  clientsBook: ClickupBookPage[];
+  // Most recent project-channel chat activity.
+  recentChat: ClickupChatMessage[];
+  notes: string[];
 }
 
 export interface ClientRecord {

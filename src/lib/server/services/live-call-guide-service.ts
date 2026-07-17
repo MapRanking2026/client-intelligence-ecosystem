@@ -163,6 +163,11 @@ async function generateClaudeSections(
       "services) -> goal review -> lead quality -> strategic action implementation % -> the business and",
       "growth conversation (wins, issues with solutions, recommendations) -> recap and close.",
       "",
+      "prepPack.clickupContext carries the client's Client's Book (goal, services, offers, competitors,",
+      "prior notes) and recent project chat. Use it to ground the goal-review section in the client's",
+      "actual stated goal, and fold any open item from recentChat (a complaint or pending request) into",
+      "the relevant section so the AM addresses it live.",
+      "",
       "Ground every talking point in the actual evidence in the bundle below and QUOTE THE REAL NUMBERS",
       "(leads, GBP call clicks, keyword rank and Market Share movement month over month, Google Ads spend",
       "and CPL, Map Check-In posts, the strategic action's implementation %). A talking point that just",
@@ -247,6 +252,8 @@ async function generateClaudeSections(
               recapQuestions: prepPack.recapQuestions,
               dataGaps: prepPack.dataGaps,
               integrationSources: prepPack.integrationSources,
+              // Client's Book intelligence + recent project chat, pulled live from ClickUp.
+              clickupContext: prepPack.clickupContext,
             }
           : null,
       },

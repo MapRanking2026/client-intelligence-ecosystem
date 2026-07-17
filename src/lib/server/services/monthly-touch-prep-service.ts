@@ -38,6 +38,7 @@ import {
 import { getFirebaseAdminDb } from "@/src/lib/server/firebase/admin";
 import { getServerEnv } from "@/src/lib/server/env";
 import { callClaudeForJson } from "@/src/lib/server/services/mtos-ai";
+import { fetchClickupClientContext } from "@/src/lib/server/services/clickup-client-context";
 import { getPrompt } from "@/src/lib/server/prompt-store";
 
 type JsonRecord = Record<string, unknown>;
@@ -959,6 +960,14 @@ async function generateClaudeTouchOutput(
       "rather than skipping the topic. This is a bachelor-thesis-standard prep document: exhaustive,",
       "specific, and structured -- not a five-sentence summary.",
       "",
+      "prepPack.clickupContext holds the client's business intelligence pulled live from their ClickUp",
+      "Client's Book (goals, services, offers, competitors, prior meeting and pre-touch notes) plus the",
+      "most recent project-channel chat. GROUND THE BRIEF IN THIS: reference the client's actual goal,",
+      "services, and offers from the Client's Book, and surface anything time-sensitive from recentChat",
+      "(a complaint, an open request, a promised follow-up) as a win, risk, or talking point so the AM",
+      "walks in already aware of it. Distinguish messages where authorIsInternal is false (the client",
+      "speaking) from internal team chatter. Never quote chat that isn't in the bundle.",
+      "",
       "Return JSON only. Keep the output specific and operational; the executiveBrief may run several",
       "paragraphs if the data supports it.",
     ].join("\n"),
@@ -1000,7 +1009,9 @@ async function generateClaudeTouchOutput(
           2,
         ),
       ].join("\n"),
-      maxTokens: 1400,
+      // The brief now runs several paragraphs and weaves in ClickUp context on top of wins, risks,
+      // recommendations, agenda, and talking points -- 2000/4000 truncated the JSON mid-array.
+      maxTokens: 8000,
       temperature: 0.2,
     }),
   );
@@ -1176,10 +1187,17 @@ async function buildPrepPack(
   const strategicAction = buildStrategicActionStatus(client);
   const clientParticipation = buildClientParticipation(client);
   const issuesAndSolutions = buildIssuesWithSolutions(client, openCommitments);
+  // Live pull of the client's ClickUp business folder (Client's Book) and project chat channel.
+  const clickupContext = await fetchClickupClientContext(context, client.name);
+
+  const dataGaps = buildDataGaps(seoPerformance, businessScorecard, strategicAction, clientParticipation);
+  if (clickupContext?.notes.length) {
+    dataGaps.push(...clickupContext.notes);
+  }
 
   return {
     preparedAt: getNowIso(),
-    pipelineVersion: "prep-pack-v3",
+    pipelineVersion: "prep-pack-v4",
     clientSummary: truncate(client.summary, 320),
     schedule: stripUndefinedDeep({
       touchDate: client.touchDate || "Not scheduled",
@@ -1211,7 +1229,8 @@ async function buildPrepPack(
     issuesAndSolutions,
     leadQualityQuestions: LEAD_QUALITY_QUESTIONS,
     recapQuestions: buildRecapQuestions(),
-    dataGaps: buildDataGaps(seoPerformance, businessScorecard, strategicAction, clientParticipation),
+    dataGaps,
+    ...(clickupContext ? { clickupContext } : {}),
     claude: {
       status: "not_configured",
     },

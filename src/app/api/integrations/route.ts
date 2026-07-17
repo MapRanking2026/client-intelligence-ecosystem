@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { after, NextResponse } from "next/server";
 import { z } from "zod";
 
 import { integrationProviderIds } from "@/src/lib/contracts/integrations";
@@ -7,6 +7,7 @@ import { syncIntegrationProvider } from "@/src/lib/server/integration-sync";
 import {
   connectIntegration,
   disconnectIntegration,
+  isSyncEnabledProvider,
   listIntegrationViews,
   refreshIntegration,
 } from "@/src/lib/server/integrations";
@@ -81,9 +82,25 @@ export async function POST(request: Request) {
       origin,
     );
 
+    // OAuth providers return a redirectUrl and finish connecting in the callback (auto-sync happens
+    // there). A direct API-key / rotating-token connect saved immediately, so sync it now without
+    // making the user click "Sync now".
+    const savedDirectly = !("redirectUrl" in connection) && isSyncEnabledProvider(payload.providerId);
+    if (savedDirectly) {
+      after(async () => {
+        try {
+          await syncIntegrationProvider(context, payload.providerId, origin);
+        } catch (syncError) {
+          console.warn(
+            `Auto-sync after connecting ${payload.providerId} failed: ${syncError instanceof Error ? syncError.message : "unknown error"}`,
+          );
+        }
+      });
+    }
+
     return NextResponse.json({
       context,
-      data: connection,
+      data: { ...connection, autoSync: savedDirectly },
     });
   } catch (error) {
     return NextResponse.json(

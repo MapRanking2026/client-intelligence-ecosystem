@@ -1393,11 +1393,25 @@ export async function completeOAuthConnection(
   );
 
   await saveStoredConnection(record);
-  return provider.id;
+  return {
+    providerId: provider.id,
+    context: { tenantId: state.tenantId, userId: state.userId, role: "tenant_admin" as const },
+  };
 }
 
 export function getIntegrationProviderIds() {
   return integrationProviderIds;
+}
+
+export function isSyncEnabledProvider(providerId: IntegrationProviderId) {
+  return syncEnabledProviders.has(providerId);
+}
+
+export async function listConnectedSyncableProviders(tenantId: string): Promise<IntegrationProviderId[]> {
+  const stored = await listStoredConnections(tenantId);
+  return Array.from(stored.entries())
+    .filter(([providerId, record]) => record.status === "connected" && syncEnabledProviders.has(providerId))
+    .map(([providerId]) => providerId);
 }
 
 export async function getIntegrationConnection(

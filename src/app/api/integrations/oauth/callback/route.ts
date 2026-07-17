@@ -1,6 +1,10 @@
-import { NextResponse } from "next/server";
+import { after, NextResponse } from "next/server";
 
-import { completeOAuthConnection } from "@/src/lib/server/integrations";
+import { completeOAuthConnection, isSyncEnabledProvider } from "@/src/lib/server/integrations";
+import { syncIntegrationProvider } from "@/src/lib/server/integration-sync";
+
+// The auto-sync kicked off after connecting can page through hundreds of records.
+export const maxDuration = 300;
 
 export async function GET(request: Request) {
   const callbackUrl = new URL(request.url);
@@ -32,9 +36,25 @@ export async function GET(request: Request) {
   }
 
   try {
-    const providerId = await completeOAuthConnection(callbackUrl, { code, state }, callbackUrl.origin);
+    const { providerId, context } = await completeOAuthConnection(callbackUrl, { code, state }, callbackUrl.origin);
     integrationsUrl.searchParams.set("status", "connected");
     integrationsUrl.searchParams.set("provider", providerId);
+
+    // Sync immediately after connecting so the user never has to click "Sync now". Runs in the
+    // background after the redirect; a failure here must not affect the connection result.
+    if (isSyncEnabledProvider(providerId)) {
+      integrationsUrl.searchParams.set("autosync", "1");
+      after(async () => {
+        try {
+          await syncIntegrationProvider(context, providerId, callbackUrl.origin);
+        } catch (syncError) {
+          console.warn(
+            `Auto-sync after connecting ${providerId} failed: ${syncError instanceof Error ? syncError.message : "unknown error"}`,
+          );
+        }
+      });
+    }
+
     return NextResponse.redirect(integrationsUrl);
   } catch (caught) {
     integrationsUrl.searchParams.set("status", "error");

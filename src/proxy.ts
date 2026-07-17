@@ -23,6 +23,8 @@ export async function proxy(request: NextRequest) {
     path.startsWith("/api/auth/logout") ||
     path.startsWith("/api/integrations/oauth/callback") ||
     path.startsWith("/api/integrations/clickup/callback") ||
+    // Cron endpoints authenticate with CRON_SECRET, not a session cookie.
+    path.startsWith("/api/cron/") ||
     path.startsWith("/_next") ||
     path.startsWith("/favicon");
 

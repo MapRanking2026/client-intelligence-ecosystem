@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 import type { TenantContext } from "@/src/lib/contracts/mtos";
-import type { CallGuide, CallGuideSection, MonthlyTouchRecord } from "@/src/lib/mtos-data";
+import type { CallGuide, CallGuideSection, MonthlyTouchRecord, ScorecardMetric } from "@/src/lib/mtos-data";
 import { getMtosDataSource } from "@/src/lib/server/data/seed-mtos-data-source";
 import { monthlyTouchPath } from "@/src/lib/server/firebase/collections";
 import { getFirebaseAdminDb } from "@/src/lib/server/firebase/admin";
@@ -23,32 +23,122 @@ const callGuideSchema = z.object({
     .max(7),
 });
 
+function formatScorecardMetric(metric?: ScorecardMetric) {
+  if (!metric || metric.availability !== "available" || metric.value === null) {
+    return null;
+  }
+  const value = metric.unit === "currency" ? `$${metric.value}` : metric.unit === "percent" ? `${metric.value}%` : metric.value;
+  const delta =
+    metric.previousValue !== null && metric.previousValue !== undefined
+      ? ` (was ${metric.previousValue})`
+      : "";
+  return `${metric.label}: ${value}${delta}`;
+}
+
 /**
- * Deterministic fallback: turns the already-prepared agenda into a timed
- * structure so an AM always has a usable call guide even if Claude is
- * unavailable. Real wins/risks/talking points feed the cues, nothing invented.
+ * Deterministic fallback: builds a timed guide straight from the prep pack so an AM always has a
+ * usable, evidence-backed guide even if Claude is unavailable. Real numbers only, nothing invented.
  */
 function buildDeterministicSections(touch: MonthlyTouchRecord): CallGuideSection[] {
-  const segments = touch.agenda.length ? touch.agenda : ["Open the call and confirm the agenda"];
-  const minutesPerSection = Math.max(Math.floor(60 / segments.length), 5);
+  const prepPack = touch.prepPack;
+  const sections: CallGuideSection[] = [];
 
-  return segments.map((title, index) => {
-    const talkingPoints =
-      index === 0
-        ? touch.wins.slice(0, 2).length
-          ? touch.wins.slice(0, 2)
-          : ["Open with the current account health picture."]
-        : touch.talkingPoints.slice(index - 1, index + 1).length
-          ? touch.talkingPoints.slice(index - 1, index + 1)
-          : touch.risks.slice(0, 1);
-
-    return {
-      title,
-      minutes: minutesPerSection,
-      talkingPoints: talkingPoints.length ? talkingPoints : ["Keep the conversation evidence-first."],
-      clientPrompts: ["What's your read on this so far?"],
-    };
+  // Scorecard first -- the SOP leads with business numbers, not services.
+  const scorecard = prepPack?.businessScorecard;
+  const scorecardPoints = scorecard
+    ? [
+        formatScorecardMetric(scorecard.totalLeads),
+        formatScorecardMetric(scorecard.qualifiedLeads),
+        formatScorecardMetric(scorecard.bookedJobs),
+        formatScorecardMetric(scorecard.callsAnswered),
+        formatScorecardMetric(scorecard.costPerLead),
+      ].filter((point): point is string => Boolean(point))
+    : [];
+  sections.push({
+    title: "Business scorecard",
+    minutes: 12,
+    talkingPoints: scorecardPoints.length
+      ? scorecardPoints
+      : ["No CRM/ads numbers are connected -- gather them live using the client prompts."],
+    clientPrompts: (prepPack?.leadQualityQuestions || []).slice(0, 2).length
+      ? (prepPack?.leadQualityQuestions || []).slice(0, 2)
+      : ["How many of this month's leads turned into real jobs?"],
   });
+
+  // SEO / visibility, quoting month-over-month movement per keyword.
+  const seoPoints = (prepPack?.seoPerformance?.profiles || [])
+    .filter((profile) => profile.status === "active")
+    .flatMap((profile) =>
+      profile.heatmapComparisons.slice(0, 3).map((comparison) => {
+        const movement =
+          comparison.previous?.shareOfLocalVoicePercent != null
+            ? ` (was ${comparison.previous.shareOfLocalVoicePercent}%)`
+            : "";
+        return `${profile.business.businessName} -- "${comparison.keyword}": Market Share ${comparison.current.shareOfLocalVoicePercent ?? "n/a"}%${movement}, ARP ${comparison.current.averageRankPosition ?? "n/a"}`;
+      }),
+    )
+    .slice(0, 5);
+  if (seoPoints.length) {
+    sections.push({
+      title: "Map visibility: this month vs last",
+      minutes: 12,
+      talkingPoints: seoPoints,
+      clientPrompts: ["Are you feeling that visibility change in call volume?"],
+    });
+  }
+
+  // Strategic action implementation %.
+  const strategicAction = prepPack?.strategicAction;
+  if (strategicAction) {
+    sections.push({
+      title: "Strategic action review",
+      minutes: 8,
+      talkingPoints: strategicAction.hasAgreedAction
+        ? [
+            `"${strategicAction.title}" is ${strategicAction.implementationPercent}% implemented.`,
+            strategicAction.resultsSoFar || "Results so far are not documented yet.",
+            strategicAction.nextSteps,
+          ].filter(Boolean)
+        : [strategicAction.nextSteps],
+      clientPrompts: ["Does that next step still line up with your priorities?"],
+    });
+  }
+
+  // Issues, each already carrying a proposed solution and owner.
+  const issuePoints = (prepPack?.issuesAndSolutions || [])
+    .slice(0, 3)
+    .map((item) => `${item.issue} -- ${item.businessImpact} Fix: ${item.solution} (${item.owner}, due ${item.dueDate})`);
+  const risks = issuePoints.length ? issuePoints : touch.risks.slice(0, 3);
+  if (risks.length) {
+    sections.push({
+      title: "Issues and what we're already doing",
+      minutes: 10,
+      talkingPoints: risks,
+      clientPrompts: ["Anything else that felt off this month we haven't covered?"],
+    });
+  }
+
+  // Wins + growth conversation.
+  sections.push({
+    title: "Wins and growth conversation",
+    minutes: 12,
+    talkingPoints: [...touch.wins.slice(0, 3), ...touch.talkingPoints.slice(0, 2)].filter(Boolean).length
+      ? [...touch.wins.slice(0, 3), ...touch.talkingPoints.slice(0, 2)].filter(Boolean)
+      : ["Anchor the conversation on measurable business value."],
+    clientPrompts: ["Where do you want to grow over the next quarter?"],
+  });
+
+  // Recap -- the SOP's five-question close.
+  sections.push({
+    title: "Recap and close",
+    minutes: 6,
+    talkingPoints: (prepPack?.recapQuestions || []).map((item) => item.question).length
+      ? (prepPack?.recapQuestions || []).map((item) => item.question)
+      : ["Restate what was agreed, with owners and dates."],
+    clientPrompts: ["Can you give me a tentative date for the items on your side?"],
+  });
+
+  return sections;
 }
 
 async function generateClaudeSections(
@@ -69,16 +159,32 @@ async function generateClaudeSections(
       "the room. Every section must include at least one client prompt -- a genuine question that pulls",
       "the client into the conversation instead of talking at them.",
       "",
-      "Sections must sum to roughly 60 minutes. Use ONLY the wins, risks, talking points, and agenda",
-      "already in the prep pack below -- never invent a metric, win, or risk that isn't already there.",
+      "Follow the SOP's meeting flow: open and frame -> business scorecard (lead the numbers, not the",
+      "services) -> goal review -> lead quality -> strategic action implementation % -> the business and",
+      "growth conversation (wins, issues with solutions, recommendations) -> recap and close.",
+      "",
+      "Ground every talking point in the actual evidence in the bundle below and QUOTE THE REAL NUMBERS",
+      "(leads, GBP call clicks, keyword rank and Market Share movement month over month, Google Ads spend",
+      "and CPL, Map Check-In posts, the strategic action's implementation %). A talking point that just",
+      "names a topic without its number is useless live on a call.",
+      "",
+      "Where a metric's availability is 'unavailable', do NOT invent it -- instead turn that gap into a",
+      "client prompt using the lead-quality questions provided (this is the SOP's sales-structure",
+      "conversation). Where clientParticipation shows gaps, cover the basics before any advanced",
+      "recommendation. Where a profile is flagged inactive/suspended, raise it as a risk, not a win.",
+      "",
+      "Sections must sum to roughly 60 minutes. Use ONLY what is in the bundle below -- never invent a",
+      "metric, win, or risk that isn't already there.",
       "",
       "Return JSON only.",
     ].join("\n"),
   );
 
+  const prepPack = touch.prepPack;
   const userText = [
     "Return a JSON object with a single key: sections.",
     "Each section needs: title, minutes (integer), talkingPoints (array of strings), clientPrompts (array of strings).",
+    "Use only the preparation bundle below. Do not invent metrics or sources.",
     "",
     JSON.stringify(
       {
@@ -87,6 +193,62 @@ async function generateClaudeSections(
         risks: touch.risks,
         talkingPoints: touch.talkingPoints,
         executiveBrief: touch.executiveBrief,
+        commitments: touch.commitments,
+        opportunities: touch.opportunities,
+        // The full evidence bundle: every connected source that fed the prep pack.
+        prepPack: prepPack
+          ? {
+              clientSummary: prepPack.clientSummary,
+              schedule: prepPack.schedule,
+              focusAreas: prepPack.focusAreas,
+              keyFacts: prepPack.keyFacts,
+              openCommitments: prepPack.openCommitments,
+              activeOpportunities: prepPack.activeOpportunities,
+              businessScorecard: prepPack.businessScorecard,
+              seoPerformance: prepPack.seoPerformance
+                ? {
+                    // Drop raw pin arrays -- the AM reads those off the heatmap, not the guide.
+                    profiles: (prepPack.seoPerformance.profiles || []).map((profile) => ({
+                      businessName: profile.business.businessName,
+                      address: profile.business.address,
+                      rating: profile.business.rating,
+                      reviews: profile.business.reviews,
+                      status: profile.status,
+                      statusNote: profile.statusNote,
+                      keywordScans: profile.keywordScans,
+                      heatmapSummary: profile.heatmapComparisons.map((comparison) => ({
+                        keyword: comparison.keyword,
+                        current: {
+                          scanDate: comparison.current.scanDate,
+                          averageRankPosition: comparison.current.averageRankPosition,
+                          shareOfLocalVoicePercent: comparison.current.shareOfLocalVoicePercent,
+                          top3Percent: comparison.current.top3Percent,
+                          topCompetitors: comparison.current.topCompetitors,
+                        },
+                        previous: comparison.previous
+                          ? {
+                              scanDate: comparison.previous.scanDate,
+                              averageRankPosition: comparison.previous.averageRankPosition,
+                              shareOfLocalVoicePercent: comparison.previous.shareOfLocalVoicePercent,
+                            }
+                          : null,
+                      })),
+                    })),
+                    gbpPerformance: prepPack.seoPerformance.gbpPerformance,
+                    checkinBusinesses: prepPack.seoPerformance.checkinBusinesses,
+                    notes: prepPack.seoPerformance.notes,
+                  }
+                : null,
+              adsPerformance: prepPack.adsPerformance,
+              strategicAction: prepPack.strategicAction,
+              clientParticipation: prepPack.clientParticipation,
+              issuesAndSolutions: prepPack.issuesAndSolutions,
+              leadQualityQuestions: prepPack.leadQualityQuestions,
+              recapQuestions: prepPack.recapQuestions,
+              dataGaps: prepPack.dataGaps,
+              integrationSources: prepPack.integrationSources,
+            }
+          : null,
       },
       null,
       2,

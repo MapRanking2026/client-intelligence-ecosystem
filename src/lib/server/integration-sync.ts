@@ -52,6 +52,11 @@ interface ClickUpTask {
   assignees?: Array<{ username?: string; email?: string }>;
   status?: { status?: string; type?: string };
   custom_fields?: Array<{ name?: string; value?: unknown }>;
+  // ClickUp nests deliverables under a per-client folder ("Icon Beauty") with the department as
+  // the list ("SEO"). The client name lives here, not in the task name.
+  list?: { id?: string; name?: string };
+  folder?: { id?: string; name?: string; hidden?: boolean };
+  project?: { id?: string; name?: string; hidden?: boolean };
 }
 
 interface GoogleCalendarEvent {
@@ -79,6 +84,12 @@ function createEmptyCounts(): IntegrationSyncCounts {
     failed: 0,
   };
 }
+
+// 100 tasks/page. Measured ~0.25s per task end-to-end (fetch + per-task Firestore write), so 15
+// pages ran 370s and blew the route's 300s ceiling. 10 pages (~1000 tasks, ~250s) leaves headroom
+// while still covering far more clients than the previous 3-page cap.
+// Follow-up: batch the Firestore writes to make deeper paging affordable.
+const CLICKUP_MAX_TASK_PAGES = 10;
 
 function toSlug(value: string) {
   return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
@@ -483,7 +494,15 @@ function collectClickUpSignals(task: ClickUpTask) {
     return values.filter(Boolean) as string[];
   });
 
+  // ClickUp marks the name of a hidden folder/project as the literal string "hidden" -- that is not
+  // a client name, so drop it rather than letting it match noise.
+  const containerNames = [task.folder?.name, task.project?.name, task.list?.name].filter(
+    (name): name is string => typeof name === "string" && name.length > 0 && name.toLowerCase() !== "hidden",
+  );
+
   return [
+    // Folder/project first: for deliverables the client name lives on the container, not the task.
+    ...containerNames,
     task.name || "",
     task.description || "",
     ...(task.tags || []).map((tag) => tag.name || ""),
@@ -533,7 +552,10 @@ async function syncClickUp(context: TenantContext, record: IntegrationConnection
   }
 
   const tasks: ClickUpTask[] = [];
-  for (let page = 0; page < 3; page += 1) {
+  // ClickUp returns 100 tasks/page ordered by last update, workspace-wide. Three pages only covered
+  // the 300 most recent tasks, so most of the ~220 clients got no deliverables at all. Page deeper so
+  // every client's brief has its ClickUp work; the loop still stops early on a short page.
+  for (let page = 0; page < CLICKUP_MAX_TASK_PAGES; page += 1) {
     const tasksPayload = await fetchJson(
       `${baseUrl}/team/${selectedTeam.id}/task?include_closed=true&subtasks=true&page=${page}&order_by=updated`,
       {

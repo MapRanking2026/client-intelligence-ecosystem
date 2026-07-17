@@ -11,6 +11,10 @@ import {
   refreshIntegration,
 } from "@/src/lib/server/integrations";
 
+// Provider syncs page through hundreds of remote records and write back to Firestore, which runs
+// well past Vercel's default function timeout. 300s is the Vercel ceiling.
+export const maxDuration = 300;
+
 const providerIdSchema = z.enum(integrationProviderIds);
 
 const integrationActionSchema = z.object({

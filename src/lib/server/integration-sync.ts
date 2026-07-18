@@ -379,9 +379,11 @@ async function maybeRefreshConnection(
   origin?: string,
 ) {
   const definition = getIntegrationDefinition(record.providerId);
+  // Refresh with a 10-minute safety buffer (and for already-expired tokens, since the diff goes
+  // negative) so a long-running sync never mid-flights on a token that lapses part way through.
   const shouldRefreshBecauseExpiring =
     record.tokenExpiresAt &&
-    new Date(record.tokenExpiresAt).getTime() - Date.now() <= 5 * 60 * 1000;
+    new Date(record.tokenExpiresAt).getTime() - Date.now() <= 10 * 60 * 1000;
 
   if (definition.authMode === "rotating_token" || shouldRefreshBecauseExpiring) {
     await refreshIntegration(context, record.providerId, origin);

@@ -1,7 +1,7 @@
 import type { TenantContext } from "@/src/lib/contracts/mtos";
 import { syncClickUpClients } from "@/src/lib/server/clickup-client-sync";
 import { syncIntegrationProvider } from "@/src/lib/server/integration-sync";
-import { listConnectedSyncableProviders } from "@/src/lib/server/integrations";
+import { listConnectedSyncableProviders, refreshAllConnectedTokens } from "@/src/lib/server/integrations";
 import { tenantUsersCollectionPath } from "@/src/lib/server/firebase/collections";
 import { getFirebaseAdminDb } from "@/src/lib/server/firebase/admin";
 import { getServerEnv } from "@/src/lib/server/env";
@@ -12,6 +12,21 @@ interface ProviderResult {
   summary: string;
 }
 
+export interface TokenRefreshReport {
+  providerId: string;
+  status: "refreshed" | "skipped" | "failed";
+  detail?: string;
+}
+
+/**
+ * Refreshes every connected integration's token that can expire, for a tenant. Kept lightweight so
+ * it can run on a frequent cron independent of the heavier data syncs.
+ */
+export async function runTokenRefresh(tenantId: string): Promise<TokenRefreshReport[]> {
+  const systemContext: TenantContext = { tenantId, userId: "system-cron", role: "tenant_admin" };
+  return refreshAllConnectedTokens(systemContext);
+}
+
 interface ClientSyncResult {
   userId: string;
   status: "completed" | "failed";
@@ -20,6 +35,7 @@ interface ClientSyncResult {
 
 export interface DailySyncReport {
   tenantId: string;
+  tokenRefresh: TokenRefreshReport[];
   providers: ProviderResult[];
   clientSyncs: ClientSyncResult[];
 }
@@ -31,6 +47,10 @@ export interface DailySyncReport {
  */
 export async function runDailyTenantSync(tenantId: string): Promise<DailySyncReport> {
   const systemContext: TenantContext = { tenantId, userId: "system-cron", role: "tenant_admin" };
+
+  // Refresh every connectable token up front -- including providers no sync touches -- so all
+  // credentials are fresh before the syncs and stay exercised.
+  const tokenRefresh = await refreshAllConnectedTokens(systemContext);
 
   const providerIds = await listConnectedSyncableProviders(tenantId);
   const providers: ProviderResult[] = [];
@@ -76,7 +96,7 @@ export async function runDailyTenantSync(tenantId: string): Promise<DailySyncRep
     }
   }
 
-  return { tenantId, providers, clientSyncs };
+  return { tenantId, tokenRefresh, providers, clientSyncs };
 }
 
 export function getDailySyncTenantId() {

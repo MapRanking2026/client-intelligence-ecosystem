@@ -956,7 +956,7 @@ async function verifyOAuthState(stateToken: string) {
 
 async function exchangeOAuthToken(
   provider: ProviderDefinition,
-  params: { code?: string; refreshToken?: string },
+  params: { code?: string; refreshToken?: string; userType?: string },
   origin?: string,
 ) {
   if (!provider.oauth) {
@@ -979,6 +979,11 @@ async function exchangeOAuthToken(
   }
   if (params.refreshToken) {
     tokenParams.set("refresh_token", params.refreshToken);
+  }
+  // GoHighLevel requires the auth class on the refresh grant; without it, a valid Company/Location
+  // token is rejected as "invalid".
+  if (provider.id === "gohighlevel") {
+    tokenParams.set("user_type", params.userType || "Location");
   }
 
   let response: Response;
@@ -1282,7 +1287,7 @@ export async function refreshIntegration(context: TenantContext, providerId: Int
 
     const payload = await exchangeOAuthToken(
       provider,
-      { refreshToken: credentials.refreshToken },
+      { refreshToken: credentials.refreshToken, userType: credentials.userType },
       origin,
     );
 
@@ -1412,6 +1417,49 @@ export async function listConnectedSyncableProviders(tenantId: string): Promise<
   return Array.from(stored.entries())
     .filter(([providerId, record]) => record.status === "connected" && syncEnabledProviders.has(providerId))
     .map(([providerId]) => providerId);
+}
+
+interface TokenRefreshResult {
+  providerId: IntegrationProviderId;
+  status: "refreshed" | "skipped" | "failed";
+  detail?: string;
+}
+
+/**
+ * Proactively refreshes the token of every connected integration whose credential can expire --
+ * OAuth (with a refresh strategy) and rotating-token providers. API-key providers are skipped since
+ * their credential never expires. Runs even for connections no sync touches (Analytics, Drive, Meet)
+ * so their refresh tokens stay exercised and never lapse, removing any need to refresh by hand.
+ */
+export async function refreshAllConnectedTokens(context: TenantContext): Promise<TokenRefreshResult[]> {
+  const stored = await listStoredConnections(context.tenantId);
+  const results: TokenRefreshResult[] = [];
+
+  for (const [providerId, record] of stored) {
+    if (record.status !== "connected") {
+      continue;
+    }
+    const definition = getProviderDefinition(providerId);
+    const canExpire =
+      definition.authMode === "rotating_token" ||
+      (definition.authMode === "oauth" && definition.oauth?.refreshStrategy !== "none");
+    if (!canExpire) {
+      results.push({ providerId, status: "skipped", detail: "credential does not expire" });
+      continue;
+    }
+    try {
+      await refreshIntegration(context, providerId);
+      results.push({ providerId, status: "refreshed" });
+    } catch (error) {
+      results.push({
+        providerId,
+        status: "failed",
+        detail: error instanceof Error ? error.message : "refresh failed",
+      });
+    }
+  }
+
+  return results;
 }
 
 export async function getIntegrationConnection(

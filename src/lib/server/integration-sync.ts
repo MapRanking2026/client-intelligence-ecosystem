@@ -18,7 +18,6 @@ import {
   getIntegrationDefinition,
   refreshIntegration,
 } from "@/src/lib/server/integrations";
-import { getMtosDataSource } from "@/src/lib/server/data/seed-mtos-data-source";
 import { prepareMonthlyTouch } from "@/src/lib/server/services/monthly-touch-prep-service";
 import {
   clientPath,
@@ -190,8 +189,10 @@ async function syncGoogleCalendar(context: TenantContext, record: IntegrationCon
 
   events.sort((a, b) => a.startIso.localeCompare(b.startIso));
 
-  const dataSource = getMtosDataSource(context);
-  const clients = await dataSource.getClients();
+  // Read the roster directly rather than through the data source: getClients() narrows to the
+  // caller's synced-client visibility, and the cron runs as "system-cron", which has none -- so the
+  // sync saw zero clients and matched nothing. A background sync covers the whole tenant.
+  const clients = await listFirestoreClients(context.tenantId);
   const counts = createEmptyCounts();
   counts.fetched = events.length;
   const touchedTouchIds = new Set<string>();
@@ -261,10 +262,30 @@ async function syncGoogleCalendar(context: TenantContext, record: IntegrationCon
 
   await commitBatch(batch);
 
+  // Store the resolved matches rather than the raw feed: 180 days of events exceeds Firestore's 1MiB
+  // document limit, and the matches are what anything downstream actually reads.
+  const snapshotPayload = {
+    capturedAt: nowIso,
+    windowStart: timeMin,
+    windowEnd: timeMax,
+    eventsScanned: events.length,
+    matchedEvents: matches.length,
+    clientsScheduled: nextTouchByClient.size,
+    clientsWithRecentTouch: lastTouchByClient.size,
+    matches: matches.map((match) => ({
+      eventId: match.eventId,
+      clientId: match.clientId,
+      clientName: match.clientName,
+      startIso: match.startIso,
+      summary: match.summary,
+      reason: match.reason,
+    })),
+  };
+
   return {
     summary: `${formatSummaryCount("calendar event", counts.fetched)} scanned · ${formatSummaryCount("client", nextTouchByClient.size)} scheduled · ${formatSummaryCount("client", lastTouchByClient.size)} with a recent touch`,
     counts,
-    snapshotPayload: payload,
+    snapshotPayload,
     touchedTouchIds: Array.from(touchedTouchIds),
   } satisfies SyncExecutionResult;
 }

@@ -56,7 +56,7 @@ interface ClaudeTouchOutput {
   risks: string[];
 }
 
-const claudeResponseSchema = z.object({
+export const claudeResponseSchema = z.object({
   executiveBrief: z.string().min(1),
   agenda: z.array(z.string().min(1)).min(4).max(6),
   talkingPoints: z.array(z.string().min(1)).min(3).max(6),
@@ -84,6 +84,150 @@ const claudeResponseSchema = z.object({
     .min(2)
     .max(4),
 });
+
+/** Keys models commonly use to carry the human-readable text of a structured item. */
+const TEXT_CARRYING_KEYS = [
+  "text",
+  "point",
+  "topic",
+  "title",
+  "headline",
+  "statement",
+  "summary",
+  "label",
+  "description",
+  "detail",
+  "details",
+  "item",
+  "content",
+  "win",
+  "risk",
+  "note",
+];
+
+/**
+ * Flattens a model-supplied value to text. Claude legitimately answers with richer structures than
+ * the schema allows (an agenda item as `{topic, detail}`, a brief split into sections), and losing
+ * the response to a type error is worse than reshaping it. Every branch preserves the words the
+ * model actually returned -- nothing here supplies content of its own.
+ */
+function coerceToText(value: unknown, joiner = " — "): string {
+  if (typeof value === "string") return value.trim();
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (Array.isArray(value)) {
+    return value
+      .map((entry) => coerceToText(entry, joiner))
+      .filter(Boolean)
+      .join(joiner);
+  }
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    const parts: string[] = [];
+
+    // Known text keys first so the item reads in a sensible order...
+    for (const key of TEXT_CARRYING_KEYS) {
+      const part = record[key];
+      const text = typeof part === "string" ? part.trim() : "";
+      if (text && !parts.includes(text)) parts.push(text);
+    }
+
+    // ...then anything else the model attached ("why", "impact", "nextStep", ...). Supporting detail
+    // is real analysis; dropping it because the key was not on a list loses content the AM needs.
+    for (const [key, part] of Object.entries(record)) {
+      if (TEXT_CARRYING_KEYS.includes(key)) continue;
+      const text = typeof part === "string" ? part.trim() : "";
+      if (text && !parts.includes(text)) parts.push(text);
+    }
+
+    if (parts.length) return parts.join(joiner);
+  }
+  return "";
+}
+
+/** Flattens a model-supplied value to a list of strings, unwrapping `{items: [...]}`-style holders. */
+function coerceToTextArray(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.map((entry) => coerceToText(entry)).filter(Boolean);
+  }
+  if (typeof value === "string") {
+    const text = value.trim();
+    return text ? [text] : [];
+  }
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    for (const entry of Object.values(record)) {
+      if (Array.isArray(entry)) return coerceToTextArray(entry);
+    }
+    const values = Object.values(record)
+      .map((entry) => coerceToText(entry))
+      .filter(Boolean);
+    if (values.length) return values;
+  }
+  return [];
+}
+
+/** Normalises the model's confidence wording onto the three levels the schema accepts. */
+function coerceConfidence(value: unknown): "High" | "Medium" | "Low" {
+  const text = coerceToText(value).toLowerCase();
+  if (text.startsWith("high") || text.startsWith("strong")) return "High";
+  if (text.startsWith("low") || text.startsWith("weak")) return "Low";
+  return "Medium";
+}
+
+/**
+ * Shapes evidence entries. When the model supplies bare text instead of a provenance object, the
+ * source and freshness are recorded as unspecified rather than attributed to a source it never
+ * named -- an invented citation is worse than an honest gap.
+ */
+function coerceEvidence(value: unknown) {
+  const entries = Array.isArray(value) ? value : value == null ? [] : [value];
+  return entries
+    .map((entry) => {
+      if (typeof entry === "string") {
+        return { label: entry.trim(), source: "Unspecified", freshness: "Unspecified" };
+      }
+      const record = (entry || {}) as Record<string, unknown>;
+      return {
+        label: coerceToText(record.label ?? record.title ?? record.name ?? record.text ?? entry),
+        source: coerceToText(record.source ?? record.provider ?? record.origin) || "Unspecified",
+        freshness:
+          coerceToText(record.freshness ?? record.asOf ?? record.date ?? record.recency) || "Unspecified",
+      };
+    })
+    .filter((entry) => entry.label)
+    .slice(0, 3);
+}
+
+/** Reshapes a raw Claude response into the schema's shape before validation. */
+export function normalizeClaudeTouchPayload(raw: JsonRecord) {
+  const record = raw as Record<string, unknown>;
+  const rawRecommendations = Array.isArray(record.recommendations)
+    ? record.recommendations
+    : record.recommendations
+      ? [record.recommendations]
+      : [];
+
+  return {
+    executiveBrief: coerceToText(record.executiveBrief, "\n\n"),
+    agenda: coerceToTextArray(record.agenda).slice(0, 6),
+    talkingPoints: coerceToTextArray(record.talkingPoints).slice(0, 6),
+    wins: coerceToTextArray(record.wins).slice(0, 8),
+    risks: coerceToTextArray(record.risks).slice(0, 8),
+    recommendations: rawRecommendations
+      .map((entry) => {
+        const item = (entry || {}) as Record<string, unknown>;
+        return {
+          title: coerceToText(item.title ?? item.name ?? item.headline),
+          summary: coerceToText(item.summary ?? item.description ?? item.detail),
+          rationale: coerceToText(item.rationale ?? item.why ?? item.reason ?? item.justification),
+          confidence: coerceConfidence(item.confidence),
+          evidence: coerceEvidence(item.evidence ?? item.sources ?? item.support),
+        };
+      })
+      .filter((item) => item.title && item.summary && item.rationale && item.evidence.length)
+      .slice(0, 4),
+  };
+}
 
 const providerLabels: Record<string, string> = {
   clickup: "ClickUp",
@@ -974,14 +1118,26 @@ async function generateClaudeTouchOutput(
   );
 
   const parsed = claudeResponseSchema.parse(
-    await callClaudeForJson({
-      env,
-      system,
-      userText: [
-        "Return a JSON object with keys: executiveBrief, agenda, talkingPoints, wins, risks, recommendations.",
-        "Each recommendation must include title, summary, rationale, confidence, and evidence.",
-        "Use only the preparation bundle below. Do not invent sources.",
-        "",
+    normalizeClaudeTouchPayload(
+      await callClaudeForJson({
+        env,
+        system,
+        userText: [
+          "Return a JSON object with exactly these keys and types:",
+          '  executiveBrief: a single string (use "\\n\\n" between paragraphs -- NOT an object)',
+          "  agenda: array of 4-6 strings (each a plain string, not an object)",
+          "  talkingPoints: array of 3-6 strings",
+          "  wins: array of 3-8 strings",
+          "  risks: array of 2-8 strings",
+          "  recommendations: array of 2-4 objects, each exactly:",
+          "    { title: string, summary: string, rationale: string,",
+          '      confidence: exactly "High" | "Medium" | "Low",',
+          "      evidence: array of 1-3 objects, each { label: string, source: string, freshness: string } }",
+          "",
+          "Every list entry must be a plain string except recommendations and evidence, which are the",
+          "objects described above. Respect the item limits -- extra items are discarded.",
+          "Use only the preparation bundle below. Do not invent sources.",
+          "",
         JSON.stringify(
           {
             client: {
@@ -1008,12 +1164,13 @@ async function generateClaudeTouchOutput(
           null,
           2,
         ),
-      ].join("\n"),
-      // The brief now runs several paragraphs and weaves in ClickUp context on top of wins, risks,
-      // recommendations, agenda, and talking points -- 2000/4000 truncated the JSON mid-array.
-      maxTokens: 8000,
-      temperature: 0.2,
-    }),
+        ].join("\n"),
+        // The brief now runs several paragraphs and weaves in ClickUp context on top of wins, risks,
+        // recommendations, agenda, and talking points -- 2000/4000 truncated the JSON mid-array.
+        maxTokens: 8000,
+        temperature: 0.2,
+      }),
+    ),
   );
 
   return {

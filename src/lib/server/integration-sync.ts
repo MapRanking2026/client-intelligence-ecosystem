@@ -215,7 +215,17 @@ async function syncGoogleCalendar(context: TenantContext, record: IntegrationCon
   for (const client of clients) {
     const next = nextTouchByClient.get(client.id);
     const last = lastTouchByClient.get(client.id);
-    if (!next && !last) {
+
+    // A previously scheduled touch that has since passed must not linger as "next", or a brief
+    // presents a date in the past as the upcoming call.
+    const existing = client as unknown as { nextTouchStartAt?: string; calendarSource?: string };
+    const staleNextTouch =
+      !next &&
+      Boolean(existing.nextTouchStartAt) &&
+      (existing.nextTouchStartAt as string) < nowIso &&
+      existing.calendarSource === "google-calendar";
+
+    if (!next && !last && !staleNextTouch) {
       counts.skipped += 1;
       continue;
     }
@@ -228,6 +238,10 @@ async function syncGoogleCalendar(context: TenantContext, record: IntegrationCon
       clientUpdate.touchDate = formatDateLabel(next.startIso);
       clientUpdate.nextTouchEventId = next.eventId;
       clientUpdate.nextTouchStartAt = next.startIso;
+    } else if (staleNextTouch) {
+      // Only the calendar-owned fields are cleared; touchDate is also written by the ClickUp sync.
+      clientUpdate.nextTouchEventId = null;
+      clientUpdate.nextTouchStartAt = null;
     }
     if (last) {
       clientUpdate.lastTouchEventId = last.eventId;

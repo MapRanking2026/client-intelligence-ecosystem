@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { getDailySyncTenantId, runDailyTenantSync } from "@/src/lib/server/services/daily-sync-service";
+import { runDailyTenantSyncAllTenants } from "@/src/lib/server/services/daily-sync-service";
 
 // Syncs every connected provider (refreshing their tokens) plus the client roster; needs the full
 // Vercel budget.
@@ -23,7 +23,7 @@ async function handle(request: Request) {
   }
 
   try {
-    const report = await runDailyTenantSync(getDailySyncTenantId());
+    const report = await runDailyTenantSyncAllTenants();
     return NextResponse.json({ ok: true, report });
   } catch (error) {
     return NextResponse.json(

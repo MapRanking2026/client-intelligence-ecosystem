@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { getDailySyncTenantId, runTokenRefresh } from "@/src/lib/server/services/daily-sync-service";
+import { runTokenRefreshAllTenants } from "@/src/lib/server/services/daily-sync-service";
 
 // Token refresh is quick, but give it room in case several providers refresh at once.
 // Scheduled daily (03:00 UTC) -- the Hobby plan caps crons at once per day; the daily-sync cron
@@ -20,7 +20,7 @@ async function handle(request: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
   try {
-    const report = await runTokenRefresh(getDailySyncTenantId());
+    const report = await runTokenRefreshAllTenants();
     return NextResponse.json({ ok: true, report });
   } catch (error) {
     return NextResponse.json(

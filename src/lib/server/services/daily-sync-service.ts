@@ -102,3 +102,41 @@ export async function runDailyTenantSync(tenantId: string): Promise<DailySyncRep
 export function getDailySyncTenantId() {
   return getServerEnv().pilotTenantId;
 }
+
+/**
+ * Lists every real tenant to run scheduled work against. Reads the `tenants` collection, which only
+ * returns documents that actually exist -- so stray integration subcollections left under a
+ * non-existent tenant id (e.g. an old demo seed) are ignored. Falls back to the configured pilot
+ * tenant if the collection can't be read, so a cron never silently does nothing.
+ */
+export async function listActiveTenantIds(): Promise<string[]> {
+  const db = getFirebaseAdminDb();
+  if (!db) return [getDailySyncTenantId()];
+  try {
+    const snapshot = await db.collection("tenants").get();
+    const ids = snapshot.docs.map((doc) => doc.id).filter(Boolean);
+    return ids.length ? ids : [getDailySyncTenantId()];
+  } catch {
+    return [getDailySyncTenantId()];
+  }
+}
+
+/** Refreshes tokens for every active tenant. */
+export async function runTokenRefreshAllTenants(): Promise<Record<string, TokenRefreshReport[]>> {
+  const tenantIds = await listActiveTenantIds();
+  const out: Record<string, TokenRefreshReport[]> = {};
+  for (const tenantId of tenantIds) {
+    out[tenantId] = await runTokenRefresh(tenantId);
+  }
+  return out;
+}
+
+/** Runs the full daily sync for every active tenant. */
+export async function runDailyTenantSyncAllTenants(): Promise<Record<string, DailySyncReport>> {
+  const tenantIds = await listActiveTenantIds();
+  const out: Record<string, DailySyncReport> = {};
+  for (const tenantId of tenantIds) {
+    out[tenantId] = await runDailyTenantSync(tenantId);
+  }
+  return out;
+}

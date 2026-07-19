@@ -3,6 +3,8 @@ import { NextResponse } from "next/server";
 import { getDailySyncTenantId, runTokenRefresh } from "@/src/lib/server/services/daily-sync-service";
 
 // Token refresh is quick, but give it room in case several providers refresh at once.
+// Scheduled daily (03:00 UTC) -- the Hobby plan caps crons at once per day; the daily-sync cron
+// (09:00) also refreshes, and on-demand refresh at every sync/prep covers intra-day expiry.
 export const maxDuration = 120;
 
 function isAuthorized(request: Request) {

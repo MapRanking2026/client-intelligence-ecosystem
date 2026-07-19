@@ -122,6 +122,25 @@ const rotatingTokenFields: IntegrationFieldDefinition[] = [
   },
 ];
 
+/**
+ * Scopes requested when connecting GoHighLevel. The agency scopes authorise the install; the
+ * sub-account ones (contacts, opportunities) are what a minted location token needs to read a
+ * client's CRM data. GOHIGHLEVEL_SCOPES overrides the list if GHL ever objects to one of them.
+ */
+function resolveGoHighLevelScopes() {
+  const configured = (process.env.GOHIGHLEVEL_SCOPES || "").split(/[\s,]+/).filter(Boolean);
+  if (configured.length) {
+    return configured;
+  }
+  return [
+    "locations.readonly",
+    "oauth.readonly",
+    "oauth.write",
+    "contacts.readonly",
+    "opportunities.readonly",
+  ];
+}
+
 const providerDefinitions: ProviderDefinition[] = [
   {
     id: "clickup",
@@ -326,11 +345,12 @@ const providerDefinitions: ProviderDefinition[] = [
     oauth: {
       authUrl: "https://marketplace.gohighlevel.com/oauth/chooselocation",
       tokenUrl: "https://services.leadconnectorhq.com/oauth/token",
-      // Agency install: GHL validates the requested scopes against the Company auth class, which
-      // rejects location-only scopes like contacts.readonly. Request only agency-compatible scopes;
-      // the location tokens minted via /oauth/locationToken inherit the app profile's location
-      // scopes (contacts.readonly, opportunities.readonly), so per-client lead data still flows.
-      scopes: ["locations.readonly", "oauth.readonly", "oauth.write"],
+      // A minted location token carries the scopes the authorize request asked for, NOT everything
+      // the marketplace app profile allows -- requesting only the three agency scopes is why
+      // /oauth/locationToken came back with exactly those and every contacts/opportunities read
+      // 401'd. The sub-account scopes must be requested here as well. Overridable via
+      // GOHIGHLEVEL_SCOPES so the list can be corrected without a deploy if GHL objects to one.
+      scopes: resolveGoHighLevelScopes(),
       clientIdEnv: "GOHIGHLEVEL_CLIENT_ID",
       clientSecretEnv: "GOHIGHLEVEL_CLIENT_SECRET",
       authUrlEnv: "GOHIGHLEVEL_AUTH_URL",

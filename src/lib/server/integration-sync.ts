@@ -31,6 +31,11 @@ import {
 } from "@/src/lib/server/firebase/collections";
 import { getFirebaseAdminDb } from "@/src/lib/server/firebase/admin";
 import { getServerEnv } from "@/src/lib/server/env";
+import {
+  matchCalendarEventsToClients,
+  selectLastTouchPerClient,
+  selectNextTouchPerClient,
+} from "@/src/lib/server/calendar-touch-matching";
 import { namesLikelyMatch, normalizeText } from "@/src/lib/server/name-matching";
 
 type JsonRecord = Record<string, unknown>;
@@ -65,6 +70,7 @@ interface GoogleCalendarEvent {
   start?: { dateTime?: string; date?: string };
   end?: { dateTime?: string; date?: string };
   status?: string;
+  attendees?: Array<{ email?: string }>;
 }
 
 interface GoogleAdsAccessibleCustomer {
@@ -141,18 +147,6 @@ function getEventStartIso(event: GoogleCalendarEvent) {
   return date.toISOString();
 }
 
-function matchesMonthlyTouchEvent(summary: string, clientName: string) {
-  const normalizedSummary = normalizeText(summary);
-  if (!normalizedSummary.includes("monthly touch")) {
-    return false;
-  }
-  const normalizedClient = normalizeText(clientName);
-  if (!normalizedClient) {
-    return false;
-  }
-  return normalizedSummary.includes(normalizedClient);
-}
-
 async function syncGoogleCalendar(context: TenantContext, record: IntegrationConnectionRecord, origin?: string) {
   const db = ensureFirestore();
   const refreshedRecord = await maybeRefreshConnection(context, record, origin);
@@ -165,7 +159,9 @@ async function syncGoogleCalendar(context: TenantContext, record: IntegrationCon
   }
 
   const now = new Date();
-  const timeMin = now.toISOString();
+  // Look back as well as forward: most touches on the calendar have already happened, and the last
+  // one is the "when did we last speak" signal a brief needs.
+  const timeMin = new Date(now.getTime() - 1000 * 60 * 60 * 24 * 90).toISOString();
   const timeMax = new Date(now.getTime() + 1000 * 60 * 60 * 24 * 90).toISOString();
   const url = new URL(`${apiBaseUrl}/calendars/primary/events`);
   url.searchParams.set("timeMin", timeMin);
@@ -188,6 +184,7 @@ async function syncGoogleCalendar(context: TenantContext, record: IntegrationCon
       id: event.id || "",
       summary: event.summary || "",
       startIso: getEventStartIso(event),
+      attendeeEmails: (event.attendees || []).map((attendee) => attendee.email || "").filter(Boolean),
     }))
     .filter((event) => event.id && event.startIso && event.summary);
 
@@ -208,38 +205,53 @@ async function syncGoogleCalendar(context: TenantContext, record: IntegrationCon
     writes = 0;
   };
 
+  const nowIso = now.toISOString();
+  const matches = matchCalendarEventsToClients(events, clients);
+  const nextTouchByClient = selectNextTouchPerClient(matches, nowIso);
+  const lastTouchByClient = selectLastTouchPerClient(matches, nowIso);
+
   let batch = db.batch();
   for (const client of clients) {
-    const match = events.find((event) => matchesMonthlyTouchEvent(event.summary, client.name));
-    if (!match) {
+    const next = nextTouchByClient.get(client.id);
+    const last = lastTouchByClient.get(client.id);
+    if (!next && !last) {
       counts.skipped += 1;
       continue;
     }
 
-    const touchDate = formatDateLabel(match.startIso);
-    batch.set(
-      db.doc(clientPath(context.tenantId, client.id)),
-      {
-        touchDate,
-        nextTouchEventId: match.id,
-        nextTouchStartAt: match.startIso,
-        calendarSource: "google-calendar",
-        updatedAt: getNowIso(),
-      },
-      { merge: true },
-    );
-    batch.set(
-      db.doc(monthlyTouchPath(context.tenantId, client.touchId)),
-      {
-        scheduledAt: match.startIso,
-        calendarEventId: match.id,
-        updatedAt: getNowIso(),
-      },
-      { merge: true },
-    );
+    const clientUpdate: Record<string, unknown> = {
+      calendarSource: "google-calendar",
+      updatedAt: getNowIso(),
+    };
+    if (next) {
+      clientUpdate.touchDate = formatDateLabel(next.startIso);
+      clientUpdate.nextTouchEventId = next.eventId;
+      clientUpdate.nextTouchStartAt = next.startIso;
+    }
+    if (last) {
+      clientUpdate.lastTouchEventId = last.eventId;
+      clientUpdate.lastTouchStartAt = last.startIso;
+      clientUpdate.lastTouchSummary = last.summary;
+    }
+
+    batch.set(db.doc(clientPath(context.tenantId, client.id)), clientUpdate, { merge: true });
+    writes += 1;
+
+    if (next) {
+      batch.set(
+        db.doc(monthlyTouchPath(context.tenantId, client.touchId)),
+        {
+          scheduledAt: next.startIso,
+          calendarEventId: next.eventId,
+          updatedAt: getNowIso(),
+        },
+        { merge: true },
+      );
+      touchedTouchIds.add(client.touchId);
+      writes += 1;
+    }
+
     counts.updated += 1;
-    touchedTouchIds.add(client.touchId);
-    writes += 2;
 
     if (writes >= 450) {
       await commitBatch(batch);
@@ -250,7 +262,7 @@ async function syncGoogleCalendar(context: TenantContext, record: IntegrationCon
   await commitBatch(batch);
 
   return {
-    summary: `${formatSummaryCount("calendar event", counts.fetched)} scanned · ${formatSummaryCount("client", counts.updated)} scheduled`,
+    summary: `${formatSummaryCount("calendar event", counts.fetched)} scanned · ${formatSummaryCount("client", nextTouchByClient.size)} scheduled · ${formatSummaryCount("client", lastTouchByClient.size)} with a recent touch`,
     counts,
     snapshotPayload: payload,
     touchedTouchIds: Array.from(touchedTouchIds),

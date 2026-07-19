@@ -999,8 +999,11 @@ async function fetchGoogleAdsRows(
     headers["login-customer-id"] = loginCustomerId;
   }
 
+  // Google retires Ads API versions on a rolling schedule and a retired one 404s, which surfaced as
+  // an opaque sync failure. Overridable so the next retirement is a config change, not a deploy.
+  const apiVersion = process.env.GOOGLE_ADS_API_VERSION?.trim() || "v22";
   const payload = await fetchJson(
-    `https://googleads.googleapis.com/v20/customers/${customerId}/googleAds:searchStream`,
+    `https://googleads.googleapis.com/${apiVersion}/customers/${customerId}/googleAds:searchStream`,
     {
       method: "POST",
       headers,

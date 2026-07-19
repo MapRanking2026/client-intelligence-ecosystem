@@ -954,34 +954,42 @@ async function syncSearchConsole(context: TenantContext, record: IntegrationConn
   const { startDate, endDate } = getLast28DaysRange();
   const analytics: Array<Record<string, unknown>> = [];
 
-  for (const site of sites.slice(0, 5)) {
-    if (!site.siteUrl) {
-      continue;
-    }
+  // Properties we are only an unverified user on cannot be queried -- asking anyway returns 403 and
+  // used to abort the whole sync depending on where one landed in the list.
+  const queryableSites = sites.filter(
+    (site) => site.siteUrl && site.permissionLevel !== "siteUnverifiedUser",
+  );
+  let failedSites = 0;
 
-    const encodedSiteUrl = encodeURIComponent(site.siteUrl);
-    const analyticsPayload = await fetchJson(
-      `https://www.googleapis.com/webmasters/v3/sites/${encodedSiteUrl}/searchAnalytics/query`,
-      {
-        method: "POST",
-        headers: {
-          ...getBearerHeaders(accessToken),
-          "content-type": "application/json",
+  for (const site of queryableSites) {
+    const encodedSiteUrl = encodeURIComponent(site.siteUrl as string);
+    try {
+      const analyticsPayload = await fetchJson(
+        `https://www.googleapis.com/webmasters/v3/sites/${encodedSiteUrl}/searchAnalytics/query`,
+        {
+          method: "POST",
+          headers: {
+            ...getBearerHeaders(accessToken),
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            startDate,
+            endDate,
+            dimensions: ["query"],
+            rowLimit: 10,
+          }),
         },
-        body: JSON.stringify({
-          startDate,
-          endDate,
-          dimensions: ["query"],
-          rowLimit: 10,
-        }),
-      },
-    );
+      );
 
-    analytics.push({
-      siteUrl: site.siteUrl,
-      permissionLevel: site.permissionLevel || "unknown",
-      rows: Array.isArray(analyticsPayload.rows) ? analyticsPayload.rows : [],
-    });
+      analytics.push({
+        siteUrl: site.siteUrl,
+        permissionLevel: site.permissionLevel || "unknown",
+        rows: Array.isArray(analyticsPayload.rows) ? analyticsPayload.rows : [],
+      });
+    } catch {
+      // One property's failure should not cost us the other 82.
+      failedSites += 1;
+    }
   }
 
   counts.created = analytics.length;
@@ -990,6 +998,8 @@ async function syncSearchConsole(context: TenantContext, record: IntegrationConn
     summary: [
       `${formatSummaryCount("property", sites.length)} listed`,
       `${formatSummaryCount("analytics snapshot", analytics.length)} captured`,
+      `${sites.length - queryableSites.length} unverified skipped`,
+      ...(failedSites ? [`${failedSites} failed`] : []),
     ].join(", "),
     counts,
     snapshotPayload: {

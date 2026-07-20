@@ -81,18 +81,33 @@ function formatScanDate(value: string) {
   return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
+/**
+ * Check-in post dates arrive without a timezone, so pin the naive form to UTC -- otherwise the same
+ * post reads as a different day depending on the viewer's zone.
+ */
+function parsePostDate(value: string) {
+  const hasZone = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(value);
+  const date = new Date(hasZone ? value : `${value}Z`);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
 function formatPostDate(value: string) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
+  const date = parsePostDate(value);
+  if (!date) {
     return value;
   }
-  return date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  return date.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    timeZone: "UTC",
+  });
 }
 
 /** "12 days ago" reads faster than a date when the question is whether a client has gone quiet. */
 function describePostRecency(value: string) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
+  const date = parsePostDate(value);
+  if (!date) {
     return "";
   }
   const days = Math.floor((Date.now() - date.getTime()) / 86400000);

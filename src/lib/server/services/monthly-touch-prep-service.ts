@@ -28,6 +28,7 @@ import {
   fetchCheckinBusinesses,
   fetchCheckinPostActivity,
   fetchHeatmapComparisons,
+  parseCheckinPostDate,
   openDashboardSession,
 } from "@/src/lib/server/services/mapranking-dashboard";
 import { namesLikelyMatch } from "@/src/lib/server/name-matching";
@@ -932,7 +933,8 @@ function describeCheckinCadence(businesses: MapCheckinBusinessSummary[]) {
     if (!business.lastPostAt) {
       return `${business.businessName} has never published a check-in post`;
     }
-    const days = Math.floor((Date.now() - new Date(business.lastPostAt).getTime()) / 86400000);
+    const lastPostMs = parseCheckinPostDate(business.lastPostAt);
+    const days = lastPostMs === null ? NaN : Math.floor((Date.now() - lastPostMs) / 86400000);
     const age = Number.isFinite(days)
       ? days <= 0
         ? "today"

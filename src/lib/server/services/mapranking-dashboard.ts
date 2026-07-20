@@ -360,6 +360,19 @@ export async function fetchCheckinBusinesses(session: DashboardSession) {
   }));
 }
 
+/**
+ * Parses a check-in post date. The API returns these without a timezone ("2026-07-20T00:00:00"),
+ * which JS would otherwise read in whatever zone the process happens to run in -- UTC on the
+ * server, something else on a developer machine, so the same post could count as published in one
+ * and still pending in the other. Pin the naive form to UTC so the answer is the same everywhere.
+ */
+export function parseCheckinPostDate(value?: string | null): number | null {
+  if (!value) return null;
+  const hasZone = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(value);
+  const parsed = new Date(hasZone ? value : `${value}Z`).getTime();
+  return Number.isNaN(parsed) ? null : parsed;
+}
+
 export interface CheckinPostActivity {
   lastPostAt: string | null;
   lastPostPlatform: string | null;
@@ -384,11 +397,7 @@ export async function fetchCheckinPostActivity(
   let lastPostPlatform: string | null = null;
   let nextScheduledPostAt: string | null = null;
 
-  const toMs = (value?: string | null) => {
-    if (!value) return null;
-    const parsed = new Date(value).getTime();
-    return Number.isNaN(parsed) ? null : parsed;
-  };
+  const toMs = (value?: string | null) => parseCheckinPostDate(value);
 
   for (let page = 1; page <= maxPages; page += 1) {
     const payload = await postJson(

@@ -36,6 +36,7 @@ import {
   selectNextTouchPerClient,
 } from "@/src/lib/server/calendar-touch-matching";
 import { namesLikelyMatch, normalizeText } from "@/src/lib/server/name-matching";
+import { parseCheckinPostDate } from "@/src/lib/server/services/mapranking-dashboard";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -499,11 +500,7 @@ async function fetchCheckinPostActivity(
   let lastPostPlatform: string | null = null;
   let nextScheduledPostAt: string | null = null;
 
-  const toMs = (value?: string | null) => {
-    if (!value) return null;
-    const parsed = new Date(value).getTime();
-    return Number.isNaN(parsed) ? null : parsed;
-  };
+  const toMs = (value?: string | null) => parseCheckinPostDate(value);
 
   for (let page = 1; page <= maxPages; page += 1) {
     const payload = await fetchJson(`${apiBase}/api/checkin-business/get-posts`, {

@@ -138,6 +138,11 @@ function resolveGoHighLevelScopes() {
     "oauth.write",
     "contacts.readonly",
     "opportunities.readonly",
+    // Form submissions and call outcomes for the business scorecard.
+    "forms.readonly",
+    "conversations.readonly",
+    "conversations/message.readonly",
+    "conversations/reports.readonly",
   ];
 }
 

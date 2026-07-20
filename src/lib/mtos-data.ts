@@ -154,6 +154,11 @@ export interface MapCheckinBusinessSummary {
   totalPosts: number;
   scheduledPosts: number;
   connectedPlatforms: string[];
+  /** When this business last actually posted. Null when nothing has been published yet. */
+  lastPostAt: string | null;
+  lastPostPlatform: string | null;
+  /** Next queued post, if anything is lined up. */
+  nextScheduledPostAt: string | null;
 }
 
 export interface HeatmapComparison {

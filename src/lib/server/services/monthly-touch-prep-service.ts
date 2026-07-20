@@ -26,6 +26,7 @@ import {
   fetchAllBusinesses,
   fetchBusinessKeywordScanHistory,
   fetchCheckinBusinesses,
+  fetchCheckinPostActivity,
   fetchHeatmapComparisons,
   openDashboardSession,
 } from "@/src/lib/server/services/mapranking-dashboard";
@@ -429,6 +430,9 @@ function extractCheckinBusinesses(payload: JsonRecord | undefined, clientId: str
     connectedPlatforms: Object.entries((row.integration_status || {}) as Record<string, unknown>)
       .filter(([, connected]) => connected === true)
       .map(([platform]) => platform),
+    lastPostAt: pickString(row, ["lastPostAt"]) || null,
+    lastPostPlatform: pickString(row, ["lastPostPlatform"]) || null,
+    nextScheduledPostAt: pickString(row, ["nextScheduledPostAt"]) || null,
   }));
 }
 
@@ -904,7 +908,7 @@ function buildExecutiveBrief(
     .filter(Boolean);
 
   const seoParagraph = matchedBusiness
-    ? `SEO visibility (Rank Tracker, live scans): ${matchedBusiness.businessName} -- ${matchedBusiness.reviews ?? "n/a"} reviews at ${matchedBusiness.rating ?? "n/a"} stars. ${scanSummaries.length ? `Latest keyword scans: ${scanSummaries.join("; ")}. Read Average Rank and Market Share together, and lead with trend over any single snapshot.` : "No completed keyword scans were returned -- verify the scan schedule with the SEO team."}${seoPerformance.gbpPerformance.length ? ` GBP performance: ${seoPerformance.gbpPerformance.reduce((sum, row) => sum + row.calls, 0)} call clicks and ${seoPerformance.gbpPerformance.reduce((sum, row) => sum + row.directionRequests, 0)} direction requests this period.` : ""}${seoPerformance.checkinBusinesses.length ? ` Map Check-Ins: ${seoPerformance.checkinBusinesses.reduce((sum, b) => sum + b.totalPosts, 0)} posts published across connected platforms.` : ""}`
+    ? `SEO visibility (Rank Tracker, live scans): ${matchedBusiness.businessName} -- ${matchedBusiness.reviews ?? "n/a"} reviews at ${matchedBusiness.rating ?? "n/a"} stars. ${scanSummaries.length ? `Latest keyword scans: ${scanSummaries.join("; ")}. Read Average Rank and Market Share together, and lead with trend over any single snapshot.` : "No completed keyword scans were returned -- verify the scan schedule with the SEO team."}${seoPerformance.gbpPerformance.length ? ` GBP performance: ${seoPerformance.gbpPerformance.reduce((sum, row) => sum + row.calls, 0)} call clicks and ${seoPerformance.gbpPerformance.reduce((sum, row) => sum + row.directionRequests, 0)} direction requests this period.` : ""}${seoPerformance.checkinBusinesses.length ? ` Map Check-Ins: ${seoPerformance.checkinBusinesses.reduce((sum, b) => sum + b.totalPosts, 0)} posts published across connected platforms. ${describeCheckinCadence(seoPerformance.checkinBusinesses)}` : ""}`
     : `No Rank Tracker business record matched "${client.name}" -- confirm the business name in Rank Tracker matches this client exactly so SEO evidence can be pulled automatically.`;
 
   const strategicParagraph = strategicAction.hasAgreedAction
@@ -916,6 +920,35 @@ function buildExecutiveBrief(
     : `Client participation gap${participation.gaps.length === 1 ? "" : "s"}: ${participation.gaps.join("; ")}. Per the readiness rule, address these before recommending advanced moves.`;
 
   return [openingParagraph, scorecardParagraph, seoParagraph, strategicParagraph, participationParagraph].join("\n\n");
+}
+
+/**
+ * States when each check-in business last actually posted and what is queued, so the AM can open the
+ * posting-cadence conversation with a date rather than a count. Silence is reported as silence --
+ * "no post published yet" is a real finding, not a gap to gloss over.
+ */
+function describeCheckinCadence(businesses: MapCheckinBusinessSummary[]) {
+  const parts = businesses.map((business) => {
+    if (!business.lastPostAt) {
+      return `${business.businessName} has never published a check-in post`;
+    }
+    const days = Math.floor((Date.now() - new Date(business.lastPostAt).getTime()) / 86400000);
+    const age = Number.isFinite(days)
+      ? days <= 0
+        ? "today"
+        : days === 1
+          ? "1 day ago"
+          : `${days} days ago`
+      : "date unclear";
+    const next = business.nextScheduledPostAt
+      ? `next scheduled ${business.nextScheduledPostAt.slice(0, 10)}`
+      : "nothing scheduled next";
+    return `${business.businessName} last posted ${business.lastPostAt.slice(0, 10)} (${age}), ${next}`;
+  });
+
+  return parts.length
+    ? `Posting cadence: ${parts.join("; ")}. If the last post is old or nothing is scheduled, raise staying active as a talking point.`
+    : "";
 }
 
 function buildKeyFacts(
@@ -1248,7 +1281,18 @@ async function fetchLiveRankTrackerEvidence(
           namesLikelyMatch(client.name, business.businessName) || manualCheckinIds.has(business.businessId),
       );
       if (liveCheckins.length) {
-        checkinBusinesses = liveCheckins;
+        // Only this client's businesses need their post history read, so the extra calls are
+        // per-client rather than across the whole roster.
+        checkinBusinesses = await Promise.all(
+          liveCheckins.map(async (business) => {
+            try {
+              const activity = await fetchCheckinPostActivity(session, business.businessId);
+              return { ...business, ...activity };
+            } catch {
+              return { ...business, lastPostAt: null, lastPostPlatform: null, nextScheduledPostAt: null };
+            }
+          }),
+        );
       }
     } catch {
       // keep snapshot fallback

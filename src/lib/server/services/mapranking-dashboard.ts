@@ -360,6 +360,73 @@ export async function fetchCheckinBusinesses(session: DashboardSession) {
   }));
 }
 
+export interface CheckinPostActivity {
+  lastPostAt: string | null;
+  lastPostPlatform: string | null;
+  nextScheduledPostAt: string | null;
+}
+
+/**
+ * Finds when a check-in business last actually posted, plus what is queued next.
+ *
+ * The posts list is ordered by createdAt rather than by the post's own date, so position cannot be
+ * trusted -- every row read is compared. A post may also be "published" with a future date (a run
+ * created in advance), so it only counts as done once that date has passed. Page size is capped at
+ * 20; further pages are read only while no completed post has been found.
+ */
+export async function fetchCheckinPostActivity(
+  session: DashboardSession,
+  checkinId: string,
+  maxPages = 3,
+): Promise<CheckinPostActivity> {
+  const nowMs = Date.now();
+  let lastPostAt: string | null = null;
+  let lastPostPlatform: string | null = null;
+  let nextScheduledPostAt: string | null = null;
+
+  const toMs = (value?: string | null) => {
+    if (!value) return null;
+    const parsed = new Date(value).getTime();
+    return Number.isNaN(parsed) ? null : parsed;
+  };
+
+  for (let page = 1; page <= maxPages; page += 1) {
+    const payload = await postJson(
+      `${session.baseUrl}/api/checkin-business/get-posts`,
+      { checkin_id: checkinId, page, limit: 20 },
+      session.token,
+    );
+
+    const rows = Array.isArray(payload.data) ? (payload.data as JsonRecord[]) : [];
+    for (const row of rows) {
+      const date = typeof row.date === "string" ? row.date : "";
+      const status = String(row.status || "");
+      const at = toMs(date);
+      if (at === null) continue;
+
+      if (status === "published" && at <= nowMs) {
+        if (at > (toMs(lastPostAt) ?? 0)) {
+          lastPostAt = date;
+          lastPostPlatform = typeof row.platform === "string" ? row.platform : null;
+        }
+      } else if (at > nowMs && (status === "scheduled" || status === "published")) {
+        const current = toMs(nextScheduledPostAt);
+        if (current === null || at < current) {
+          nextScheduledPostAt = date;
+        }
+      }
+    }
+
+    const pagination = (payload.pagination || {}) as { totalPages?: number };
+    const totalPages = typeof pagination.totalPages === "number" ? pagination.totalPages : 1;
+    if (lastPostAt || page >= totalPages || rows.length < 20) {
+      break;
+    }
+  }
+
+  return { lastPostAt, lastPostPlatform, nextScheduledPostAt };
+}
+
 export interface DashboardBusinessSummary {
   businessId: string;
   businessName: string;

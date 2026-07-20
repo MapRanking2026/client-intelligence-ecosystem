@@ -81,6 +81,32 @@ function formatScanDate(value: string) {
   return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
+function formatPostDate(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+  return date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+}
+
+/** "12 days ago" reads faster than a date when the question is whether a client has gone quiet. */
+function describePostRecency(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+  const days = Math.floor((Date.now() - date.getTime()) / 86400000);
+  if (days <= 0) return "today";
+  if (days === 1) return "yesterday";
+  if (days < 30) return `${days} days ago`;
+  const months = Math.floor(days / 30);
+  return months === 1 ? "1 month ago" : `${months} months ago`;
+}
+
+function formatPlatform(value: string) {
+  return value.replace(/_/g, " ");
+}
+
 function formatMetric(metric: ScorecardMetric) {
   if (metric.value === null) {
     return "Not available";
@@ -378,6 +404,26 @@ export function SeoPerformancePanel({ seo }: { seo: SeoPerformancePack }) {
                 <span>{business.totalPosts} posts published</span>
                 <span>{business.scheduledPosts} scheduled</span>
               </div>
+              <p className="mt-2 text-sm text-slate-200">
+                {business.lastPostAt ? (
+                  <>
+                    Last post{" "}
+                    <span className="font-semibold text-white">{formatPostDate(business.lastPostAt)}</span>
+                    <span className="text-slate-400">
+                      {" "}
+                      ({describePostRecency(business.lastPostAt)}
+                      {business.lastPostPlatform ? ` · ${formatPlatform(business.lastPostPlatform)}` : ""})
+                    </span>
+                  </>
+                ) : (
+                  <span className="text-slate-400">No post published yet</span>
+                )}
+              </p>
+              <p className="mt-1 text-xs text-slate-400">
+                {business.nextScheduledPostAt
+                  ? `Next scheduled ${formatPostDate(business.nextScheduledPostAt)}`
+                  : "Nothing scheduled next"}
+              </p>
               <p className="mt-1 text-xs text-slate-400">
                 Connected: {business.connectedPlatforms.length ? business.connectedPlatforms.join(", ") : "no platforms connected"}
               </p>

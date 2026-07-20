@@ -463,6 +463,84 @@ async function fetchJson(url: string, init?: RequestInit) {
   return payload;
 }
 
+interface CheckinPostActivity {
+  lastPostAt: string | null;
+  lastPostPlatform: string | null;
+  nextScheduledPostAt: string | null;
+}
+
+interface CheckinPostRow {
+  date?: string;
+  status?: string;
+  platform?: string;
+}
+
+/**
+ * Reads a check-in business's recent posts to find when it last actually posted, and what is queued
+ * next. Two properties of this API drive the shape of this function:
+ *
+ * - Pages are ordered by createdAt, NOT by the post's own date, so the newest date is not simply the
+ *   first row. Every row read is compared rather than trusting position.
+ * - A post can be status "published" with a future date (scheduled runs created in advance), so a
+ *   post only counts as done once its date has actually passed.
+ *
+ * Page size is capped at 20 by the API. One page is normally enough; more are read only while no
+ * completed post has been found yet, which keeps a 200-business sync from turning into thousands of
+ * requests while still answering correctly for a business whose recent activity is all scheduled.
+ */
+async function fetchCheckinPostActivity(
+  apiBase: string,
+  accessToken: string,
+  checkinId: string,
+  maxPages = 3,
+): Promise<CheckinPostActivity> {
+  const nowMs = Date.now();
+  let lastPostAt: string | null = null;
+  let lastPostPlatform: string | null = null;
+  let nextScheduledPostAt: string | null = null;
+
+  const toMs = (value?: string | null) => {
+    if (!value) return null;
+    const parsed = new Date(value).getTime();
+    return Number.isNaN(parsed) ? null : parsed;
+  };
+
+  for (let page = 1; page <= maxPages; page += 1) {
+    const payload = await fetchJson(`${apiBase}/api/checkin-business/get-posts`, {
+      method: "POST",
+      headers: { "content-type": "application/json", ...getBearerHeaders(accessToken) },
+      body: JSON.stringify({ checkin_id: checkinId, page, limit: 20 }),
+    });
+
+    const rows = Array.isArray(payload.data) ? (payload.data as CheckinPostRow[]) : [];
+    for (const row of rows) {
+      const at = toMs(row.date);
+      if (at === null) continue;
+
+      if (row.status === "published" && at <= nowMs) {
+        if (!lastPostAt || at > (toMs(lastPostAt) ?? 0)) {
+          lastPostAt = row.date as string;
+          lastPostPlatform = row.platform || null;
+        }
+      } else if (at > nowMs && (row.status === "scheduled" || row.status === "published")) {
+        const current = toMs(nextScheduledPostAt);
+        if (current === null || at < current) {
+          nextScheduledPostAt = row.date as string;
+        }
+      }
+    }
+
+    const pagination = (payload.pagination || {}) as { totalPages?: number };
+    const totalPages = typeof pagination.totalPages === "number" ? pagination.totalPages : 1;
+    // Stop as soon as a completed post is known, or the list runs out.
+    if (lastPostAt || page >= totalPages || rows.length < 20) {
+      break;
+    }
+  }
+
+  return { lastPostAt, lastPostPlatform, nextScheduledPostAt };
+}
+
 async function listFirestoreClients(tenantId: string) {
   const db = ensureFirestore();
   const snapshot = await db.collection(clientsCollectionPath(tenantId)).get();
@@ -1239,6 +1317,25 @@ async function syncRotatingTokenProvider(
       })),
     );
 
+    // Post counts alone cannot answer "are they still active?" -- that needs the date of the last
+    // post. Fetch it only for businesses matched to a client, so the extra calls stay proportional.
+    const matchedCheckinIds = new Set<string>();
+    for (const rows of Object.values(checkinBusinessesByClient)) {
+      for (const row of rows) {
+        const id = String(row._id || "");
+        if (id) matchedCheckinIds.add(id);
+      }
+    }
+
+    const postActivityById = new Map<string, CheckinPostActivity>();
+    for (const checkinId of matchedCheckinIds) {
+      try {
+        postActivityById.set(checkinId, await fetchCheckinPostActivity(apiBase, accessToken, checkinId));
+      } catch {
+        // A business whose posts cannot be read still reports its counts; the dates stay null.
+      }
+    }
+
     const counts = createEmptyCounts();
     counts.fetched = checkinBusinesses.length;
     counts.created = counts.fetched;
@@ -1250,13 +1347,19 @@ async function syncRotatingTokenProvider(
         checkinBusinessesByClient: Object.fromEntries(
           Object.entries(checkinBusinessesByClient).map(([clientId, rows]) => [
             clientId,
-            rows.map((row) => ({
-              _id: row._id,
-              business_name: row.business_name,
-              totalPosts: row.totalPosts,
-              scheduledPosts: row.scheduledPosts,
-              integration_status: row.integration_status,
-            })),
+            rows.map((row) => {
+              const activity = postActivityById.get(String(row._id || ""));
+              return {
+                _id: row._id,
+                business_name: row.business_name,
+                totalPosts: row.totalPosts,
+                scheduledPosts: row.scheduledPosts,
+                integration_status: row.integration_status,
+                lastPostAt: activity?.lastPostAt ?? null,
+                lastPostPlatform: activity?.lastPostPlatform ?? null,
+                nextScheduledPostAt: activity?.nextScheduledPostAt ?? null,
+              };
+            }),
           ]),
         ),
       },

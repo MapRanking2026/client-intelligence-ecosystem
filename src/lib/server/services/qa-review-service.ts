@@ -7,7 +7,7 @@ import { monthlyTouchPath } from "@/src/lib/server/firebase/collections";
 import { getFirebaseAdminDb } from "@/src/lib/server/firebase/admin";
 import { getServerEnv } from "@/src/lib/server/env";
 import { callClaudeForJson, getNowIso, stripUndefinedDeep } from "@/src/lib/server/services/mtos-ai";
-import { getPrompt } from "@/src/lib/server/prompt-store";
+import { getPromptText } from "@/src/lib/server/prompt-store";
 
 export const QA_SCORECARD_CATEGORIES = [
   "Preparation and evidence use",
@@ -38,18 +38,11 @@ async function evaluateWithClaude(
   touch: MonthlyTouchRecord,
   transcript: string,
 ) {
-  const system = await getPrompt(
-    "qa_evaluation_prompt",
-    [
-      "You are Victor, the QA Director evaluating an Account Manager's Growth Pilot monthly touch call.",
-      `Score each of these categories from 1 (poor) to 5 (excellent), using ONLY evidence in the`,
-      `transcript, in this exact order: ${QA_SCORECARD_CATEGORIES.join("; ")}.`,
-      "Do not give a 4 or a 5 without a specific moment in the transcript to point to in your notes. Be",
-      "direct about gaps -- this is a coaching tool for the AM, not a formality.",
-      "",
-      "Return JSON only.",
-    ].join("\n"),
-  );
+  // The category list stays in code because the response parser depends on it;
+  // the engine's prompt receives it as a variable rather than restating it.
+  const system = await getPromptText("qa_evaluation_prompt", {
+    qa_scorecard_categories: QA_SCORECARD_CATEGORIES.join("; "),
+  });
 
   const userText = [
     "Return a JSON object with keys: scorecard (array of {category, score, notes} for every category",

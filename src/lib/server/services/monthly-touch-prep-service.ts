@@ -41,7 +41,7 @@ import { getFirebaseAdminDb } from "@/src/lib/server/firebase/admin";
 import { getServerEnv } from "@/src/lib/server/env";
 import { callClaudeForJson } from "@/src/lib/server/services/mtos-ai";
 import { fetchClickupClientContext } from "@/src/lib/server/services/clickup-client-context";
-import { getPrompt } from "@/src/lib/server/prompt-store";
+import { getPromptText } from "@/src/lib/server/prompt-store";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -1107,50 +1107,7 @@ async function generateClaudeTouchOutput(
     return null;
   }
 
-  const system = await getPrompt(
-    "monthly_touch_preparation_prompt",
-    [
-      "You are preparing an Account Manager for a Growth Touch -- a recurring client meeting whose",
-      "purpose is to act as a business growth coach, not a report reader. The AM should never see",
-      "information for the first time live on the call; everything they need is in this prep pack.",
-      "",
-      "Wins: every win must answer 'so what' -- translate the activity into a business outcome",
-      "(revenue, leads, calls, visibility, competitive protection, expansion). Never state a",
-      "deliverable with no business meaning (bad: 'we posted on GBP'; good: 'a new GBP offer that",
-      "increases click-through and signals an active business to Google's algorithm').",
-      "Return AT LEAST 3 wins, ordered most business-critical first -- the first 3 get highlighted",
-      "to the AM, the rest remain available as the full library, so include every real win you can",
-      "support with the data below, not just three.",
-      "",
-      "Risks: identify problems the AM should raise BEFORE the client does, each with enough context",
-      "to explain why it matters and what the recommended next step is. Return AT LEAST 2 risks,",
-      "ordered most urgent first -- same highlighted-vs-full-library pattern as wins.",
-      "",
-      "Use ONLY the preparation bundle provided in the user message. Never invent a metric, a source,",
-      "or a client detail that isn't in that bundle -- if there isn't enough evidence for a 3rd win or",
-      "a 2nd risk, say so plainly in that item rather than fabricating one.",
-      "",
-      "The prepPack.businessScorecard, prepPack.seoPerformance, prepPack.strategicAction, and",
-      "prepPack.clientParticipation objects hold the SOP-required numbers for this touch (leads, calls,",
-      "keyword heatmaps, GBP performance, the agreed strategic action's implementation %, and the",
-      "participation-readiness checklist). The executiveBrief must weave these in explicitly by name",
-      "and number wherever their availability field is 'available' -- and must say plainly what is",
-      "missing (e.g. no CRM connected, no Rank Tracker sync) wherever availability is 'unavailable',",
-      "rather than skipping the topic. This is a bachelor-thesis-standard prep document: exhaustive,",
-      "specific, and structured -- not a five-sentence summary.",
-      "",
-      "prepPack.clickupContext holds the client's business intelligence pulled live from their ClickUp",
-      "Client's Book (goals, services, offers, competitors, prior meeting and pre-touch notes) plus the",
-      "most recent project-channel chat. GROUND THE BRIEF IN THIS: reference the client's actual goal,",
-      "services, and offers from the Client's Book, and surface anything time-sensitive from recentChat",
-      "(a complaint, an open request, a promised follow-up) as a win, risk, or talking point so the AM",
-      "walks in already aware of it. Distinguish messages where authorIsInternal is false (the client",
-      "speaking) from internal team chatter. Never quote chat that isn't in the bundle.",
-      "",
-      "Return JSON only. Keep the output specific and operational; the executiveBrief may run several",
-      "paragraphs if the data supports it.",
-    ].join("\n"),
-  );
+  const system = await getPromptText("monthly_touch_preparation_prompt");
 
   const parsed = claudeResponseSchema.parse(
     normalizeClaudeTouchPayload(

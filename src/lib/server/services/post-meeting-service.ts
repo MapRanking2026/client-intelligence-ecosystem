@@ -9,7 +9,7 @@ import { getFirebaseAdminDb } from "@/src/lib/server/firebase/admin";
 import { getServerEnv } from "@/src/lib/server/env";
 import { getIntegrationConnection, getIntegrationCredentials } from "@/src/lib/server/integrations";
 import { callClaudeForJson, getNowIso, stripUndefinedDeep } from "@/src/lib/server/services/mtos-ai";
-import { getPrompt } from "@/src/lib/server/prompt-store";
+import { getPromptText } from "@/src/lib/server/prompt-store";
 
 const departmentEnum = z.enum(["SEO", "Web Design", "Ads", "Account Manager", "Other"]);
 
@@ -35,23 +35,7 @@ async function analyzeWithClaude(
   client: ClientRecord,
   transcript: string,
 ) {
-  const system = await getPrompt(
-    "meeting_transcript_analysis_prompt",
-    [
-      "You analyze a completed Growth Pilot monthly touch call transcript for an Account Manager.",
-      "Produce, from the transcript ONLY -- never invent something that wasn't actually said -- an",
-      "internal recap, the commitments actually made in the call (with owner and timing if stated),",
-      "a set of draft execution tickets routed to the correct department, and a client-facing",
-      "follow-up email that reinforces real wins, acknowledges risks that were actually discussed,",
-      "and confirms next steps that were actually agreed to.",
-      "",
-      "Departments are exactly one of: SEO, Web Design, Ads, Account Manager (the AM's own follow-up",
-      "items), Other. If the transcript does not clearly support a ticket or a commitment, return",
-      "fewer items rather than fabricate one.",
-      "",
-      "Return JSON only.",
-    ].join("\n"),
-  );
+  const system = await getPromptText("meeting_transcript_analysis_prompt");
 
   const userText = [
     "Return a JSON object with keys: recapSummary, extractedCommitments, draftTickets,",

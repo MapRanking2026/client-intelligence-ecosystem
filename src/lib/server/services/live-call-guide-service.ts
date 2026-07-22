@@ -7,7 +7,7 @@ import { monthlyTouchPath } from "@/src/lib/server/firebase/collections";
 import { getFirebaseAdminDb } from "@/src/lib/server/firebase/admin";
 import { getServerEnv } from "@/src/lib/server/env";
 import { callClaudeForJson, getNowIso, stripUndefinedDeep } from "@/src/lib/server/services/mtos-ai";
-import { getPrompt } from "@/src/lib/server/prompt-store";
+import { getPromptText } from "@/src/lib/server/prompt-store";
 
 const callGuideSchema = z.object({
   sections: z
@@ -149,41 +149,7 @@ async function generateClaudeSections(
     return null;
   }
 
-  const system = await getPrompt(
-    "growth_review_structure_prompt",
-    [
-      "You turn an already-prepared Growth Pilot monthly touch prep pack into a live, timed call guide",
-      "for the Account Manager to follow during the meeting.",
-      "",
-      "The AM acts as a business-growth coach, not a report reader. The client is an active co-pilot in",
-      "the room. Every section must include at least one client prompt -- a genuine question that pulls",
-      "the client into the conversation instead of talking at them.",
-      "",
-      "Follow the SOP's meeting flow: open and frame -> business scorecard (lead the numbers, not the",
-      "services) -> goal review -> lead quality -> strategic action implementation % -> the business and",
-      "growth conversation (wins, issues with solutions, recommendations) -> recap and close.",
-      "",
-      "prepPack.clickupContext carries the client's Client's Book (goal, services, offers, competitors,",
-      "prior notes) and recent project chat. Use it to ground the goal-review section in the client's",
-      "actual stated goal, and fold any open item from recentChat (a complaint or pending request) into",
-      "the relevant section so the AM addresses it live.",
-      "",
-      "Ground every talking point in the actual evidence in the bundle below and QUOTE THE REAL NUMBERS",
-      "(leads, GBP call clicks, keyword rank and Market Share movement month over month, Google Ads spend",
-      "and CPL, Map Check-In posts, the strategic action's implementation %). A talking point that just",
-      "names a topic without its number is useless live on a call.",
-      "",
-      "Where a metric's availability is 'unavailable', do NOT invent it -- instead turn that gap into a",
-      "client prompt using the lead-quality questions provided (this is the SOP's sales-structure",
-      "conversation). Where clientParticipation shows gaps, cover the basics before any advanced",
-      "recommendation. Where a profile is flagged inactive/suspended, raise it as a risk, not a win.",
-      "",
-      "Sections must sum to roughly 60 minutes. Use ONLY what is in the bundle below -- never invent a",
-      "metric, win, or risk that isn't already there.",
-      "",
-      "Return JSON only.",
-    ].join("\n"),
-  );
+  const system = await getPromptText("meeting_structure_run_sheet_prompt");
 
   const prepPack = touch.prepPack;
   const userText = [

@@ -1,6 +1,8 @@
 import fs from "fs";
 import path from "path";
 
+import { getFirebaseAdminDb } from "@/src/lib/server/firebase/admin";
+
 export type PromptRole =
   | "Research Agent"
   | "Reasoning Agent"
@@ -142,7 +144,26 @@ function normalizePromptConfig(value: unknown): PromptConfig {
   return [];
 }
 
-export async function getPrompts(): Promise<PromptConfig> {
+/**
+ * Firestore is undefined-hostile, so drop undefined keys before any write.
+ */
+function stripUndefined<T extends Record<string, unknown>>(value: T): T {
+  return Object.fromEntries(Object.entries(value).filter(([, item]) => item !== undefined)) as T;
+}
+
+function toStorable(prompt: PromptDefinition) {
+  return stripUndefined({
+    ...prompt,
+    history: (prompt.history || []).map((entry) => stripUndefined({ ...entry })),
+  } as unknown as Record<string, unknown>);
+}
+
+// ---------------------------------------------------------------------------
+// File backend. Used for local development and seed mode. Serverless hosts mount
+// the app read-only, so this is a development convenience, not the deploy target.
+// ---------------------------------------------------------------------------
+
+async function readFileConfig(): Promise<PromptConfig> {
   try {
     const text = await fs.promises.readFile(PROMPT_FILE, "utf8");
     return normalizePromptConfig(JSON.parse(text));
@@ -154,10 +175,139 @@ export async function getPrompts(): Promise<PromptConfig> {
   }
 }
 
+async function writeFileConfig(config: PromptConfig): Promise<void> {
+  await fs.promises.mkdir(path.dirname(PROMPT_FILE), { recursive: true });
+  await fs.promises.writeFile(PROMPT_FILE, JSON.stringify(config, null, 2), "utf8");
+}
+
+// ---------------------------------------------------------------------------
+// Firestore backend. The deploy target. One document per prompt so a save
+// touches only that prompt and the runtime can resolve a single key with a
+// single read, plus an order document that preserves the phase grouping.
+// ---------------------------------------------------------------------------
+
+const PROMPT_COLLECTION = "promptEngine";
+const LIBRARY_DOC = "library";
+
+type PromptOrder = { phase: string; keys: string[] }[];
+
+type Db = NonNullable<ReturnType<typeof getFirebaseAdminDb>>;
+
+function libraryDoc(db: Db) {
+  return db.collection(PROMPT_COLLECTION).doc(LIBRARY_DOC);
+}
+
+function promptsCollection(db: Db) {
+  return libraryDoc(db).collection("prompts");
+}
+
+/** Guards against re-seeding on every request within a warm instance. */
+let seedPromise: Promise<void> | null = null;
+
+/**
+ * On an empty database, publish the bundled JSON library as the initial
+ * content. The JSON file ships with the build and stays the default the
+ * platform boots from; Firestore holds every edit made after that.
+ */
+async function ensureSeeded(db: Db): Promise<void> {
+  if (!seedPromise) {
+    seedPromise = (async () => {
+      const existing = await libraryDoc(db).get();
+      if (existing.exists) return;
+
+      const seed = await readFileConfig();
+      if (!seed.length) return;
+
+      const batch = db.batch();
+      batch.set(libraryDoc(db), {
+        order: seed.map((phase) => ({ phase: phase.phase, keys: phase.prompts.map((p) => p.key) })),
+        seededAt: nowIso(),
+      });
+      for (const phase of seed) {
+        for (const prompt of phase.prompts) {
+          batch.set(promptsCollection(db).doc(prompt.key), toStorable(prompt));
+        }
+      }
+      await batch.commit();
+    })().catch((error) => {
+      // Let a later request retry rather than caching the failure forever.
+      seedPromise = null;
+      throw error;
+    });
+  }
+
+  return seedPromise;
+}
+
+async function readFirestoreConfig(db: Db): Promise<PromptConfig> {
+  await ensureSeeded(db);
+
+  const [library, prompts] = await Promise.all([
+    libraryDoc(db).get(),
+    promptsCollection(db).get(),
+  ]);
+
+  const byKey = new Map<string, PromptDefinition>();
+  for (const doc of prompts.docs) {
+    byKey.set(doc.id, withDefaults(doc.data() as PromptDefinition));
+  }
+
+  const order = ((library.data()?.order as PromptOrder) || []).map((phase) => ({
+    phase: phase.phase,
+    prompts: phase.keys.map((key) => byKey.get(key)).filter((p): p is PromptDefinition => Boolean(p)),
+  }));
+
+  // Anything written without an order entry still has to be reachable.
+  const ordered = new Set(order.flatMap((phase) => phase.prompts.map((p) => p.key)));
+  const orphans = [...byKey.values()].filter((prompt) => !ordered.has(prompt.key));
+  if (orphans.length) {
+    order.push({ phase: "Unassigned", prompts: orphans });
+  }
+
+  return order;
+}
+
+async function writeFirestoreConfig(db: Db, config: PromptConfig): Promise<void> {
+  await ensureSeeded(db);
+
+  const existing = await promptsCollection(db).get();
+  const nextKeys = new Set(config.flatMap((phase) => phase.prompts.map((prompt) => prompt.key)));
+
+  const batch = db.batch();
+  batch.set(libraryDoc(db), {
+    order: config.map((phase) => ({ phase: phase.phase, keys: phase.prompts.map((p) => p.key) })),
+    updatedAt: nowIso(),
+  });
+  for (const phase of config) {
+    for (const prompt of phase.prompts) {
+      batch.set(promptsCollection(db).doc(prompt.key), toStorable(prompt));
+    }
+  }
+  for (const doc of existing.docs) {
+    if (!nextKeys.has(doc.id)) {
+      batch.delete(doc.ref);
+    }
+  }
+  await batch.commit();
+}
+
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
+
+export async function getPrompts(): Promise<PromptConfig> {
+  const db = getFirebaseAdminDb();
+  return db ? readFirestoreConfig(db) : readFileConfig();
+}
+
 export async function savePrompts(data: PromptConfig): Promise<void> {
   const normalized = normalizePromptConfig(data);
-  await fs.promises.mkdir(path.dirname(PROMPT_FILE), { recursive: true });
-  await fs.promises.writeFile(PROMPT_FILE, JSON.stringify(normalized, null, 2), "utf8");
+  const db = getFirebaseAdminDb();
+  if (db) {
+    await writeFirestoreConfig(db, normalized);
+    return;
+  }
+  await writeFileConfig(normalized);
 }
 
 function locate(config: PromptConfig, key: string) {
@@ -171,7 +321,15 @@ function locate(config: PromptConfig, key: string) {
 }
 
 export async function getPromptRecord(key: string): Promise<PromptDefinition | null> {
-  const config = await getPrompts();
+  const db = getFirebaseAdminDb();
+  if (db) {
+    // The runtime path: one document read, no matter how large the library is.
+    await ensureSeeded(db);
+    const doc = await promptsCollection(db).doc(key).get();
+    return doc.exists ? withDefaults(doc.data() as PromptDefinition) : null;
+  }
+
+  const config = await readFileConfig();
   return locate(config, key)?.prompt ?? null;
 }
 
@@ -184,14 +342,7 @@ export async function savePromptRecord(
   patch: PromptPatch,
   note?: string,
 ): Promise<PromptDefinition> {
-  const config = await getPrompts();
-  const found = locate(config, key);
-  if (!found) {
-    throw new Error(`Prompt "${key}" does not exist in the Prompt Engine`);
-  }
-
-  const { phaseIndex, promptIndex, prompt: current } = found;
-  const next: PromptDefinition = {
+  const applyPatch = (current: PromptDefinition): PromptDefinition => ({
     ...current,
     ...patch,
     key: current.key,
@@ -207,10 +358,34 @@ export async function savePromptRecord(
       },
       ...(current.history || []),
     ].slice(0, MAX_HISTORY_ENTRIES),
-  };
+  });
 
-  config[phaseIndex].prompts[promptIndex] = next;
-  await savePrompts(config);
+  const db = getFirebaseAdminDb();
+  if (db) {
+    await ensureSeeded(db);
+    const ref = promptsCollection(db).doc(key);
+    // A transaction so two concurrent edits cannot skip a version or drop a
+    // history entry.
+    return db.runTransaction(async (transaction) => {
+      const doc = await transaction.get(ref);
+      if (!doc.exists) {
+        throw new Error(`Prompt "${key}" does not exist in the Prompt Engine`);
+      }
+      const next = applyPatch(withDefaults(doc.data() as PromptDefinition));
+      transaction.set(ref, toStorable(next));
+      return next;
+    });
+  }
+
+  const config = await readFileConfig();
+  const found = locate(config, key);
+  if (!found) {
+    throw new Error(`Prompt "${key}" does not exist in the Prompt Engine`);
+  }
+
+  const next = applyPatch(found.prompt);
+  config[found.phaseIndex].prompts[found.promptIndex] = next;
+  await writeFileConfig(config);
   return next;
 }
 
@@ -282,6 +457,20 @@ export async function getPromptText(
 
   return interpolate(composed, variables);
 }
+
+/**
+ * Testing seam. The Firestore helpers already take their database handle as an
+ * argument, so exposing them lets a test drive the backend with a fake instead
+ * of requiring an emulator. Not part of the supported API.
+ */
+export const __internal = {
+  ensureSeeded,
+  readFirestoreConfig,
+  writeFirestoreConfig,
+  resetSeedCache: () => {
+    seedPromise = null;
+  },
+};
 
 export function validatePromptDraft(
   draft: { prompt?: string; runtimeContract?: string; title?: string },

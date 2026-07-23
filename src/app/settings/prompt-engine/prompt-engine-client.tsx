@@ -639,6 +639,10 @@ export function PromptEngineClient({ initialPrompts }: { initialPrompts: PromptC
                   {preview ? (
                     <div className={panelClass}>
                       <p className={labelClass}>Composed prompt sent to the model</p>
+                      <p className="mt-1 text-xs text-slate-500">
+                        Full runtime composition: Global System Preamble, then this prompt, then its
+                        runtime contract.
+                      </p>
                       <pre className="mt-2 max-h-72 overflow-auto whitespace-pre-wrap break-words text-xs leading-5 text-slate-300">
                         {preview}
                       </pre>

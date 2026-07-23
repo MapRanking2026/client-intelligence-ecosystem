@@ -3,6 +3,8 @@ import { NextResponse } from "next/server";
 import { getServerEnv } from "@/src/lib/server/env";
 import {
   collectPromptVariables,
+  composePromptText,
+  getGlobalPreambleText,
   getPromptRecord,
   validatePromptDraft,
 } from "@/src/lib/server/prompt-store";
@@ -20,30 +22,6 @@ interface TestRequestBody {
   sampleInput?: string;
   /** Values for {{variables}} the calling module would normally supply. */
   variables?: Record<string, string>;
-}
-
-const VARIABLE_PATTERN = /\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g;
-
-function interpolate(text: string, variables: Record<string, string>) {
-  return text.replace(VARIABLE_PATTERN, (original, name: string) =>
-    Object.prototype.hasOwnProperty.call(variables, name) ? variables[name] : original,
-  );
-}
-
-function compose(prompt: string, runtimeContract: string | undefined, variables: Record<string, string>) {
-  const body = (prompt || "").trim();
-  const contract = (runtimeContract || "").trim();
-  const composed = contract
-    ? [
-        body,
-        "",
-        "RUNTIME CONTRACT (authoritative -- these operating rules and this output",
-        "format override anything above that conflicts with them):",
-        contract,
-      ].join("\n")
-    : body;
-
-  return interpolate(composed, variables);
 }
 
 /**
@@ -67,7 +45,16 @@ export async function POST(request: Request, { params }: RouteContext) {
 
   const variables = body.variables || {};
   const issues = validatePromptDraft(draft, Object.keys(variables));
-  const preview = compose(draft.prompt, draft.runtimeContract, variables);
+  // Preview exactly what runtime sends: the saved Global System Preamble
+  // (skipped when previewing the preamble itself) + this draft body + contract.
+  const preamble = await getGlobalPreambleText();
+  const preview = composePromptText({
+    key,
+    prompt: draft.prompt,
+    runtimeContract: draft.runtimeContract,
+    preamble,
+    variables,
+  });
   const detectedVariables = collectPromptVariables(
     `${draft.prompt}\n${draft.runtimeContract || ""}`,
   );

@@ -431,6 +431,51 @@ function interpolate(text: string, variables: Record<string, string>): string {
   );
 }
 
+const RUNTIME_CONTRACT_HEADER = [
+  "RUNTIME CONTRACT (authoritative -- these operating rules and this output",
+  "format override anything above that conflicts with them):",
+];
+
+/**
+ * Assemble the final system prompt from its parts, exactly as it runs at
+ * execution time: Global System Preamble, then the module body, then the
+ * runtime contract, with variables interpolated. Kept pure so the Prompt
+ * Engine's preview can call it on unsaved draft text and get byte-for-byte
+ * what getPromptText would send to the model.
+ *
+ * The preamble leads so its non-negotiable rules frame the module, while the
+ * runtime contract comes last and is declared authoritative so it still wins
+ * on output shape. The preamble is skipped for the preamble module itself so
+ * it never self-nests.
+ */
+export function composePromptText(params: {
+  key: string;
+  prompt: string;
+  runtimeContract?: string;
+  preamble?: string;
+  variables?: Record<string, string>;
+}): string {
+  const body = (params.prompt || "").trim();
+  const contract = (params.runtimeContract || "").trim();
+  const withContract = contract
+    ? [body, "", ...RUNTIME_CONTRACT_HEADER, contract].join("\n")
+    : body;
+
+  const preamble = (params.preamble || "").trim();
+  const composed =
+    preamble && params.key !== GLOBAL_PREAMBLE_KEY
+      ? [preamble, "", "---", "", withContract].join("\n")
+      : withContract;
+
+  return interpolate(composed, params.variables || {});
+}
+
+/** The active Global System Preamble text, or "" when none is configured. */
+export async function getGlobalPreambleText(): Promise<string> {
+  const preamble = await getPromptRecord(GLOBAL_PREAMBLE_KEY);
+  return (preamble?.prompt || "").trim();
+}
+
 /**
  * Compose the executable system prompt for a module. Throws when the key is
  * missing or empty rather than falling back to code, because the Prompt Engine
@@ -448,40 +493,19 @@ export async function getPromptText(
     );
   }
 
-  const body = (record.prompt || "").trim();
-  if (!body) {
+  if (!(record.prompt || "").trim()) {
     throw new Error(`Prompt "${key}" is empty in the Prompt Engine.`);
   }
 
-  const contract = (record.runtimeContract || "").trim();
-  const withContract = contract
-    ? [
-        body,
-        "",
-        "RUNTIME CONTRACT (authoritative -- these operating rules and this output",
-        "format override anything above that conflicts with them):",
-        contract,
-      ].join("\n")
-    : body;
+  const preamble = key === GLOBAL_PREAMBLE_KEY ? "" : await getGlobalPreambleText();
 
-  // Every module inherits the Global System Preamble. It leads so its
-  // non-negotiable rules frame the module body, while the runtime contract
-  // still wins on output shape because it comes last and is declared
-  // authoritative. The preamble itself is exempt so it never self-nests.
-  const composed =
-    key === GLOBAL_PREAMBLE_KEY ? withContract : await withGlobalPreamble(withContract);
-
-  return interpolate(composed, variables);
-}
-
-/** Prepend the Global System Preamble when one is configured. */
-async function withGlobalPreamble(moduleText: string): Promise<string> {
-  const preamble = await getPromptRecord(GLOBAL_PREAMBLE_KEY);
-  const preambleText = (preamble?.prompt || "").trim();
-  if (!preambleText) {
-    return moduleText;
-  }
-  return [preambleText, "", "---", "", moduleText].join("\n");
+  return composePromptText({
+    key,
+    prompt: record.prompt,
+    runtimeContract: record.runtimeContract,
+    preamble,
+    variables,
+  });
 }
 
 /**

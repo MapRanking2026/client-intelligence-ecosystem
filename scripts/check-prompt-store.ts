@@ -93,7 +93,7 @@ async function main() {
   const promptDocs = [...(db as FakeDb).store.keys()].filter((k) =>
     k.startsWith("promptEngine/library/prompts/"),
   );
-  check("seeds every prompt as its own document", promptDocs.length === 37, `${promptDocs.length} docs`);
+  check("seeds every prompt as its own document", promptDocs.length === 38, `${promptDocs.length} docs`);
   check("writes the order document", (db as FakeDb).store.has("promptEngine/library"));
 
   // 2. Seeding is idempotent across warm invocations.
@@ -104,13 +104,14 @@ async function main() {
 
   // 3. Reads reassemble phases in the original order.
   const config = await __internal.readFirestoreConfig(db);
-  check("phase count preserved", config.length === 6, `${config.length} phases`);
-  check("prompt count preserved", config.flatMap((p) => p.prompts).length === 37);
-  check("first phase intact", config[0].phase.startsWith("Phase 0"), config[0].phase);
+  const totalPrompts = config.flatMap((p) => p.prompts).length;
+  check("phase count preserved", config.length === 7, `${config.length} phases`);
+  check("prompt count preserved", totalPrompts === 38, `${totalPrompts} prompts`);
+  check("preamble leads the library", config[0].phase === "Global Standard", config[0].phase);
   check(
-    "first prompt intact",
-    config[0].prompts[0].key === "workflow_orchestrator_prompt",
-    config[0].prompts[0].key,
+    "first module intact",
+    config[1].prompts[0].key === "workflow_orchestrator_prompt",
+    config[1].prompts[0].key,
   );
   check("no Unassigned bucket when order is complete", !config.some((p) => p.phase === "Unassigned"));
   check(
@@ -129,15 +130,16 @@ async function main() {
   check("single-key resolution is one read", (db as FakeDb).reads - before === 1);
   check("resolved doc has content", Boolean((doc.data() as any)?.prompt));
 
-  // 5. A whole-library write prunes prompts that were removed.
+  // 5. A whole-library write prunes prompts that were removed. Trim Phase 0
+  //    (index 1) from two prompts to one, so exactly one is deleted.
   const trimmed = config.map((phase, index) =>
-    index === 0 ? { ...phase, prompts: phase.prompts.slice(0, 1) } : phase,
+    index === 1 ? { ...phase, prompts: phase.prompts.slice(0, 1) } : phase,
   );
   await __internal.writeFirestoreConfig(db, trimmed);
   const afterPrune = await __internal.readFirestoreConfig(db);
   check(
     "removed prompt is deleted",
-    afterPrune.flatMap((p) => p.prompts).length === 36,
+    afterPrune.flatMap((p) => p.prompts).length === totalPrompts - 1,
     `${afterPrune.flatMap((p) => p.prompts).length} prompts`,
   );
   check("no orphan bucket after prune", !afterPrune.some((p) => p.phase === "Unassigned"));

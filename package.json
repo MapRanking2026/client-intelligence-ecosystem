@@ -9,7 +9,9 @@
     "lint": "eslint .",
     "check": "tsc --noEmit && eslint .",
     "seed:firestore": "tsx scripts/seed-firestore-pilot.ts",
-    "bootstrap:map-ranking": "tsx scripts/bootstrap-map-ranking.ts"
+    "bootstrap:map-ranking": "tsx scripts/bootstrap-map-ranking.ts",
+    "import:prompts": "tsx scripts/import-prompt-library.ts",
+    "check:prompt-store": "tsx scripts/check-prompt-store.ts"
   },
   "dependencies": {
     "@opentelemetry/api": "^1.9.1",

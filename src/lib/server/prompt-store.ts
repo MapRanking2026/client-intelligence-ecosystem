@@ -85,6 +85,15 @@ const MAX_PROMPT_LENGTH = 60_000;
 
 const VARIABLE_PATTERN = /\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g;
 
+/**
+ * The Global System Preamble. The v2 library defines a single operating standard
+ * that is prepended to every module call; storing it as a normal prompt under
+ * this key keeps it editable, versioned, and rollback-able through the same UI
+ * as everything else. It is never itself a runnable module, so it is skipped
+ * when composing its own text.
+ */
+export const GLOBAL_PREAMBLE_KEY = "global_system_preamble";
+
 function nowIso() {
   return new Date().toISOString();
 }
@@ -445,7 +454,7 @@ export async function getPromptText(
   }
 
   const contract = (record.runtimeContract || "").trim();
-  const composed = contract
+  const withContract = contract
     ? [
         body,
         "",
@@ -455,7 +464,24 @@ export async function getPromptText(
       ].join("\n")
     : body;
 
+  // Every module inherits the Global System Preamble. It leads so its
+  // non-negotiable rules frame the module body, while the runtime contract
+  // still wins on output shape because it comes last and is declared
+  // authoritative. The preamble itself is exempt so it never self-nests.
+  const composed =
+    key === GLOBAL_PREAMBLE_KEY ? withContract : await withGlobalPreamble(withContract);
+
   return interpolate(composed, variables);
+}
+
+/** Prepend the Global System Preamble when one is configured. */
+async function withGlobalPreamble(moduleText: string): Promise<string> {
+  const preamble = await getPromptRecord(GLOBAL_PREAMBLE_KEY);
+  const preambleText = (preamble?.prompt || "").trim();
+  if (!preambleText) {
+    return moduleText;
+  }
+  return [preambleText, "", "---", "", moduleText].join("\n");
 }
 
 /**

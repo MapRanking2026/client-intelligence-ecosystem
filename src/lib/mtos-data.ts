@@ -387,6 +387,39 @@ export interface ClientEmailDraft {
   status: "pending" | "approved";
 }
 
+/** A proposed change to one of the two Client Intelligence dashboards. */
+export type DashboardKind = "risk_register" | "stakeholder_map";
+
+export interface DashboardUpdateProposal {
+  id: string;
+  dashboard: DashboardKind;
+  action: "create" | "update";
+  clientName: string;
+  /** One-line description of the proposed change. */
+  summary: string;
+  /** The exact body written into the ClickUp task on approval. */
+  detail: string;
+  reason: string;
+  evidence: string[];
+  status: "pending" | "approved" | "declined";
+  clickupTaskId?: string;
+  clickupTaskUrl?: string;
+  executionNote?: string;
+}
+
+/**
+ * Output of the Client Intelligence Dashboard Updater step, which runs after
+ * transcript analysis and proposes Risk Register / Stakeholder Map updates for
+ * AM approval. Purely additive to the post-meeting record.
+ */
+export interface DashboardUpdateReview {
+  status: "draft_ready" | "applied";
+  proposals: DashboardUpdateProposal[];
+  analyzedAt?: string;
+  model?: string;
+  errorMessage?: string;
+}
+
 export interface PostMeetingReview {
   status: "not_started" | "draft_ready" | "approved";
   transcript?: string;
@@ -394,6 +427,8 @@ export interface PostMeetingReview {
   extractedCommitments?: string[];
   draftTickets?: DraftTicket[];
   clientEmail?: ClientEmailDraft;
+  /** Proposed Client Intelligence dashboard updates (optional, additive). */
+  dashboardUpdates?: DashboardUpdateReview;
   analyzedAt?: string;
   model?: string;
   errorMessage?: string;

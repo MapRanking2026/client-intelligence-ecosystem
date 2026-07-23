@@ -10,6 +10,11 @@ import { getServerEnv } from "@/src/lib/server/env";
 import { getIntegrationConnection, getIntegrationCredentials } from "@/src/lib/server/integrations";
 import { callClaudeForJson, getNowIso, stripUndefinedDeep } from "@/src/lib/server/services/mtos-ai";
 import { getPromptText } from "@/src/lib/server/prompt-store";
+import {
+  applyDashboardDecisions,
+  draftDashboardUpdates,
+} from "@/src/lib/server/services/dashboard-intelligence-service";
+import type { DashboardUpdateReview } from "@/src/lib/mtos-data";
 
 const departmentEnum = z.enum(["SEO", "Web Design", "Ads", "Account Manager", "Other"]);
 
@@ -95,6 +100,28 @@ export async function analyzePostMeetingTranscript(context: TenantContext, touch
     status: "pending",
   }));
 
+  // Client Intelligence Dashboard Updater -- one additional post-processing step
+  // inserted after transcript analysis. It only drafts proposed Risk Register /
+  // Stakeholder Map updates; it writes nothing here. It is deliberately
+  // non-fatal: if it fails, transcript analysis still succeeds unchanged.
+  let dashboardUpdates: DashboardUpdateReview | undefined;
+  try {
+    dashboardUpdates = await draftDashboardUpdates(env, touch, client, {
+      recapSummary: analysis.recapSummary,
+      extractedCommitments: analysis.extractedCommitments,
+      draftTickets: analysis.draftTickets,
+    });
+  } catch (error) {
+    dashboardUpdates = {
+      status: "draft_ready",
+      proposals: [],
+      analyzedAt: getNowIso(),
+      model: env.anthropicModel,
+      errorMessage:
+        error instanceof Error ? error.message : "Dashboard intelligence step could not run.",
+    };
+  }
+
   const postMeeting: PostMeetingReview = {
     status: "draft_ready",
     transcript: trimmedTranscript,
@@ -106,6 +133,7 @@ export async function analyzePostMeetingTranscript(context: TenantContext, touch
       body: analysis.clientEmailBody,
       status: "pending",
     },
+    dashboardUpdates,
     analyzedAt: getNowIso(),
     model: env.anthropicModel,
   };
@@ -199,6 +227,8 @@ async function createClickUpTask(context: TenantContext, ticket: DraftTicket): P
 export interface PostMeetingDecisions {
   ticketDecisions: Record<string, "approved" | "declined">;
   approveEmail: boolean;
+  /** Decisions on Client Intelligence dashboard proposals, keyed by proposal id. */
+  dashboardDecisions?: Record<string, "approved" | "declined">;
 }
 
 export async function applyPostMeetingDecisions(
@@ -252,11 +282,23 @@ export async function applyPostMeetingDecisions(
       }
     : undefined;
 
+  // Apply approved dashboard proposals (writes to the two configured ClickUp
+  // dashboard lists). Left untouched when there are no proposals or decisions.
+  let dashboardUpdates = touch.postMeeting.dashboardUpdates;
+  if (dashboardUpdates?.proposals.length && decisions.dashboardDecisions) {
+    dashboardUpdates = await applyDashboardDecisions(
+      context,
+      dashboardUpdates,
+      decisions.dashboardDecisions,
+    );
+  }
+
   const postMeeting: PostMeetingReview = {
     ...touch.postMeeting,
     status: "approved",
     draftTickets: updatedTickets,
     clientEmail,
+    dashboardUpdates,
   };
 
   const updatedTouch: MonthlyTouchRecord = stripUndefinedDeep({

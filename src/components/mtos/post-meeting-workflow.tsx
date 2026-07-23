@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
-import { CheckCircle2, LoaderCircle, Mail, ShieldCheck, Sparkles, Ticket } from "lucide-react";
+import { CheckCircle2, Gauge, LoaderCircle, Mail, ShieldCheck, Sparkles, Ticket } from "lucide-react";
 
 import type {
   DraftTicket,
@@ -64,7 +64,16 @@ export function PostMeetingWorkflow({ touchId, postMeeting, qaReview }: PostMeet
     ),
   );
   const [approveEmail, setApproveEmail] = useState(postMeeting?.clientEmail?.status === "approved");
+  const [dashboardDecisions, setDashboardDecisions] = useState<Record<string, "approved" | "declined">>(() =>
+    Object.fromEntries(
+      (postMeeting?.dashboardUpdates?.proposals || [])
+        .filter((proposal) => proposal.status !== "pending")
+        .map((proposal) => [proposal.id, proposal.status as "approved" | "declined"]),
+    ),
+  );
   const [victorNote, setVictorNote] = useState("");
+
+  const dashboardProposals = postMeeting?.dashboardUpdates?.proposals || [];
 
   const pendingTickets = useMemo(
     () => (postMeeting?.draftTickets || []).filter((ticket) => ticket.status === "pending"),
@@ -264,6 +273,109 @@ export function PostMeetingWorkflow({ touchId, postMeeting, qaReview }: PostMeet
             ) : null}
           </div>
 
+          {/* Post-processing step: Client Intelligence dashboard updates */}
+          {postMeeting.dashboardUpdates ? (
+            <div className="rounded-[24px] border border-white/8 bg-black/20 p-5">
+              <div className="flex items-center gap-2">
+                <Gauge className="h-4 w-4 text-[#d7f5ec]" />
+                <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">
+                  Client intelligence -- dashboard updates (approval required)
+                </p>
+              </div>
+              <p className="mt-1 text-xs text-slate-500">
+                Proposed updates to the Risk Register and Stakeholder Map, drafted from this touch.
+                Approved changes are written to ClickUp; nothing else is touched.
+              </p>
+              <div className="mt-3 space-y-3">
+                {dashboardProposals.map((proposal) => {
+                  const decision =
+                    dashboardDecisions[proposal.id] ||
+                    (proposal.status !== "pending" ? proposal.status : undefined);
+                  return (
+                    <div key={proposal.id} className="rounded-2xl border border-white/8 bg-white/4 p-4">
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                          <span className="inline-flex rounded-full border border-white/10 bg-white/5 px-2 py-1 text-[11px] font-medium text-slate-200">
+                            {proposal.dashboard === "risk_register" ? "Risk Register" : "Stakeholder Map"}
+                            {" · "}
+                            {proposal.action}
+                          </span>
+                          <p className="mt-2 text-sm font-semibold text-white">{proposal.summary}</p>
+                          {proposal.detail ? (
+                            <p className="mt-1 whitespace-pre-wrap text-sm text-slate-300">{proposal.detail}</p>
+                          ) : null}
+                          {proposal.reason ? (
+                            <p className="mt-1 text-xs text-slate-400">Why: {proposal.reason}</p>
+                          ) : null}
+                          {proposal.executionNote ? (
+                            <p className="mt-2 text-xs text-amber-200">{proposal.executionNote}</p>
+                          ) : null}
+                          {proposal.clickupTaskUrl ? (
+                            <a
+                              href={proposal.clickupTaskUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="mt-2 inline-block text-xs text-[#d7f5ec] underline"
+                            >
+                              View in ClickUp
+                            </a>
+                          ) : null}
+                        </div>
+                        {!decisionsApplied ? (
+                          <div className="flex shrink-0 gap-2">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setDashboardDecisions((prev) => ({ ...prev, [proposal.id]: "approved" }))
+                              }
+                              className={`rounded-full border px-3 py-1.5 text-xs font-medium transition ${
+                                decision === "approved"
+                                  ? "border-emerald-400/30 bg-emerald-500/20 text-emerald-100"
+                                  : "border-white/10 bg-white/5 text-slate-300 hover:bg-white/10"
+                              }`}
+                            >
+                              Approve
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setDashboardDecisions((prev) => ({ ...prev, [proposal.id]: "declined" }))
+                              }
+                              className={`rounded-full border px-3 py-1.5 text-xs font-medium transition ${
+                                decision === "declined"
+                                  ? "border-rose-400/30 bg-rose-500/20 text-rose-100"
+                                  : "border-white/10 bg-white/5 text-slate-300 hover:bg-white/10"
+                              }`}
+                            >
+                              Decline
+                            </button>
+                          </div>
+                        ) : (
+                          <span
+                            className={`shrink-0 rounded-full border px-3 py-1.5 text-xs font-medium ${
+                              proposal.status === "approved"
+                                ? "border-emerald-400/30 bg-emerald-500/20 text-emerald-100"
+                                : "border-rose-400/30 bg-rose-500/20 text-rose-100"
+                            }`}
+                          >
+                            {proposal.status === "approved" ? "Approved" : "Declined"}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+                {!dashboardProposals.length ? (
+                  <p className="text-sm text-slate-400">
+                    {postMeeting.dashboardUpdates.errorMessage
+                      ? postMeeting.dashboardUpdates.errorMessage
+                      : "No dashboard changes are needed from this touch."}
+                  </p>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
+
           {!decisionsApplied ? (
             <button
               type="button"
@@ -272,6 +384,7 @@ export function PostMeetingWorkflow({ touchId, postMeeting, qaReview }: PostMeet
                   action: "apply_post_meeting_decisions",
                   ticketDecisions,
                   approveEmail,
+                  dashboardDecisions,
                 })
               }
               disabled={isPending || (pendingTickets.length > 0 && Object.keys(ticketDecisions).length < (postMeeting.draftTickets || []).length)}

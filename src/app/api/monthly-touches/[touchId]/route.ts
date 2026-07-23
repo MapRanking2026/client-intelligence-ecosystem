@@ -20,6 +20,7 @@ const touchRequestSchema = z.discriminatedUnion("action", [
     action: z.literal("apply_post_meeting_decisions"),
     ticketDecisions: z.record(z.string(), z.enum(["approved", "declined"])),
     approveEmail: z.boolean(),
+    dashboardDecisions: z.record(z.string(), z.enum(["approved", "declined"])).optional(),
   }),
   z.object({ action: z.literal("generate_qa_review") }),
   z.object({
@@ -78,6 +79,7 @@ export async function POST(
         result = await applyPostMeetingDecisions(context, touchId, {
           ticketDecisions: payload.ticketDecisions,
           approveEmail: payload.approveEmail,
+          dashboardDecisions: payload.dashboardDecisions,
         });
         break;
       case "generate_qa_review":

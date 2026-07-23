@@ -93,7 +93,7 @@ async function main() {
   const promptDocs = [...(db as FakeDb).store.keys()].filter((k) =>
     k.startsWith("promptEngine/library/prompts/"),
   );
-  check("seeds every prompt as its own document", promptDocs.length === 38, `${promptDocs.length} docs`);
+  check("seeds every prompt as its own document", promptDocs.length === 39, `${promptDocs.length} docs`);
   check("writes the order document", (db as FakeDb).store.has("promptEngine/library"));
 
   // 2. Seeding is idempotent across warm invocations.
@@ -105,8 +105,8 @@ async function main() {
   // 3. Reads reassemble phases in the original order.
   const config = await __internal.readFirestoreConfig(db);
   const totalPrompts = config.flatMap((p) => p.prompts).length;
-  check("phase count preserved", config.length === 7, `${config.length} phases`);
-  check("prompt count preserved", totalPrompts === 38, `${totalPrompts} prompts`);
+  check("phase count preserved", config.length === 8, `${config.length} phases`);
+  check("prompt count preserved", totalPrompts === 39, `${totalPrompts} prompts`);
   check("preamble leads the library", config[0].phase === "Global Standard", config[0].phase);
   check(
     "first module intact",
@@ -116,7 +116,7 @@ async function main() {
   check("no Unassigned bucket when order is complete", !config.some((p) => p.phase === "Unassigned"));
   check(
     "runtime contracts survived the round trip",
-    config.flatMap((p) => p.prompts).filter((p) => p.runtimeContract).length === 4,
+    config.flatMap((p) => p.prompts).filter((p) => p.runtimeContract).length === 5,
   );
 
   // 4. The runtime path reads exactly one document.

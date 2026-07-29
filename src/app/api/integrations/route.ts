@@ -3,7 +3,7 @@ import { z } from "zod";
 
 import { integrationProviderIds } from "@/src/lib/contracts/integrations";
 import { resolveTenantContext } from "@/src/lib/auth/resolve-tenant-context";
-import { syncIntegrationProvider } from "@/src/lib/server/integration-sync";
+import { syncIntegrationProvider, testIntegrationConnection } from "@/src/lib/server/integration-sync";
 import {
   connectIntegration,
   disconnectIntegration,
@@ -19,7 +19,7 @@ export const maxDuration = 300;
 const providerIdSchema = z.enum(integrationProviderIds);
 
 const integrationActionSchema = z.object({
-  action: z.enum(["connect", "disconnect", "refresh", "sync"]),
+  action: z.enum(["connect", "disconnect", "refresh", "sync", "test"]),
   providerId: providerIdSchema,
   credentials: z.record(z.string(), z.string()).optional(),
 });
@@ -71,6 +71,17 @@ export async function POST(request: Request) {
         data: {
           providerId: payload.providerId,
           syncResult,
+        },
+      });
+    }
+
+    if (payload.action === "test") {
+      const testResult = await testIntegrationConnection(context, payload.providerId, origin);
+      return NextResponse.json({
+        context,
+        data: {
+          providerId: payload.providerId,
+          testResult,
         },
       });
     }

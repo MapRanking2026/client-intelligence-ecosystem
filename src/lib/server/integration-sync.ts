@@ -6,6 +6,8 @@ import type {
 } from "@/src/lib/contracts/integrations";
 import type {
   ExternalRecordMappingRecord,
+  IntegrationConnectionTestCheck,
+  IntegrationConnectionTestResult,
   IntegrationSnapshotRecord,
   IntegrationSyncCounts,
   IntegrationSyncJobRecord,
@@ -1779,6 +1781,251 @@ async function runProviderSync(
     default:
       throw new Error(`${getIntegrationDefinition(providerId).name} sync is not implemented in this slice`);
   }
+}
+
+/**
+ * GETs a Google API without throwing on a non-2xx, so a test can inspect the exact status and error
+ * body rather than losing them to an exception. Returns the response alongside the parsed JSON.
+ */
+async function fetchWithStatus(url: string, accessToken: string, init?: RequestInit) {
+  const response = await fetch(url, {
+    ...init,
+    headers: { ...getBearerHeaders(accessToken), ...(init?.headers as Record<string, string> | undefined) },
+  });
+  const payload = (await response.json().catch(() => ({}))) as JsonRecord;
+  return { response, payload };
+}
+
+/**
+ * Google returns errors as `{ error: { code, message, status } }`. Pull out the human message and the
+ * canonical status string so a caller can both display and classify the failure.
+ */
+function extractGoogleError(payload: JsonRecord, httpStatus: number) {
+  const errorObject =
+    payload.error && typeof payload.error === "object" ? (payload.error as JsonRecord) : null;
+  const message = errorObject
+    ? String(errorObject.message || "")
+    : typeof payload.error === "string"
+      ? payload.error
+      : typeof payload.message === "string"
+        ? payload.message
+        : "";
+  const googleStatus = errorObject ? String(errorObject.status || "") : "";
+  return {
+    message: message || `Request failed with status ${httpStatus}`,
+    googleStatus,
+  };
+}
+
+/**
+ * Recognises the specific error Google returns when an API is not enabled for the project, or the
+ * Business Profile API access request has not been granted: a 403 whose message says the API "has
+ * not been used"/"is disabled" (or a PERMISSION_DENIED status), or a 429 that reports a zero quota
+ * (the state a project sits in until it is allowlisted). This is the signal that answers "did Google
+ * approve the request?" as opposed to a token/scope problem.
+ */
+function looksLikeApprovalBlock(httpStatus: number, message: string, googleStatus: string) {
+  const normalized = message.toLowerCase();
+  if (
+    httpStatus === 403 &&
+    (normalized.includes("has not been used") ||
+      normalized.includes("is disabled") ||
+      normalized.includes("has not been enabled") ||
+      normalized.includes("accessnotconfigured") ||
+      googleStatus === "PERMISSION_DENIED")
+  ) {
+    return true;
+  }
+  if (httpStatus === 429 && normalized.includes("quota")) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Probes the three Google APIs the Business Profile sync depends on -- account management, business
+ * information (locations), and performance metrics -- each of which Google enables/allowlists
+ * independently. Reports per-API whether real data came back or the "API not enabled / not approved"
+ * error, so "is our access request approved?" becomes a one-click check inside MTOS.
+ */
+async function testGoogleBusinessProfileConnection(
+  context: TenantContext,
+  record: IntegrationConnectionRecord,
+  origin?: string,
+): Promise<IntegrationConnectionTestCheck[]> {
+  const refreshedRecord = await maybeRefreshConnection(context, record, origin);
+  const accessToken = getIntegrationCredentials(refreshedRecord).accessToken;
+  if (!accessToken) {
+    throw new Error(
+      "Google Business Profile access token is missing. Reconnect the integration, then test again.",
+    );
+  }
+
+  const checks: IntegrationConnectionTestCheck[] = [];
+
+  // 1. Account Management API -- the gate: nothing else works without it.
+  const accountsHost = "mybusinessaccountmanagement.googleapis.com";
+  let firstAccountName = "";
+  {
+    const { response, payload } = await fetchWithStatus(`https://${accountsHost}/v1/accounts`, accessToken);
+    if (response.ok) {
+      const accounts = Array.isArray(payload.accounts) ? (payload.accounts as JsonRecord[]) : [];
+      firstAccountName = String(accounts[0]?.name || "");
+      checks.push({
+        api: "Account Management API",
+        endpoint: accountsHost,
+        status: "ok",
+        httpStatus: response.status,
+        detail: `${formatSummaryCount("Business Profile account", accounts.length)} visible to this connection.`,
+      });
+    } else {
+      const { message, googleStatus } = extractGoogleError(payload, response.status);
+      checks.push({
+        api: "Account Management API",
+        endpoint: accountsHost,
+        status: "failed",
+        httpStatus: response.status,
+        detail: message,
+        approvalBlocked: looksLikeApprovalBlock(response.status, message, googleStatus),
+      });
+    }
+  }
+
+  // 2. Business Information API -- lists a client's locations. Needs an account to query under.
+  const infoHost = "mybusinessbusinessinformation.googleapis.com";
+  let firstLocationId = "";
+  if (firstAccountName) {
+    const url = new URL(`https://${infoHost}/v1/${firstAccountName}/locations`);
+    url.searchParams.set("pageSize", "1");
+    url.searchParams.set("readMask", "name,title");
+    const { response, payload } = await fetchWithStatus(url.toString(), accessToken);
+    if (response.ok) {
+      const locations = Array.isArray(payload.locations) ? (payload.locations as JsonRecord[]) : [];
+      firstLocationId = String(locations[0]?.name || "").split("/").filter(Boolean).pop() || "";
+      checks.push({
+        api: "Business Information API",
+        endpoint: infoHost,
+        status: "ok",
+        httpStatus: response.status,
+        detail: locations.length
+          ? `Locations are readable (sampled "${String(locations[0]?.title || "untitled")}").`
+          : "Reachable, but this account has no locations yet.",
+      });
+    } else {
+      const { message, googleStatus } = extractGoogleError(payload, response.status);
+      checks.push({
+        api: "Business Information API",
+        endpoint: infoHost,
+        status: "failed",
+        httpStatus: response.status,
+        detail: message,
+        approvalBlocked: looksLikeApprovalBlock(response.status, message, googleStatus),
+      });
+    }
+  } else {
+    checks.push({
+      api: "Business Information API",
+      endpoint: infoHost,
+      status: "skipped",
+      detail: "No account was returned, so there was nothing to list locations for.",
+    });
+  }
+
+  // 3. Performance API -- the calls/clicks/impressions the brief reads. Needs a location to sample.
+  const performanceHost = "businessprofileperformance.googleapis.com";
+  if (firstLocationId) {
+    const sampleDay = new Date();
+    sampleDay.setUTCDate(sampleDay.getUTCDate() - 1);
+    const parts = toGoogleDateParts(sampleDay);
+    const url = new URL(
+      `https://${performanceHost}/v1/locations/${firstLocationId}:fetchMultiDailyMetricsTimeSeries`,
+    );
+    url.searchParams.append("dailyMetrics", "CALL_CLICKS");
+    url.searchParams.set("dailyRange.start_date.year", String(parts.year));
+    url.searchParams.set("dailyRange.start_date.month", String(parts.month));
+    url.searchParams.set("dailyRange.start_date.day", String(parts.day));
+    url.searchParams.set("dailyRange.end_date.year", String(parts.year));
+    url.searchParams.set("dailyRange.end_date.month", String(parts.month));
+    url.searchParams.set("dailyRange.end_date.day", String(parts.day));
+    const { response, payload } = await fetchWithStatus(url.toString(), accessToken);
+    if (response.ok) {
+      checks.push({
+        api: "Performance API",
+        endpoint: performanceHost,
+        status: "ok",
+        httpStatus: response.status,
+        detail: "Performance metrics are readable for the sampled location.",
+      });
+    } else {
+      const { message, googleStatus } = extractGoogleError(payload, response.status);
+      checks.push({
+        api: "Performance API",
+        endpoint: performanceHost,
+        status: "failed",
+        httpStatus: response.status,
+        detail: message,
+        approvalBlocked: looksLikeApprovalBlock(response.status, message, googleStatus),
+      });
+    }
+  } else {
+    checks.push({
+      api: "Performance API",
+      endpoint: performanceHost,
+      status: "skipped",
+      detail: "No location was available to sample metrics for.",
+    });
+  }
+
+  return checks;
+}
+
+/**
+ * Runs a live, read-only connection test against a provider and summarises whether its APIs are
+ * actually reachable. Currently implemented for Google Business Profile, whose access is gated behind
+ * a Google approval/allowlisting step -- the test surfaces exactly that state.
+ */
+export async function testIntegrationConnection(
+  context: TenantContext,
+  providerId: IntegrationProviderId,
+  origin?: string,
+): Promise<IntegrationConnectionTestResult> {
+  const record = await getConnectedRecord(context, providerId);
+
+  let checks: IntegrationConnectionTestCheck[];
+  switch (providerId) {
+    case "google-business-profile":
+      checks = await testGoogleBusinessProfileConnection(context, record, origin);
+      break;
+    default:
+      throw new Error(
+        `Connection testing is not available for ${getIntegrationDefinition(providerId).name} yet.`,
+      );
+  }
+
+  const runnableChecks = checks.filter((check) => check.status !== "skipped");
+  const ok = runnableChecks.length > 0 && runnableChecks.every((check) => check.status === "ok");
+  const blocked = checks.find((check) => check.approvalBlocked);
+  const firstFailure = checks.find((check) => check.status === "failed");
+
+  let summary: string;
+  if (ok) {
+    summary =
+      "Connected and approved — every Business Profile API MTOS uses responded successfully, so client data can be pulled.";
+  } else if (blocked) {
+    summary = `Not approved yet — the ${blocked.api} returned Google's "API not enabled / not allowlisted" response ("${blocked.detail}"). The access request has not been granted for this project.`;
+  } else if (firstFailure) {
+    summary = `The ${firstFailure.api} did not respond successfully: ${firstFailure.detail}`;
+  } else {
+    summary = "No API probes could be run for this connection.";
+  }
+
+  return {
+    providerId,
+    ok,
+    checkedAt: getNowIso(),
+    summary,
+    checks,
+  };
 }
 
 export async function syncIntegrationProvider(

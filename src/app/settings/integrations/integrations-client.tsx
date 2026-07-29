@@ -10,17 +10,21 @@ import {
   KeyRound,
   Link2,
   LoaderCircle,
+  MinusCircle,
   Play,
   RefreshCw,
   ShieldCheck,
+  Stethoscope,
   TimerReset,
   Unplug,
+  XCircle,
 } from "lucide-react";
 
 import type {
   IntegrationFieldDefinition,
   IntegrationProviderView,
 } from "@/src/lib/contracts/integrations";
+import type { IntegrationConnectionTestResult } from "@/src/lib/contracts/integration-sync";
 import { cn } from "@/src/lib/utils";
 
 interface IntegrationsClientProps {
@@ -43,9 +47,14 @@ interface IntegrationMutationResponse {
     syncResult?: {
       summary?: string;
     };
+    testResult?: IntegrationConnectionTestResult;
   };
   error?: string;
 }
+
+// Providers whose live access is gated behind an external approval/allowlisting step, where a
+// read-only "test connection" probe is worth surfacing in the UI.
+const testableProviderIds = new Set<string>(["google-business-profile"]);
 
 const authModeMeta = {
   oauth: {
@@ -158,6 +167,7 @@ export function IntegrationsClient({
   const [formValues, setFormValues] = useState<Record<string, string>>({});
   const [activeAction, setActiveAction] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
+  const [testResults, setTestResults] = useState<Record<string, IntegrationConnectionTestResult>>({});
 
   const selectedProvider =
     integrations.find((provider) => provider.id === selectedProviderId) || null;
@@ -362,6 +372,34 @@ export function IntegrationsClient({
     }
   }
 
+  async function handleTest(provider: IntegrationProviderView) {
+    setActiveAction(`test-${provider.id}`);
+    setFormError(null);
+
+    try {
+      const response = await fetch("/api/integrations", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          action: "test",
+          providerId: provider.id,
+        }),
+      });
+      const payload = (await response.json()) as IntegrationMutationResponse;
+
+      if (!response.ok || !payload.data.testResult) {
+        throw new Error(payload.error || `Unable to test ${provider.name}`);
+      }
+
+      const result = payload.data.testResult;
+      setTestResults((current) => ({ ...current, [provider.id]: result }));
+    } catch (caught) {
+      setFormError(caught instanceof Error ? caught.message : `Unable to test ${provider.name}`);
+    } finally {
+      setActiveAction(null);
+    }
+  }
+
   return (
     <div className="space-y-6">
       {flashStatus || flashMessage ? (
@@ -467,7 +505,9 @@ export function IntegrationsClient({
                   activeAction === `save-${provider.id}` ||
                   activeAction === `refresh-${provider.id}` ||
                   activeAction === `disconnect-${provider.id}` ||
-                  activeAction === `sync-${provider.id}`;
+                  activeAction === `sync-${provider.id}` ||
+                  activeAction === `test-${provider.id}`;
+                const testResult = testResults[provider.id];
 
                 return (
                   <article
@@ -588,6 +628,23 @@ export function IntegrationsClient({
                         </button>
                       ) : null}
 
+                      {testableProviderIds.has(provider.id) ? (
+                        <button
+                          type="button"
+                          disabled={!provider.isConnected || activeAction === `test-${provider.id}`}
+                          onClick={() => handleTest(provider)}
+                          style={{ color: "#0d1625" }}
+                          className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-medium text-[#0d1625] transition hover:bg-white/8 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {activeAction === `test-${provider.id}` ? (
+                            <LoaderCircle className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <Stethoscope className="h-4 w-4" />
+                          )}
+                          Test connection
+                        </button>
+                      ) : null}
+
                       <button
                         type="button"
                         disabled={!provider.isConnected || activeAction === `disconnect-${provider.id}`}
@@ -603,6 +660,50 @@ export function IntegrationsClient({
                         Disconnect
                       </button>
                     </div>
+
+                    {testResult ? (
+                      <div
+                        className={cn(
+                          "mt-4 space-y-3 rounded-[22px] border px-4 py-4 text-sm",
+                          testResult.ok
+                            ? "border-emerald-400/25 bg-emerald-500/12 text-emerald-100"
+                            : testResult.checks.some((check) => check.approvalBlocked)
+                              ? "border-amber-400/25 bg-amber-500/12 text-amber-100"
+                              : "border-rose-400/25 bg-rose-500/12 text-rose-100",
+                        )}
+                      >
+                        <p className="font-medium leading-6">{testResult.summary}</p>
+                        <ul className="space-y-2">
+                          {testResult.checks.map((check) => {
+                            const CheckIcon =
+                              check.status === "ok"
+                                ? CheckCircle2
+                                : check.status === "skipped"
+                                  ? MinusCircle
+                                  : XCircle;
+                            return (
+                              <li key={check.api} className="flex items-start gap-2">
+                                <CheckIcon className="mt-0.5 h-4 w-4 shrink-0" />
+                                <div className="space-y-0.5">
+                                  <p className="font-medium text-white">
+                                    {check.api}
+                                    {check.httpStatus ? (
+                                      <span className="ml-2 text-xs font-normal text-slate-300">
+                                        HTTP {check.httpStatus}
+                                      </span>
+                                    ) : null}
+                                  </p>
+                                  <p className="text-xs leading-5 text-slate-200">{check.detail}</p>
+                                </div>
+                              </li>
+                            );
+                          })}
+                        </ul>
+                        <p className="text-[11px] uppercase tracking-[0.18em] text-slate-300">
+                          Checked {formatIntegrationTimestamp(testResult.checkedAt)}
+                        </p>
+                      </div>
+                    ) : null}
 
                     {provider.authMode === "oauth" && !provider.isConfigured ? (
                       <div className="mt-4 rounded-2xl border border-amber-400/25 bg-amber-500/12 px-4 py-3 text-sm text-amber-100">

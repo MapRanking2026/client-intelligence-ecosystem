@@ -8,7 +8,7 @@ import { monthlyTouchPath } from "@/src/lib/server/firebase/collections";
 import { getFirebaseAdminDb } from "@/src/lib/server/firebase/admin";
 import { getServerEnv } from "@/src/lib/server/env";
 import { getIntegrationConnection, getIntegrationCredentials } from "@/src/lib/server/integrations";
-import { callClaudeForJson, getNowIso, stripUndefinedDeep } from "@/src/lib/server/services/mtos-ai";
+import { callLlmForJson, getNowIso, hasAnyLlmProvider, stripUndefinedDeep } from "@/src/lib/server/services/mtos-ai";
 import { getPromptText } from "@/src/lib/server/prompt-store";
 import {
   applyDashboardDecisions,
@@ -60,7 +60,8 @@ async function analyzeWithClaude(
     ),
   ].join("\n");
 
-  return analysisSchema.parse(await callClaudeForJson({ env, system, userText, maxTokens: 1800 }));
+  const result = await callLlmForJson({ env, system, userText, maxTokens: 1800 });
+  return { analysis: analysisSchema.parse(result.data), provider: result.provider, model: result.model };
 }
 
 export async function analyzePostMeetingTranscript(context: TenantContext, touchId: string, transcript: string) {
@@ -86,11 +87,11 @@ export async function analyzePostMeetingTranscript(context: TenantContext, touch
   }
 
   const env = getServerEnv();
-  if (!env.anthropicApiKey) {
-    throw new Error("Claude is not configured yet (missing ANTHROPIC_API_KEY), so transcript analysis can't run.");
+  if (!hasAnyLlmProvider(env)) {
+    throw new Error("No AI provider is configured (set ANTHROPIC_API_KEY, OPENAI_API_KEY, or GEMINI_API_KEY), so transcript analysis can't run.");
   }
 
-  const analysis = await analyzeWithClaude(env, touch, client, trimmedTranscript);
+  const { analysis, model } = await analyzeWithClaude(env, touch, client, trimmedTranscript);
 
   const draftTickets: DraftTicket[] = analysis.draftTickets.map((ticket) => ({
     id: `ticket-${nanoid(8)}`,
@@ -116,7 +117,7 @@ export async function analyzePostMeetingTranscript(context: TenantContext, touch
       status: "draft_ready",
       proposals: [],
       analyzedAt: getNowIso(),
-      model: env.anthropicModel,
+      model,
       errorMessage:
         error instanceof Error ? error.message : "Dashboard intelligence step could not run.",
     };
@@ -135,7 +136,7 @@ export async function analyzePostMeetingTranscript(context: TenantContext, touch
     },
     dashboardUpdates,
     analyzedAt: getNowIso(),
-    model: env.anthropicModel,
+    model,
   };
 
   const updatedTouch: MonthlyTouchRecord = stripUndefinedDeep({

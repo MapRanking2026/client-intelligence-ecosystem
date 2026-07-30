@@ -8,6 +8,7 @@ import {
   getPromptRecord,
   validatePromptDraft,
 } from "@/src/lib/server/prompt-store";
+import { callLlmForText, hasAnyLlmProvider } from "@/src/lib/server/services/mtos-ai";
 
 interface RouteContext {
   params: Promise<{ key: string }>;
@@ -72,51 +73,40 @@ export async function POST(request: Request, { params }: RouteContext) {
   }
 
   const env = getServerEnv();
-  if (!env.anthropicApiKey) {
-    return NextResponse.json(
-      { issues, preview, detectedVariables, output: null, error: "Claude is not configured (missing ANTHROPIC_API_KEY)." },
-      { status: 503 },
-    );
-  }
-
-  const response = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      "x-api-key": env.anthropicApiKey,
-      "anthropic-version": "2023-06-01",
-    },
-    body: JSON.stringify({
-      model: env.anthropicModel,
-      max_tokens: 1400,
-      temperature: 0.2,
-      system: preview,
-      messages: [{ role: "user", content: [{ type: "text", text: sampleInput }] }],
-    }),
-  });
-
-  const payload = (await response.json().catch(() => ({}))) as {
-    content?: Array<{ type?: string; text?: string }>;
-    error?: { message?: string };
-  };
-
-  if (!response.ok) {
+  if (!hasAnyLlmProvider(env)) {
     return NextResponse.json(
       {
         issues,
         preview,
         detectedVariables,
         output: null,
-        error: payload.error?.message || `Claude request failed with status ${response.status}`,
+        error: "No AI provider is configured (set ANTHROPIC_API_KEY, OPENAI_API_KEY, or GEMINI_API_KEY).",
+      },
+      { status: 503 },
+    );
+  }
+
+  try {
+    // Runs through the same failover chain as production, so the test reflects
+    // real runtime behavior. `preview` is the composed system prompt.
+    const { text, provider, model } = await callLlmForText({
+      env,
+      system: preview,
+      userText: sampleInput,
+      maxTokens: 1400,
+      temperature: 0.2,
+    });
+    return NextResponse.json({ issues, preview, detectedVariables, output: text, provider, model });
+  } catch (error) {
+    return NextResponse.json(
+      {
+        issues,
+        preview,
+        detectedVariables,
+        output: null,
+        error: error instanceof Error ? error.message : "LLM request failed",
       },
       { status: 502 },
     );
   }
-
-  const output = (payload.content || [])
-    .filter((block) => block.type === "text" && block.text)
-    .map((block) => block.text || "")
-    .join("\n");
-
-  return NextResponse.json({ issues, preview, detectedVariables, output });
 }

@@ -44,6 +44,8 @@ export interface PrepPackClaudeState {
   status: "generated" | "not_configured" | "failed";
   generatedAt?: string;
   model?: string;
+  /** Which LLM provider actually answered (claude/openai/gemini). */
+  provider?: string;
   errorMessage?: string;
 }
 
@@ -365,6 +367,8 @@ export interface CallGuide {
   sections: CallGuideSection[];
   generatedAt?: string;
   model?: string;
+  /** Which LLM provider answered (claude/openai/gemini). */
+  provider?: string;
   errorMessage?: string;
 }
 
@@ -451,6 +455,145 @@ export interface QaReview {
   errorMessage?: string;
 }
 
+/**
+ * Lead & call verification. A verification run inspects the individual leads,
+ * calls, and form submissions a client received (read from the GoHighLevel
+ * snapshot, which aggregates every source), vets each one, reconciles the counts
+ * against the platforms that report their own numbers (Google Ads, GBP), and
+ * confirms each lead's attribution channel. It is non-destructive: the AI drafts
+ * a verdict per lead and the AM can override it.
+ */
+export type LeadType = "call" | "form" | "chat" | "manual";
+
+export type LeadStatus = "valid" | "flagged" | "needs_review";
+
+/** Resolved attribution channel a lead came in through. */
+export type LeadChannel =
+  | "google_ads"
+  | "organic_website"
+  | "meta_ads"
+  | "gbp_call"
+  | "direct"
+  | "referral"
+  | "unknown";
+
+/** Why a lead is classified the way it is. `valid_new_lead` is the good outcome. */
+export type LeadCategory =
+  | "valid_new_lead"
+  | "spam"
+  | "duplicate"
+  | "existing_customer"
+  | "wrong_number"
+  | "sales_solicitation"
+  | "out_of_area"
+  | "incomplete";
+
+export interface VerifiedLead {
+  id: string;
+  name?: string;
+  phone?: string;
+  email?: string;
+  /** ISO timestamp the lead was received. */
+  receivedAt?: string;
+  /** Raw source string as it arrived from GoHighLevel. */
+  rawSource?: string;
+  /** Resolved attribution channel. */
+  channel: LeadChannel;
+  type: LeadType;
+  campaign?: string;
+  status: LeadStatus;
+  category: LeadCategory;
+  /** Classification rationale / why it was flagged. */
+  reason?: string;
+  /** 0-100 attribution + vetting confidence. */
+  confidence?: number;
+  /** Best-effort call-recording link (Phase 3). */
+  recordingUrl?: string;
+  /** Deep link into the contact in GoHighLevel. */
+  contactUrl?: string;
+  /** First message / snippet of context. */
+  notes?: string;
+  /** Whether the current verdict came from the AI or an AM override. */
+  verdictSource?: "ai" | "manual";
+  /** True for pasted/imported leads not sourced from a connected integration. */
+  manual?: boolean;
+}
+
+export interface LeadChannelCount {
+  channel: LeadChannel;
+  total: number;
+  valid: number;
+  flagged: number;
+}
+
+/** GHL's count for a channel vs. the platform that reports its own number. */
+export interface LeadReconciliation {
+  channel: LeadChannel;
+  ghlCount: number;
+  platformCount: number | null;
+  platformLabel: string;
+  delta: number | null;
+  note?: string;
+}
+
+export interface LeadVerificationReview {
+  status: "not_started" | "ready" | "error";
+  clientId: string;
+  leads: VerifiedLead[];
+  totals: {
+    total: number;
+    valid: number;
+    flagged: number;
+    needsReview: number;
+  };
+  byChannel: LeadChannelCount[];
+  reconciliation: LeadReconciliation[];
+  warnings: string[];
+  /** Time window the leads were pulled for. */
+  window?: { since?: string; until?: string };
+  source?: "claude" | "heuristic";
+  generatedAt?: string;
+  model?: string;
+  /** Which LLM provider answered the vetting pass (claude/openai/gemini). */
+  provider?: string;
+  errorMessage?: string;
+}
+
+/** Client-safe display labels, shared by the engine and the UI. */
+export const LEAD_CHANNEL_LABEL: Record<LeadChannel, string> = {
+  google_ads: "Google Ads",
+  organic_website: "Organic / Website",
+  meta_ads: "Meta Ads",
+  gbp_call: "Google Business calls",
+  direct: "Direct",
+  referral: "Referral",
+  unknown: "Unknown",
+};
+
+export const LEAD_CATEGORY_LABEL: Record<LeadCategory, string> = {
+  valid_new_lead: "Valid new lead",
+  spam: "Spam",
+  duplicate: "Duplicate",
+  existing_customer: "Existing customer",
+  wrong_number: "Wrong number",
+  sales_solicitation: "Sales solicitation",
+  out_of_area: "Out of area",
+  incomplete: "Incomplete",
+};
+
+export const LEAD_STATUS_LABEL: Record<LeadStatus, string> = {
+  valid: "Valid",
+  flagged: "Flagged",
+  needs_review: "Needs review",
+};
+
+export const LEAD_TYPE_LABEL: Record<LeadType, string> = {
+  call: "Call",
+  form: "Form",
+  chat: "Chat",
+  manual: "Manual",
+};
+
 export interface MonthlyTouchRecord {
   id: string;
   clientId: string;
@@ -472,6 +615,8 @@ export interface MonthlyTouchRecord {
   callGuide?: CallGuide;
   postMeeting?: PostMeetingReview;
   qaReview?: QaReview;
+  /** Latest lead & call verification captured during prep (optional, additive). */
+  leadVerification?: LeadVerificationReview;
 }
 
 const clients: ClientRecord[] = [

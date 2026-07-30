@@ -11,7 +11,7 @@ import type {
 } from "@/src/lib/mtos-data";
 import { getServerEnv } from "@/src/lib/server/env";
 import { getIntegrationConnection, getIntegrationCredentials } from "@/src/lib/server/integrations";
-import { callClaudeForJson, getNowIso } from "@/src/lib/server/services/mtos-ai";
+import { callLlmForJson, getNowIso } from "@/src/lib/server/services/mtos-ai";
 import { getPromptText } from "@/src/lib/server/prompt-store";
 
 /**
@@ -100,9 +100,8 @@ export async function draftDashboardUpdates(
     ),
   ].join("\n");
 
-  const parsed = dashboardResponseSchema.parse(
-    await callClaudeForJson({ env, system, userText, maxTokens: 1200 }),
-  );
+  const llmResult = await callLlmForJson({ env, system, userText, maxTokens: 1200 });
+  const parsed = dashboardResponseSchema.parse(llmResult.data);
 
   // Keep only actionable proposals; a "no_change" from the model is a valid,
   // expected answer that simply produces nothing to approve.
@@ -124,7 +123,7 @@ export async function draftDashboardUpdates(
     status: "draft_ready",
     proposals,
     analyzedAt: getNowIso(),
-    model: env.anthropicModel,
+    model: llmResult.model,
   };
 }
 

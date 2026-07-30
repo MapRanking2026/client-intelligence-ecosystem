@@ -50,6 +50,24 @@ export function integrationSnapshotPath(tenantId: string, providerId: string) {
   return `${integrationSnapshotsCollectionPath(tenantId)}/${providerId}`;
 }
 
+export function leadVerificationsCollectionPath(tenantId: string) {
+  return `${tenantPath(tenantId)}/leadVerifications`;
+}
+
+/** One document per client holding the latest lead & call verification review. */
+export function leadVerificationPath(tenantId: string, clientId: string) {
+  return `${leadVerificationsCollectionPath(tenantId)}/${clientId}`;
+}
+
+export function knowledgeChunksCollectionPath(tenantId: string) {
+  return `${tenantPath(tenantId)}/knowledgeChunks`;
+}
+
+/** One document per embedded chunk in the Map Ranking knowledge base (RAG). */
+export function knowledgeChunkPath(tenantId: string, chunkId: string) {
+  return `${knowledgeChunksCollectionPath(tenantId)}/${chunkId}`;
+}
+
 export function tenantUsersCollectionPath(tenantId: string) {
   return `${tenantPath(tenantId)}/users`;
 }

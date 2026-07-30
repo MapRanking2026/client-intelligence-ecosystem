@@ -6,7 +6,7 @@ import { getMtosDataSource } from "@/src/lib/server/data/seed-mtos-data-source";
 import { monthlyTouchPath } from "@/src/lib/server/firebase/collections";
 import { getFirebaseAdminDb } from "@/src/lib/server/firebase/admin";
 import { getServerEnv } from "@/src/lib/server/env";
-import { callClaudeForJson, getNowIso, stripUndefinedDeep } from "@/src/lib/server/services/mtos-ai";
+import { callLlmForJson, getNowIso, hasAnyLlmProvider, stripUndefinedDeep } from "@/src/lib/server/services/mtos-ai";
 import { getPromptText } from "@/src/lib/server/prompt-store";
 
 const callGuideSchema = z.object({
@@ -144,8 +144,8 @@ function buildDeterministicSections(touch: MonthlyTouchRecord): CallGuideSection
 async function generateClaudeSections(
   env: ReturnType<typeof getServerEnv>,
   touch: MonthlyTouchRecord,
-): Promise<CallGuideSection[] | null> {
-  if (!env.anthropicApiKey) {
+): Promise<{ sections: CallGuideSection[]; provider: string; model: string } | null> {
+  if (!hasAnyLlmProvider(env)) {
     return null;
   }
 
@@ -228,8 +228,9 @@ async function generateClaudeSections(
     ),
   ].join("\n");
 
-  const parsed = callGuideSchema.parse(await callClaudeForJson({ env, system, userText, maxTokens: 1200 }));
-  return parsed.sections;
+  const result = await callLlmForJson({ env, system, userText, maxTokens: 1200 });
+  const parsed = callGuideSchema.parse(result.data);
+  return { sections: parsed.sections, provider: result.provider, model: result.model };
 }
 
 export async function generateLiveCallGuide(context: TenantContext, touchId: string) {
@@ -260,9 +261,10 @@ export async function generateLiveCallGuide(context: TenantContext, touchId: str
       callGuide = {
         status: "generated",
         source: "claude",
-        sections: claudeSections,
+        sections: claudeSections.sections,
         generatedAt: getNowIso(),
-        model: env.anthropicModel,
+        model: claudeSections.model,
+        provider: claudeSections.provider,
       };
     }
   } catch (error) {

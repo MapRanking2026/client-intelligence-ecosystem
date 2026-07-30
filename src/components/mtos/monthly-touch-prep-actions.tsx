@@ -8,7 +8,15 @@ interface MonthlyTouchPrepActionsProps {
   preparedAt?: string;
   claudeStatus?: "generated" | "not_configured" | "failed";
   claudeError?: string;
+  /** Which LLM provider answered (claude/openai/gemini), when generated. */
+  claudeProvider?: string;
 }
+
+const PROVIDER_LABEL: Record<string, string> = {
+  claude: "Claude",
+  openai: "OpenAI",
+  gemini: "Gemini",
+};
 
 interface PrepareTouchResponse {
   data?: {
@@ -46,6 +54,7 @@ export function MonthlyTouchPrepActions({
   preparedAt,
   claudeStatus,
   claudeError,
+  claudeProvider,
 }: MonthlyTouchPrepActionsProps) {
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
@@ -87,7 +96,10 @@ export function MonthlyTouchPrepActions({
         </p>
         <p className="text-sm text-slate-200">Last prepared: {formatPreparedAt(preparedAt)}</p>
         <p className="text-xs text-slate-500">
-          Claude status: {claudeStatus === "generated" ? "Generated" : claudeStatus === "failed" ? "Failed" : "Not configured"}
+          AI status: {claudeStatus === "generated" ? "Generated" : claudeStatus === "failed" ? "Failed" : "Not configured"}
+          {claudeStatus === "generated" && claudeProvider
+            ? ` · via ${PROVIDER_LABEL[claudeProvider] || claudeProvider}`
+            : ""}
         </p>
       </div>
 

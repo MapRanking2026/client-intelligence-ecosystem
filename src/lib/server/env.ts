@@ -20,6 +20,20 @@ export function getServerEnv() {
     adminSignupCode: process.env.MTOS_ADMIN_SIGNUP_CODE || "",
     anthropicApiKey: process.env.ANTHROPIC_API_KEY || "",
     anthropicModel: process.env.ANTHROPIC_MODEL || "claude-3-5-sonnet-latest",
+    // Fallback LLM providers. Model defaults are conservative and overridable via
+    // env so the exact model can be set without a code change.
+    openaiApiKey: process.env.OPENAI_API_KEY || "",
+    openaiModel: process.env.OPENAI_MODEL || "gpt-4o",
+    openaiEmbeddingModel: process.env.OPENAI_EMBEDDING_MODEL || "text-embedding-3-small",
+    geminiApiKey: process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "",
+    geminiModel: process.env.GEMINI_MODEL || "gemini-1.5-pro",
+    geminiEmbeddingModel: process.env.GEMINI_EMBEDDING_MODEL || "text-embedding-004",
+    // Embedding provider order for the knowledge base (RAG). Claude has no
+    // embeddings API, so only openai/gemini are eligible.
+    embeddingProviderOrder: process.env.EMBEDDING_PROVIDER_ORDER || "openai,gemini",
+    // Default failover order for the LLM layer; a comma-separated list of
+    // provider ids ("claude", "openai", "gemini"). Unknown ids are ignored.
+    llmProviderOrder: process.env.LLM_PROVIDER_ORDER || "claude,openai,gemini",
     gohighlevelAgencyApiKey: (process.env.GOHIGHLEVEL_AGENCY_API_KEY || "").replace(/^Bearer\s+/i, "").trim(),
   };
 }

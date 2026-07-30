@@ -6,7 +6,7 @@ import { getMtosDataSource } from "@/src/lib/server/data/seed-mtos-data-source";
 import { monthlyTouchPath } from "@/src/lib/server/firebase/collections";
 import { getFirebaseAdminDb } from "@/src/lib/server/firebase/admin";
 import { getServerEnv } from "@/src/lib/server/env";
-import { callClaudeForJson, getNowIso, stripUndefinedDeep } from "@/src/lib/server/services/mtos-ai";
+import { callClaudeForJson, getNowIso, hasAnyLlmProvider, stripUndefinedDeep } from "@/src/lib/server/services/mtos-ai";
 import { getPromptText } from "@/src/lib/server/prompt-store";
 
 export const QA_SCORECARD_CATEGORIES = [
@@ -78,8 +78,8 @@ export async function generateQaReview(context: TenantContext, touchId: string) 
   }
 
   const env = getServerEnv();
-  if (!env.anthropicApiKey) {
-    throw new Error("Claude is not configured yet (missing ANTHROPIC_API_KEY), so the QA review can't be generated.");
+  if (!hasAnyLlmProvider(env)) {
+    throw new Error("No AI provider is configured (set ANTHROPIC_API_KEY, OPENAI_API_KEY, or GEMINI_API_KEY), so the QA review can't be generated.");
   }
 
   const evaluation = await evaluateWithClaude(env, touch, touch.postMeeting.transcript);

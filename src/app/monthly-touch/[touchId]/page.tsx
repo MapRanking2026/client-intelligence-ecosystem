@@ -4,6 +4,7 @@ import { CheckCircle2 } from "lucide-react";
 
 import { AppShell } from "@/src/components/mtos/app-shell";
 import { CallGuideActions } from "@/src/components/mtos/call-guide-actions";
+import { LeadVerificationSummary } from "@/src/components/mtos/lead-verification-summary";
 import { MonthlyTouchPrepActions } from "@/src/components/mtos/monthly-touch-prep-actions";
 import {
   AdsPerformancePanel,
@@ -121,6 +122,7 @@ export default async function MonthlyTouchPage({
               preparedAt={prepPack?.preparedAt}
               claudeStatus={prepPack?.claude.status}
               claudeError={prepPack?.claude.errorMessage}
+              claudeProvider={prepPack?.claude.provider}
             />
             {readinessChecks.map((item) => (
               <div key={item.label} className="flex items-center gap-3 rounded-2xl border border-white/8 bg-white/4 px-4 py-3">
@@ -133,6 +135,16 @@ export default async function MonthlyTouchPage({
       </div>
 
       {prepPack ? <DataGapsBanner gaps={prepPack.dataGaps} /> : null}
+
+      {touch.leadVerification ? (
+        <SectionCard
+          eyebrow="Lead & call verification"
+          title="Leads, calls & forms — vetted and reconciled"
+          subtitle="Auto-run during prep: each lead vetted as valid or flagged, attributed to a channel, and the counts reconciled against Google Ads and Google Business Profile. Open the full page to review lead-by-lead."
+        >
+          <LeadVerificationSummary review={touch.leadVerification} clientId={client.id} />
+        </SectionCard>
+      ) : null}
 
       {prepPack ? (
         <SectionCard

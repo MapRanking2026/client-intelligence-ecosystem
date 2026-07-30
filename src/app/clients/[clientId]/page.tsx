@@ -4,11 +4,13 @@ import { ArrowRight, BookOpenText, CalendarDays, MessageSquareQuote } from "luci
 
 import { AppShell } from "@/src/components/mtos/app-shell";
 import { ClientProfileMappings } from "@/src/components/mtos/client-profile-mappings";
+import { LeadVerificationQuickActions } from "@/src/components/mtos/lead-verification-quick-actions";
 import { ScorePill } from "@/src/components/mtos/score-pill";
 import { SectionCard } from "@/src/components/mtos/section-card";
 import { resolveTenantContext } from "@/src/lib/auth/resolve-tenant-context";
 import { getClientMappingView } from "@/src/lib/server/services/client-mappings-service";
 import { getClientWorkspaceView } from "@/src/lib/server/services/clients-service";
+import { getStoredLeadVerification } from "@/src/lib/server/services/lead-verification-service";
 import { healthTone } from "@/src/lib/utils";
 
 export default async function ClientWorkspacePage({
@@ -25,7 +27,10 @@ export default async function ClientWorkspacePage({
   }
 
   const { client, touch, commitments: clientCommitments, opportunities: clientOpportunities } = payload;
-  const mappingView = await getClientMappingView(context, clientId);
+  const [mappingView, leadVerification] = await Promise.all([
+    getClientMappingView(context, clientId),
+    getStoredLeadVerification(context, clientId),
+  ]);
 
   return (
     <AppShell
@@ -104,6 +109,14 @@ export default async function ClientWorkspacePage({
           ) : null}
         </SectionCard>
       </div>
+
+      <SectionCard
+        eyebrow="Lead & call verification"
+        title="Verify the leads, calls & forms this client received"
+        subtitle="Vet each lead as real or flagged, confirm which channel it came from, and reconcile the counts across Google Ads, organic/website, and Meta — all pulled from GoHighLevel. Runs on demand here and automatically during monthly-touch prep."
+      >
+        <LeadVerificationQuickActions clientId={client.id} initialReview={leadVerification} />
+      </SectionCard>
 
       <div className="grid gap-6 lg:grid-cols-[1.05fr_0.95fr_1fr]">
         <SectionCard eyebrow="Commitments" title="Open accountability" subtitle="Promises stay visible until they are resolved.">

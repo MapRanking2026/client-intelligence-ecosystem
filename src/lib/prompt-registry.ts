@@ -38,6 +38,12 @@ export const PROMPT_BINDINGS: Record<string, PromptBinding[]> = {
       source: "src/lib/server/services/qa-review-service.ts",
     },
   ],
+  lead_verification_prompt: [
+    {
+      module: "Lead & call verification (client card + Monthly Touch prep)",
+      source: "src/lib/server/services/lead-verification-service.ts",
+    },
+  ],
 };
 
 export function getPromptBindings(key: string): PromptBinding[] {

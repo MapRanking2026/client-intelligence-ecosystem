@@ -12,6 +12,7 @@ import type {
   HeatmapGrid,
   IssueSolutionItem,
   KeywordScanHistory,
+  LeadVerificationReview,
   MapCheckinBusinessSummary,
   MonthlyTouchPrepPack,
   MonthlyTouchRecord,
@@ -39,8 +40,9 @@ import {
 } from "@/src/lib/server/firebase/collections";
 import { getFirebaseAdminDb } from "@/src/lib/server/firebase/admin";
 import { getServerEnv } from "@/src/lib/server/env";
-import { callClaudeForJson } from "@/src/lib/server/services/mtos-ai";
+import { callLlmForJson, hasAnyLlmProvider } from "@/src/lib/server/services/mtos-ai";
 import { fetchClickupClientContext } from "@/src/lib/server/services/clickup-client-context";
+import { runLeadVerification } from "@/src/lib/server/services/lead-verification-service";
 import { getPromptText } from "@/src/lib/server/prompt-store";
 
 type JsonRecord = Record<string, unknown>;
@@ -1103,15 +1105,13 @@ async function generateClaudeTouchOutput(
   client: ClientRecord,
   touch: MonthlyTouchRecord,
 ) {
-  if (!env.anthropicApiKey) {
+  if (!hasAnyLlmProvider(env)) {
     return null;
   }
 
   const system = await getPromptText("monthly_touch_preparation_prompt");
 
-  const parsed = claudeResponseSchema.parse(
-    normalizeClaudeTouchPayload(
-      await callClaudeForJson({
+  const llmResult = await callLlmForJson({
         env,
         system,
         userText: [
@@ -1161,11 +1161,10 @@ async function generateClaudeTouchOutput(
         // recommendations, agenda, and talking points -- 2000/4000 truncated the JSON mid-array.
         maxTokens: 8000,
         temperature: 0.2,
-      }),
-    ),
-  );
+  });
+  const parsed = claudeResponseSchema.parse(normalizeClaudeTouchPayload(llmResult.data));
 
-  return {
+  const output = {
     executiveBrief: parsed.executiveBrief,
     agenda: unique(parsed.agenda).slice(0, 6),
     talkingPoints: unique(parsed.talkingPoints).slice(0, 6),
@@ -1180,6 +1179,8 @@ async function generateClaudeTouchOutput(
       evidence: recommendation.evidence,
     })),
   } satisfies ClaudeTouchOutput;
+
+  return { output, provider: llmResult.provider, model: llmResult.model };
 }
 
 function isProfileInactive(
@@ -1461,28 +1462,28 @@ export async function prepareMonthlyTouch(
     status: "not_configured",
   };
 
-  if (options.includeClaude && env.anthropicApiKey) {
+  if (options.includeClaude && hasAnyLlmProvider(env)) {
     try {
       const claudeOutput = await generateClaudeTouchOutput(env, prepPack, client, touch);
       if (claudeOutput) {
-        executiveBrief = claudeOutput.executiveBrief;
-        agenda = claudeOutput.agenda;
-        talkingPoints = claudeOutput.talkingPoints;
-        aiRecommendations = claudeOutput.recommendations;
-        wins = claudeOutput.wins;
-        risks = claudeOutput.risks;
+        executiveBrief = claudeOutput.output.executiveBrief;
+        agenda = claudeOutput.output.agenda;
+        talkingPoints = claudeOutput.output.talkingPoints;
+        aiRecommendations = claudeOutput.output.recommendations;
+        wins = claudeOutput.output.wins;
+        risks = claudeOutput.output.risks;
         claudeState = {
           status: "generated",
           generatedAt: getNowIso(),
-          model: env.anthropicModel,
+          model: claudeOutput.model,
+          provider: claudeOutput.provider,
         };
       }
     } catch (error) {
       claudeState = {
         status: "failed",
         generatedAt: getNowIso(),
-        model: env.anthropicModel,
-        errorMessage: error instanceof Error ? error.message : "Claude generation failed",
+        errorMessage: error instanceof Error ? error.message : "AI generation failed",
       };
     }
   }
@@ -1490,6 +1491,21 @@ export async function prepareMonthlyTouch(
   const derivedOpportunities = buildOpportunities(client, opportunities);
   const derivedCommitments = buildCommitmentList(commitments);
   const hasClaudeOutput = claudeState.status === "generated";
+
+  // Lead & call verification runs as a non-fatal gated step: it vets the leads
+  // the client received and reconciles the counts, but a failure here must never
+  // block prep. runLeadVerification also persists the per-client review used by
+  // the client card and the dedicated page.
+  let leadVerification: LeadVerificationReview | undefined;
+  try {
+    leadVerification = await runLeadVerification(context, client.id);
+  } catch (error) {
+    console.warn(
+      `Lead verification during prep failed for ${client.id}: ${
+        error instanceof Error ? error.message : "unknown error"
+      }`,
+    );
+  }
 
   const updatedTouch: MonthlyTouchRecord = stripUndefinedDeep({
     ...touch,
@@ -1508,6 +1524,7 @@ export async function prepareMonthlyTouch(
       ...prepPack,
       claude: claudeState,
     },
+    leadVerification,
     updatedAt: getNowIso(),
   });
 

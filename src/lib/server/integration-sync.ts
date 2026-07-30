@@ -1451,6 +1451,8 @@ interface GhlLeadCounts {
   pipelineOpportunities: number | null;
   bookedJobsWon: number | null;
   sampleContacts: JsonRecord[];
+  /** Full normalized lead records for the recent window, for lead verification. */
+  leads: JsonRecord[];
   errorMessage?: string;
 }
 
@@ -1460,8 +1462,84 @@ const emptyGhlLeadCounts = (errorMessage?: string): GhlLeadCounts => ({
   pipelineOpportunities: null,
   bookedJobsWon: null,
   sampleContacts: [],
+  leads: [],
   errorMessage,
 });
+
+/** How many days back the lead-verification pull reaches, and its hard cap. */
+const GHL_LEAD_WINDOW_DAYS = 90;
+const GHL_LEAD_PULL_CAP = 100;
+
+function firstString(...values: unknown[]): string | undefined {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Normalize a raw GoHighLevel contact into the compact lead shape the
+ * verification engine consumes. Captures identity, the raw source, and the
+ * attribution block (utm/session) so the engine can resolve a channel without
+ * re-fetching. Channel/type resolution is intentionally left to the engine.
+ */
+function mapGhlContact(contact: JsonRecord): JsonRecord {
+  const attribution = (contact.attributionSource || {}) as JsonRecord;
+  const lastAttribution = (contact.lastAttributionSource || {}) as JsonRecord;
+  const name =
+    firstString(contact.contactName, contact.name) ||
+    [contact.firstName, contact.lastName].filter((part) => typeof part === "string" && part).join(" ").trim() ||
+    undefined;
+  const tags = Array.isArray(contact.tags)
+    ? (contact.tags as unknown[]).filter((tag): tag is string => typeof tag === "string")
+    : undefined;
+
+  return {
+    id: firstString(contact.id, contact._id) || "",
+    name,
+    email: firstString(contact.email),
+    phone: firstString(contact.phone),
+    source: firstString(contact.source, attribution.sessionSource, attribution.utmSource, lastAttribution.utmSource),
+    dateAdded: firstString(contact.dateAdded, contact.createdAt),
+    tags,
+    attribution: {
+      source: firstString(attribution.utmSource, attribution.sessionSource, lastAttribution.utmSource),
+      medium: firstString(attribution.medium, attribution.utmMedium, lastAttribution.medium),
+      campaign: firstString(attribution.campaign, attribution.utmCampaign, lastAttribution.utmCampaign),
+      referrer: firstString(attribution.referrer, attribution.url, lastAttribution.referrer),
+    },
+  };
+}
+
+/**
+ * Pull the recent lead list (up to the cap) for a location, newest first, so the
+ * verification engine has individual records rather than just counts. Best-effort:
+ * a failure here returns an empty list and never blocks the count pull.
+ */
+async function fetchGhlRecentLeads(
+  headers: Record<string, string>,
+  locationId: string,
+  sinceIso: string,
+): Promise<JsonRecord[]> {
+  try {
+    const payload = await fetchJson("https://services.leadconnectorhq.com/contacts/search", {
+      method: "POST",
+      headers: { ...headers, "content-type": "application/json" },
+      body: JSON.stringify({
+        locationId,
+        pageLimit: GHL_LEAD_PULL_CAP,
+        sort: [{ field: "dateAdded", direction: "desc" }],
+        filters: [{ field: "dateAdded", operator: "range", value: { gte: sinceIso } }],
+      }),
+    });
+    const contacts = Array.isArray(payload.contacts) ? (payload.contacts as JsonRecord[]) : [];
+    return contacts.slice(0, GHL_LEAD_PULL_CAP).map(mapGhlContact);
+  } catch {
+    return [];
+  }
+}
 
 function readGhlMetaTotal(payload: JsonRecord) {
   const meta = (payload.meta || {}) as JsonRecord;
@@ -1522,12 +1600,16 @@ async function fetchGhlLeadCountsWithToken(token: string, locationId: string): P
     { headers },
   ).catch(() => ({}) as JsonRecord);
 
+  const windowStart = new Date(Date.now() - GHL_LEAD_WINDOW_DAYS * 24 * 3600 * 1000).toISOString();
+  const leads = await fetchGhlRecentLeads(headers, locationId, windowStart);
+
   return {
     newLeads30d,
     totalContacts,
     pipelineOpportunities: readGhlMetaTotal(opportunitiesPayload),
     bookedJobsWon: readGhlMetaTotal(wonPayload),
     sampleContacts,
+    leads,
   };
 }
 
@@ -1564,6 +1646,7 @@ async function fetchGhlLocationLeadCounts(
       pipelineOpportunities: null,
       bookedJobsWon: null,
       sampleContacts: contacts.slice(0, 5),
+      leads: contacts.slice(0, GHL_LEAD_PULL_CAP).map(mapGhlContact),
     };
   } catch (error) {
     return emptyGhlLeadCounts(error instanceof Error ? error.message : "GoHighLevel contact fetch failed");
@@ -1616,6 +1699,9 @@ async function syncGoHighLevelAgency(
         source: contact.source || "unknown",
         dateAdded: contact.dateAdded,
       })),
+      // Full normalized lead records for the recent window, consumed by the
+      // lead & call verification engine. Additive -- counts above are unchanged.
+      leads: counts.leads,
     };
   }
 

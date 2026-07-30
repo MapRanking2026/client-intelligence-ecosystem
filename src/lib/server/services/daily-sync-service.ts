@@ -2,6 +2,7 @@ import type { TenantContext } from "@/src/lib/contracts/mtos";
 import { syncClickUpClients } from "@/src/lib/server/clickup-client-sync";
 import { syncIntegrationProvider } from "@/src/lib/server/integration-sync";
 import { listConnectedSyncableProviders, refreshAllConnectedTokens } from "@/src/lib/server/integrations";
+import { resyncClickupKnowledge, type ClickupResyncReport } from "@/src/lib/server/services/knowledge-service";
 import { tenantUsersCollectionPath } from "@/src/lib/server/firebase/collections";
 import { getFirebaseAdminDb } from "@/src/lib/server/firebase/admin";
 import { getServerEnv } from "@/src/lib/server/env";
@@ -38,6 +39,7 @@ export interface DailySyncReport {
   tokenRefresh: TokenRefreshReport[];
   providers: ProviderResult[];
   clientSyncs: ClientSyncResult[];
+  knowledgeSync: ClickupResyncReport | { error: string };
 }
 
 /**
@@ -96,7 +98,16 @@ export async function runDailyTenantSync(tenantId: string): Promise<DailySyncRep
     }
   }
 
-  return { tenantId, tokenRefresh, providers, clientSyncs };
+  // Keep the ClickUp-sourced knowledge base current: re-embed changed wiki pages,
+  // prune deleted ones. Non-fatal and a no-op when nothing is imported.
+  let knowledgeSync: ClickupResyncReport | { error: string };
+  try {
+    knowledgeSync = await resyncClickupKnowledge(systemContext);
+  } catch (error) {
+    knowledgeSync = { error: error instanceof Error ? error.message : "knowledge re-sync failed" };
+  }
+
+  return { tenantId, tokenRefresh, providers, clientSyncs, knowledgeSync };
 }
 
 export function getDailySyncTenantId() {

@@ -6,7 +6,7 @@
  * comparable within the same model.
  */
 
-export type KnowledgeSourceType = "manual" | "monthly_touch" | "import";
+export type KnowledgeSourceType = "manual" | "monthly_touch" | "clickup" | "import";
 
 export interface KnowledgeChunk {
   id: string;
@@ -23,6 +23,10 @@ export interface KnowledgeChunk {
   embeddingModel: string;
   chunkIndex: number;
   createdAt: string;
+  /** For synced sources (e.g. ClickUp), the origin id (the ClickUp doc id) so a re-sync can group and prune reliably. */
+  sourceRefId?: string;
+  /** sha256 of the source text, so a re-sync can skip re-embedding unchanged content. */
+  sourceHash?: string;
 }
 
 /** One row in the admin list — a document, not its individual chunks. */

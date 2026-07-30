@@ -20,6 +20,13 @@ export default function SettingsPage() {
       accent: true,
     },
     {
+      title: "Knowledge base",
+      description:
+        "Ground the AI in Map Ranking's own playbooks, SOPs, and past monthly touches. Add knowledge here and it gets retrieved into prep automatically.",
+      href: "/settings/knowledge",
+      accent: true,
+    },
+    {
       title: "Users and role assignments",
       description: "Control workspace access, ownership, and role visibility for account teams.",
     },

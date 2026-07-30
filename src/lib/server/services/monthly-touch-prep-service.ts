@@ -43,6 +43,7 @@ import { getServerEnv } from "@/src/lib/server/env";
 import { callLlmForJson, hasAnyLlmProvider } from "@/src/lib/server/services/mtos-ai";
 import { fetchClickupClientContext } from "@/src/lib/server/services/clickup-client-context";
 import { runLeadVerification } from "@/src/lib/server/services/lead-verification-service";
+import { retrieveKnowledge } from "@/src/lib/server/services/knowledge-service";
 import { getPromptText } from "@/src/lib/server/prompt-store";
 
 type JsonRecord = Record<string, unknown>;
@@ -1100,6 +1101,7 @@ function extractJsonObject(value: string) {
 }
 
 async function generateClaudeTouchOutput(
+  context: TenantContext,
   env: ReturnType<typeof getServerEnv>,
   prepPack: MonthlyTouchPrepPack,
   client: ClientRecord,
@@ -1111,10 +1113,30 @@ async function generateClaudeTouchOutput(
 
   const system = await getPromptText("monthly_touch_preparation_prompt");
 
+  // RAG grounding: pull the most relevant Map Ranking knowledge for this client
+  // and hand it to the model as authoritative context. Non-fatal.
+  const knowledgeQuery = [
+    client.name,
+    client.summary,
+    ...client.topRisks,
+    ...client.topOpportunities,
+  ]
+    .filter(Boolean)
+    .join(" ");
+  const knowledge = await retrieveKnowledge(context, knowledgeQuery, 5).catch(() => []);
+  const groundingBlock = knowledge.length
+    ? [
+        "MAP RANKING KNOWLEDGE (authoritative playbook/SOP context -- ground your recommendations in this, prefer it over generic advice):",
+        ...knowledge.map((hit, index) => `[${index + 1}] ${hit.title}\n${hit.text}`),
+        "",
+      ].join("\n")
+    : "";
+
   const llmResult = await callLlmForJson({
         env,
         system,
         userText: [
+          groundingBlock,
           "Return a JSON object with exactly these keys and types:",
           '  executiveBrief: a single string (use "\\n\\n" between paragraphs -- NOT an object)',
           "  agenda: array of 4-6 strings (each a plain string, not an object)",
@@ -1464,7 +1486,7 @@ export async function prepareMonthlyTouch(
 
   if (options.includeClaude && hasAnyLlmProvider(env)) {
     try {
-      const claudeOutput = await generateClaudeTouchOutput(env, prepPack, client, touch);
+      const claudeOutput = await generateClaudeTouchOutput(context, env, prepPack, client, touch);
       if (claudeOutput) {
         executiveBrief = claudeOutput.output.executiveBrief;
         agenda = claudeOutput.output.agenda;

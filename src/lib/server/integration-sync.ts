@@ -1453,6 +1453,8 @@ interface GhlLeadCounts {
   sampleContacts: JsonRecord[];
   /** Full normalized lead records for the recent window, for lead verification. */
   leads: JsonRecord[];
+  /** Human-readable note on how the lead pull went, surfaced for diagnostics. */
+  leadsDiagnostic?: string;
   errorMessage?: string;
 }
 
@@ -1522,7 +1524,9 @@ async function fetchGhlRecentLeads(
   headers: Record<string, string>,
   locationId: string,
   sinceIso: string,
-): Promise<JsonRecord[]> {
+): Promise<{ leads: JsonRecord[]; diagnostic: string }> {
+  const notes: string[] = [];
+
   // Preferred: the advanced search, filtered to the recent window. No `sort` --
   // some locations reject the sort body and 400 the whole request.
   try {
@@ -1536,11 +1540,12 @@ async function fetchGhlRecentLeads(
       }),
     });
     const contacts = Array.isArray(payload.contacts) ? (payload.contacts as JsonRecord[]) : [];
+    notes.push(`search returned ${contacts.length}`);
     if (contacts.length) {
-      return contacts.slice(0, GHL_LEAD_PULL_CAP).map(mapGhlContact);
+      return { leads: contacts.slice(0, GHL_LEAD_PULL_CAP).map(mapGhlContact), diagnostic: notes.join("; ") };
     }
-  } catch {
-    // Fall through to the plain list below.
+  } catch (error) {
+    notes.push(`search error: ${error instanceof Error ? error.message : "unknown"}`);
   }
 
   // Fallback: the plain contacts list -- the same call that already powers the
@@ -1552,9 +1557,11 @@ async function fetchGhlRecentLeads(
       { headers },
     );
     const contacts = Array.isArray(payload.contacts) ? (payload.contacts as JsonRecord[]) : [];
-    return contacts.slice(0, GHL_LEAD_PULL_CAP).map(mapGhlContact);
-  } catch {
-    return [];
+    notes.push(`list returned ${contacts.length}`);
+    return { leads: contacts.slice(0, GHL_LEAD_PULL_CAP).map(mapGhlContact), diagnostic: notes.join("; ") };
+  } catch (error) {
+    notes.push(`list error: ${error instanceof Error ? error.message : "unknown"}`);
+    return { leads: [], diagnostic: notes.join("; ") };
   }
 }
 
@@ -1618,7 +1625,7 @@ async function fetchGhlLeadCountsWithToken(token: string, locationId: string): P
   ).catch(() => ({}) as JsonRecord);
 
   const windowStart = new Date(Date.now() - GHL_LEAD_WINDOW_DAYS * 24 * 3600 * 1000).toISOString();
-  const leads = await fetchGhlRecentLeads(headers, locationId, windowStart);
+  const { leads, diagnostic } = await fetchGhlRecentLeads(headers, locationId, windowStart);
 
   return {
     newLeads30d,
@@ -1627,6 +1634,7 @@ async function fetchGhlLeadCountsWithToken(token: string, locationId: string): P
     bookedJobsWon: readGhlMetaTotal(wonPayload),
     sampleContacts,
     leads,
+    leadsDiagnostic: diagnostic,
   };
 }
 
@@ -1664,6 +1672,7 @@ async function fetchGhlLocationLeadCounts(
       bookedJobsWon: null,
       sampleContacts: contacts.slice(0, 5),
       leads: contacts.slice(0, GHL_LEAD_PULL_CAP).map(mapGhlContact),
+      leadsDiagnostic: `v1 list returned ${contacts.length}`,
     };
   } catch (error) {
     return emptyGhlLeadCounts(error instanceof Error ? error.message : "GoHighLevel contact fetch failed");
@@ -1719,6 +1728,7 @@ async function syncGoHighLevelAgency(
       // Full normalized lead records for the recent window, consumed by the
       // lead & call verification engine. Additive -- counts above are unchanged.
       leads: counts.leads,
+      leadsDiagnostic: counts.leadsDiagnostic,
     };
   }
 

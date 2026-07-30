@@ -402,6 +402,10 @@ export async function runLeadVerification(
     warnings.push(
       "No individual lead records available yet — the latest GoHighLevel sync returned only counts. Try Refresh, or re-sync GoHighLevel.",
     );
+    const diagnostic = str(clientCrm?.leadsDiagnostic);
+    if (diagnostic) {
+      warnings.push(`GoHighLevel lead pull diagnostic: ${diagnostic}`);
+    }
   }
 
   // Deterministic first pass over every lead (also seeds duplicate detection).

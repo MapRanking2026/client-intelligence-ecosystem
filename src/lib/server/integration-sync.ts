@@ -396,6 +396,25 @@ async function failSyncJob(
     );
 }
 
+/**
+ * Firestore rejects `undefined` values (it throws on the whole document write).
+ * Drop undefined keys recursively so an optional field left unset by any provider
+ * can never fail a snapshot write. `null` and everything else are preserved.
+ */
+function dropUndefinedDeep<T>(value: T): T {
+  if (Array.isArray(value)) {
+    return value.map((item) => dropUndefinedDeep(item)) as unknown as T;
+  }
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .filter(([, nested]) => nested !== undefined)
+        .map(([key, nested]) => [key, dropUndefinedDeep(nested)]),
+    ) as T;
+  }
+  return value;
+}
+
 async function saveIntegrationSnapshot(
   context: TenantContext,
   providerId: IntegrationProviderId,
@@ -412,7 +431,9 @@ async function saveIntegrationSnapshot(
     payload: result.snapshotPayload,
   };
 
-  await db.doc(integrationSnapshotPath(context.tenantId, providerId)).set(snapshot);
+  // Strip undefined before the write -- a single unset optional field (e.g. a
+  // contact with no email) would otherwise reject the entire snapshot.
+  await db.doc(integrationSnapshotPath(context.tenantId, providerId)).set(dropUndefinedDeep(snapshot));
 }
 
 async function getConnectedRecord(context: TenantContext, providerId: IntegrationProviderId) {

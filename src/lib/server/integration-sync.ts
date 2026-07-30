@@ -1523,6 +1523,8 @@ async function fetchGhlRecentLeads(
   locationId: string,
   sinceIso: string,
 ): Promise<JsonRecord[]> {
+  // Preferred: the advanced search, filtered to the recent window. No `sort` --
+  // some locations reject the sort body and 400 the whole request.
   try {
     const payload = await fetchJson("https://services.leadconnectorhq.com/contacts/search", {
       method: "POST",
@@ -1530,10 +1532,25 @@ async function fetchGhlRecentLeads(
       body: JSON.stringify({
         locationId,
         pageLimit: GHL_LEAD_PULL_CAP,
-        sort: [{ field: "dateAdded", direction: "desc" }],
         filters: [{ field: "dateAdded", operator: "range", value: { gte: sinceIso } }],
       }),
     });
+    const contacts = Array.isArray(payload.contacts) ? (payload.contacts as JsonRecord[]) : [];
+    if (contacts.length) {
+      return contacts.slice(0, GHL_LEAD_PULL_CAP).map(mapGhlContact);
+    }
+  } catch {
+    // Fall through to the plain list below.
+  }
+
+  // Fallback: the plain contacts list -- the same call that already powers the
+  // sample/count pull, so it's known to work where search may not.
+  try {
+    const encodedLocation = encodeURIComponent(locationId);
+    const payload = await fetchJson(
+      `https://services.leadconnectorhq.com/contacts/?locationId=${encodedLocation}&limit=${GHL_LEAD_PULL_CAP}`,
+      { headers },
+    );
     const contacts = Array.isArray(payload.contacts) ? (payload.contacts as JsonRecord[]) : [];
     return contacts.slice(0, GHL_LEAD_PULL_CAP).map(mapGhlContact);
   } catch {

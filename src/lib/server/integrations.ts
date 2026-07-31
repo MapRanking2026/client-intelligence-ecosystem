@@ -830,34 +830,48 @@ function getStatusDetail(provider: ProviderDefinition, record?: IntegrationConne
     return record.errorMessage;
   }
 
-  if (record.status === "expiring" && record.tokenExpiresAt) {
-    return `Token rotation due by ${new Date(record.tokenExpiresAt).toLocaleString("en-US")}.`;
-  }
-
   if (record.status === "connected") {
     return record.displayLabel
-      ? `Connected as ${record.displayLabel}.`
-      : "Connected and ready for secure server-side requests.";
+      ? `Connected as ${record.displayLabel} — renews automatically.`
+      : "Connected — renews automatically.";
   }
 
   if (record.status === "action_required") {
-    return "Connection needs attention before MTOS can sync data.";
+    return "Reconnect once to restore access — auto-renew isn't available.";
   }
 
   return "Connection is configured but not yet active.";
 }
 
-function deriveConnectionStatus(record?: IntegrationConnectionRecord): IntegrationProviderView["status"] {
+/**
+ * Whether a connected record can renew itself without a manual reconnect:
+ * rotating-token and api-key providers always can; OAuth that doesn't rotate
+ * (ClickUp) needs nothing; other OAuth needs a stored refresh token.
+ */
+function canAutoRenew(provider: ProviderDefinition, record: IntegrationConnectionRecord): boolean {
+  if (provider.authMode === "rotating_token" || provider.authMode === "api_key") {
+    return true;
+  }
+  if (!provider.oauth || provider.oauth.refreshStrategy === "none") {
+    return true;
+  }
+  const credentials = record.credentialCiphertext ? unsealCredentials(record.credentialCiphertext) : undefined;
+  return Boolean(credentials?.refreshToken);
+}
+
+function deriveConnectionStatus(
+  provider: ProviderDefinition,
+  record?: IntegrationConnectionRecord,
+): IntegrationProviderView["status"] {
   if (!record) {
     return "not_connected";
   }
 
-  if (record.tokenExpiresAt) {
-    const expiry = new Date(record.tokenExpiresAt).getTime();
-    const minutesUntilExpiry = Math.round((expiry - Date.now()) / 60000);
-    if (Number.isFinite(minutesUntilExpiry) && minutesUntilExpiry <= 15 && record.status === "connected") {
-      return "expiring";
-    }
+  // A short-lived access token nearing expiry is NOT a problem -- it auto-renews
+  // on demand. Only flag a connection that genuinely cannot renew itself, so the
+  // user is asked to reconnect exactly once instead of nagged every hour.
+  if (record.status === "connected" && !canAutoRenew(provider, record)) {
+    return "action_required";
   }
 
   return record.status;
@@ -869,7 +883,7 @@ function toProviderView(
   latestSyncJob?: IntegrationSyncJobRecord,
 ): IntegrationProviderView {
   const oauthConfig = provider.authMode === "oauth" ? getOAuthClientConfig(provider) : null;
-  const status = deriveConnectionStatus(record);
+  const status = deriveConnectionStatus(provider, record);
 
   return {
     id: provider.id,
@@ -1145,7 +1159,38 @@ function assertRequiredFields(provider: ProviderDefinition, credentials: StoredC
   }
 }
 
+/**
+ * Silently renew any connected + auto-renewable token that's past or within ~30
+ * min of expiry, so the page never shows a stale token and the connection
+ * self-heals on view. Best-effort and parallel; a failure is swallowed (the sync
+ * path retries, and a genuinely dead connection surfaces as action_required).
+ */
+async function proactivelyRenewTokens(context: TenantContext): Promise<void> {
+  const connections = await listStoredConnections(context.tenantId);
+  const renewBy = Date.now() + 30 * 60 * 1000;
+
+  const stale = [...connections.values()].filter((record) => {
+    if (record.status !== "connected" || !record.tokenExpiresAt) {
+      return false;
+    }
+    const provider = providerDefinitions.find((definition) => definition.id === record.providerId);
+    if (!provider || !canAutoRenew(provider, record)) {
+      return false;
+    }
+    // Don't re-refresh a token that was just renewed (e.g. rapid reloads).
+    if (record.lastRefreshAt && Date.now() - new Date(record.lastRefreshAt).getTime() < 5 * 60 * 1000) {
+      return false;
+    }
+    return new Date(record.tokenExpiresAt).getTime() <= renewBy;
+  });
+
+  await Promise.all(
+    stale.map((record) => refreshIntegration(context, record.providerId).catch(() => undefined)),
+  );
+}
+
 export async function listIntegrationViews(context: TenantContext) {
+  await proactivelyRenewTokens(context);
   const storedConnections = await listStoredConnections(context.tenantId);
   const latestJobs = await listLatestSyncJobs(context.tenantId);
   return providerDefinitions.map((provider) =>

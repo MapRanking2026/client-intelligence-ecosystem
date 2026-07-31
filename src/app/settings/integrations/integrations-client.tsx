@@ -187,7 +187,7 @@ export function IntegrationsClient({
         if (provider.isConnected) {
           accumulator.connected += 1;
         }
-        if (provider.status === "action_required" || provider.status === "expiring" || provider.status === "error") {
+        if (provider.status === "action_required" || provider.status === "error") {
           accumulator.attention += 1;
         }
         return accumulator;
@@ -538,11 +538,6 @@ export function IntegrationsClient({
                       {provider.connectedAt ? (
                         <p className="text-xs uppercase tracking-[0.18em] text-slate-500">
                           Connected {formatIntegrationTimestamp(provider.connectedAt)}
-                        </p>
-                      ) : null}
-                      {provider.tokenExpiresAt ? (
-                        <p className="text-xs uppercase tracking-[0.18em] text-slate-500">
-                          Token due {formatIntegrationTimestamp(provider.tokenExpiresAt)}
                         </p>
                       ) : null}
                       {provider.lastSyncAt ? (

@@ -18,7 +18,7 @@ import { getMtosDataSource } from "@/src/lib/server/data/seed-mtos-data-source";
 import { getFirebaseAdminDb } from "@/src/lib/server/firebase/admin";
 import { integrationSnapshotPath, leadVerificationPath } from "@/src/lib/server/firebase/collections";
 import { getServerEnv } from "@/src/lib/server/env";
-import { syncIntegrationProvider } from "@/src/lib/server/integration-sync";
+import { fetchGhlClientLeadsAndCalls, syncIntegrationProvider } from "@/src/lib/server/integration-sync";
 import { callLlmForJson, getNowIso, hasAnyLlmProvider, stripUndefinedDeep } from "@/src/lib/server/services/mtos-ai";
 import { getPromptText } from "@/src/lib/server/prompt-store";
 
@@ -51,6 +51,9 @@ const RECONCILED_CHANNELS: LeadChannel[] = ["google_ads", "gbp_call", "meta_ads"
 
 /** Cap how many leads are sent to Claude in one run, to bound token cost. */
 const AI_BATCH_CAP = 80;
+
+/** Verification window: last N days of leads/calls (matches the GHL pull). */
+const GHL_VERIFY_WINDOW_DAYS = 30;
 
 // ---------------------------------------------------------------------------
 // Firestore helpers
@@ -406,11 +409,32 @@ export async function runLeadVerification(
 
   const leadsByClient = (crmPayload?.leadsByClient || {}) as JsonRecord;
   const clientCrm = (leadsByClient[clientId] || null) as JsonRecord | null;
-  const rawLeads = Array.isArray(clientCrm?.leads) ? (clientCrm?.leads as JsonRecord[]) : [];
   const locationId = str(clientCrm?.locationId);
+  const windowStart = new Date(Date.now() - GHL_VERIFY_WINDOW_DAYS * 24 * 3600 * 1000).toISOString();
 
   const warnings: string[] = [];
-  if (!clientCrm) {
+
+  // Pull the FULL window directly from GoHighLevel for this one client (paginated),
+  // so a busy client's older leads/calls aren't truncated by the shared-snapshot
+  // cap. Falls back to whatever the snapshot holds if the direct pull can't run.
+  let rawLeads = Array.isArray(clientCrm?.leads) ? (clientCrm?.leads as JsonRecord[]) : [];
+  if (locationId) {
+    try {
+      const direct = await fetchGhlClientLeadsAndCalls(context, locationId, windowStart);
+      if (direct && direct.leads.length) {
+        rawLeads = direct.leads;
+        if (direct.diagnostic) {
+          warnings.push(`GoHighLevel pull (last ${GHL_VERIFY_WINDOW_DAYS}d): ${direct.diagnostic}`);
+        }
+      }
+    } catch (error) {
+      console.warn(
+        `Lead verification direct GHL pull failed: ${error instanceof Error ? error.message : "unknown error"}`,
+      );
+    }
+  }
+
+  if (!clientCrm && !rawLeads.length) {
     warnings.push(
       "GoHighLevel has no data matched to this client yet — pin the client's GHL location under Profile mappings, then sync.",
     );
@@ -530,7 +554,6 @@ export async function runLeadVerification(
     meta_ads: { count: null, label: "Meta Ads (not connected)" },
   };
 
-  const windowStart = new Date(Date.now() - 90 * 24 * 3600 * 1000).toISOString();
   const review = assembleReview(clientId, baseLeads, platformCounts, {
     source,
     warnings,

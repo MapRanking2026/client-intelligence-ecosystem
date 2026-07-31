@@ -1489,12 +1489,18 @@ const emptyGhlLeadCounts = (errorMessage?: string): GhlLeadCounts => ({
   errorMessage,
 });
 
-/** How many days back the lead-verification pull reaches, and its hard cap. */
+/** How many days back the lead-verification pull reaches. */
 const GHL_LEAD_WINDOW_DAYS = 30;
+/** Default (shared-snapshot) cap -- kept small so the shared snapshot doc stays under Firestore's 1MB limit. */
 const GHL_LEAD_PULL_CAP = 100;
-/** Bound the calls pull (conversations scanned, calls kept). */
-const GHL_CALL_CONVO_SCAN = 60;
 const GHL_CALL_CAP = 100;
+const GHL_CALL_CONVO_SCAN = 60;
+/** Full per-client caps used by the direct verify-time fetch (stored per client, so larger is safe). */
+const GHL_LEAD_FULL_CAP = 500;
+const GHL_CALL_FULL_CAP = 300;
+const GHL_CALL_CONVO_FULL_SCAN = 200;
+/** Hard page-loop guard for paginated pulls. */
+const GHL_MAX_PAGES = 20;
 
 function firstString(...values: unknown[]): string | undefined {
   for (const value of values) {
@@ -1548,26 +1554,55 @@ async function fetchGhlRecentLeads(
   headers: Record<string, string>,
   locationId: string,
   sinceIso: string,
+  maxResults: number = GHL_LEAD_PULL_CAP,
 ): Promise<{ leads: JsonRecord[]; diagnostic: string }> {
   const notes: string[] = [];
 
-  // Preferred: the advanced search, filtered to the recent window. No `sort` --
-  // some locations reject the sort body and 400 the whole request.
+  // Preferred: the advanced search, filtered to the recent window, PAGINATED so a
+  // busy client's older leads aren't dropped by a single 100-row page. No `sort` --
+  // some locations reject the sort body and 400 the whole request. The seen-id
+  // guard makes this safe even if `page` is ignored (we stop when no new rows).
   try {
-    const payload = await fetchJson("https://services.leadconnectorhq.com/contacts/search", {
-      method: "POST",
-      headers: { ...headers, "content-type": "application/json" },
-      body: JSON.stringify({
-        locationId,
-        pageLimit: GHL_LEAD_PULL_CAP,
-        filters: [{ field: "dateAdded", operator: "range", value: { gte: sinceIso } }],
-      }),
-    });
-    const contacts = Array.isArray(payload.contacts) ? (payload.contacts as JsonRecord[]) : [];
-    notes.push(`search returned ${contacts.length}`);
-    if (contacts.length) {
-      return { leads: contacts.slice(0, GHL_LEAD_PULL_CAP).map(mapGhlContact), diagnostic: notes.join("; ") };
+    const collected: JsonRecord[] = [];
+    const seen = new Set<string>();
+    let total: number | undefined;
+    for (let page = 1; page <= GHL_MAX_PAGES && collected.length < maxResults; page += 1) {
+      const payload = await fetchJson("https://services.leadconnectorhq.com/contacts/search", {
+        method: "POST",
+        headers: { ...headers, "content-type": "application/json" },
+        body: JSON.stringify({
+          locationId,
+          page,
+          pageLimit: 100,
+          filters: [{ field: "dateAdded", operator: "range", value: { gte: sinceIso } }],
+        }),
+      });
+      if (typeof payload.total === "number") {
+        total = payload.total;
+      }
+      const contacts = Array.isArray(payload.contacts) ? (payload.contacts as JsonRecord[]) : [];
+      const fresh = contacts.filter((contact) => {
+        const id = firstString(contact.id, contact._id) || "";
+        if (!id || seen.has(id)) {
+          return false;
+        }
+        seen.add(id);
+        return true;
+      });
+      collected.push(...fresh);
+      // Last page, or pagination isn't advancing.
+      if (contacts.length < 100 || fresh.length === 0) {
+        break;
+      }
+      if (total !== undefined && collected.length >= total) {
+        break;
+      }
     }
+    if (collected.length) {
+      notes.push(`search returned ${collected.length}${total !== undefined ? ` of ${total}` : ""}`);
+      return { leads: collected.slice(0, maxResults).map(mapGhlContact), diagnostic: notes.join("; ") };
+    }
+    notes.push("search returned 0");
   } catch (error) {
     notes.push(`search error: ${error instanceof Error ? error.message : "unknown"}`);
   }
@@ -1577,12 +1612,12 @@ async function fetchGhlRecentLeads(
   try {
     const encodedLocation = encodeURIComponent(locationId);
     const payload = await fetchJson(
-      `https://services.leadconnectorhq.com/contacts/?locationId=${encodedLocation}&limit=${GHL_LEAD_PULL_CAP}`,
+      `https://services.leadconnectorhq.com/contacts/?locationId=${encodedLocation}&limit=100`,
       { headers },
     );
     const contacts = Array.isArray(payload.contacts) ? (payload.contacts as JsonRecord[]) : [];
     notes.push(`list returned ${contacts.length}`);
-    return { leads: contacts.slice(0, GHL_LEAD_PULL_CAP).map(mapGhlContact), diagnostic: notes.join("; ") };
+    return { leads: contacts.slice(0, maxResults).map(mapGhlContact), diagnostic: notes.join("; ") };
   } catch (error) {
     notes.push(`list error: ${error instanceof Error ? error.message : "unknown"}`);
     return { leads: [], diagnostic: notes.join("; ") };
@@ -1657,53 +1692,74 @@ async function fetchGhlRecentCalls(
   headers: Record<string, string>,
   locationId: string,
   sinceIso: string,
+  maxCalls: number = GHL_CALL_CAP,
+  maxConversations: number = GHL_CALL_CONVO_SCAN,
 ): Promise<{ calls: JsonRecord[]; diagnostic: string }> {
   const notes: string[] = [];
   const sinceMs = Date.parse(sinceIso);
   const encodedLocation = encodeURIComponent(locationId);
+  const calls: JsonRecord[] = [];
 
   try {
-    const convoPayload = await fetchJson(
-      `https://services.leadconnectorhq.com/conversations/search?locationId=${encodedLocation}&limit=${GHL_CALL_CONVO_SCAN}&sortBy=last_message_date&sort=desc`,
-      { headers },
-    );
-    const conversations = Array.isArray(convoPayload.conversations)
-      ? (convoPayload.conversations as JsonRecord[])
-      : [];
+    const seenConvos = new Set<string>();
+    let scanned = 0;
+    let reachedWindowEnd = false;
 
-    const calls: JsonRecord[] = [];
-    for (const conversation of conversations) {
-      if (calls.length >= GHL_CALL_CAP) {
-        break;
-      }
-      // Conversations are newest-first; once one has no activity in the window,
-      // everything after it is older too.
-      const lastMs = ghlDateMs(conversation.lastMessageDate);
-      if (lastMs && lastMs < sinceMs) {
-        break;
-      }
-
-      const convoId = firstString(conversation.id);
-      if (!convoId) {
-        continue;
-      }
-      const messagesPayload = await fetchJson(
-        `https://services.leadconnectorhq.com/conversations/${encodeURIComponent(convoId)}/messages?limit=100`,
+    // Conversations are newest-first; page through until they fall outside the
+    // window or we hit the caps. The seen-id guard keeps it safe if `page` is a no-op.
+    for (let page = 1; page <= GHL_MAX_PAGES && calls.length < maxCalls && scanned < maxConversations; page += 1) {
+      const convoPayload = await fetchJson(
+        `https://services.leadconnectorhq.com/conversations/search?locationId=${encodedLocation}&limit=100&page=${page}&sortBy=last_message_date&sort=desc`,
         { headers },
-      ).catch(() => ({}) as JsonRecord);
+      );
+      const conversations = Array.isArray(convoPayload.conversations)
+        ? (convoPayload.conversations as JsonRecord[])
+        : [];
+      if (!conversations.length) {
+        break;
+      }
 
-      for (const message of extractGhlMessages(messagesPayload)) {
-        if (!isGhlCallMessage(message)) {
+      let progressed = false;
+      for (const conversation of conversations) {
+        const convoId = firstString(conversation.id);
+        if (!convoId || seenConvos.has(convoId)) {
           continue;
         }
-        const dateMs = ghlDateMs(message.dateAdded);
-        if (dateMs && dateMs < sinceMs) {
-          continue;
-        }
-        calls.push(mapGhlCall(message, conversation));
-        if (calls.length >= GHL_CALL_CAP) {
+        seenConvos.add(convoId);
+        progressed = true;
+        scanned += 1;
+
+        const lastMs = ghlDateMs(conversation.lastMessageDate);
+        if (lastMs && lastMs < sinceMs) {
+          reachedWindowEnd = true;
           break;
         }
+        if (calls.length >= maxCalls || scanned >= maxConversations) {
+          break;
+        }
+
+        const messagesPayload = await fetchJson(
+          `https://services.leadconnectorhq.com/conversations/${encodeURIComponent(convoId)}/messages?limit=100`,
+          { headers },
+        ).catch(() => ({}) as JsonRecord);
+
+        for (const message of extractGhlMessages(messagesPayload)) {
+          if (!isGhlCallMessage(message)) {
+            continue;
+          }
+          const dateMs = ghlDateMs(message.dateAdded);
+          if (dateMs && dateMs < sinceMs) {
+            continue;
+          }
+          calls.push(mapGhlCall(message, conversation));
+          if (calls.length >= maxCalls) {
+            break;
+          }
+        }
+      }
+
+      if (reachedWindowEnd || conversations.length < 100 || !progressed) {
+        break;
       }
     }
 
@@ -1711,7 +1767,7 @@ async function fetchGhlRecentCalls(
     return { calls, diagnostic: notes.join("; ") };
   } catch (error) {
     notes.push(`calls error: ${error instanceof Error ? error.message : "unknown"}`);
-    return { calls: [], diagnostic: notes.join("; ") };
+    return { calls, diagnostic: notes.join("; ") };
   }
 }
 
@@ -1763,6 +1819,33 @@ export async function getGhlLocationToken(context: TenantContext, locationId: st
 
   const minted = await mintGhlLocationToken(agencyKey, { id: locationId, name: "", companyId });
   return minted || agencyKey;
+}
+
+/**
+ * Full, paginated per-client pull of leads + calls for the last 30 days, direct
+ * from GoHighLevel (mints a location token). Used by lead verification so a busy
+ * client's full window is loaded WITHOUT bloating the shared integration snapshot
+ * (which holds every client and is bounded by Firestore's 1MB doc limit). Returns
+ * null when GoHighLevel isn't connected / no token can be minted.
+ */
+export async function fetchGhlClientLeadsAndCalls(
+  context: TenantContext,
+  locationId: string,
+  sinceIso: string,
+): Promise<{ leads: JsonRecord[]; diagnostic: string } | null> {
+  const token = await getGhlLocationToken(context, locationId);
+  if (!token) {
+    return null;
+  }
+  const headers = { ...getBearerHeaders(token), Version: "2021-07-28" };
+  const [leadResult, callResult] = await Promise.all([
+    fetchGhlRecentLeads(headers, locationId, sinceIso, GHL_LEAD_FULL_CAP),
+    fetchGhlRecentCalls(headers, locationId, sinceIso, GHL_CALL_FULL_CAP, GHL_CALL_CONVO_FULL_SCAN),
+  ]);
+  return {
+    leads: [...callResult.calls, ...leadResult.leads].slice(0, GHL_LEAD_FULL_CAP + GHL_CALL_FULL_CAP),
+    diagnostic: [leadResult.diagnostic, callResult.diagnostic].filter(Boolean).join(" | "),
+  };
 }
 
 async function fetchGhlLeadCountsWithToken(token: string, locationId: string): Promise<GhlLeadCounts> {

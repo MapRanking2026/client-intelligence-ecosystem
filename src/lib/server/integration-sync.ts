@@ -1490,8 +1490,11 @@ const emptyGhlLeadCounts = (errorMessage?: string): GhlLeadCounts => ({
 });
 
 /** How many days back the lead-verification pull reaches, and its hard cap. */
-const GHL_LEAD_WINDOW_DAYS = 90;
+const GHL_LEAD_WINDOW_DAYS = 30;
 const GHL_LEAD_PULL_CAP = 100;
+/** Bound the calls pull (conversations scanned, calls kept). */
+const GHL_CALL_CONVO_SCAN = 60;
+const GHL_CALL_CAP = 100;
 
 function firstString(...values: unknown[]): string | undefined {
   for (const value of values) {
@@ -1586,6 +1589,132 @@ async function fetchGhlRecentLeads(
   }
 }
 
+/** Epoch-ms for a GHL date field, which may be a number (ms) or an ISO string. */
+function ghlDateMs(value: unknown): number {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Date.parse(value);
+    return Number.isNaN(parsed) ? 0 : parsed;
+  }
+  return 0;
+}
+
+function isGhlCallMessage(message: JsonRecord): boolean {
+  const marker = `${message.type ?? ""} ${message.messageType ?? ""}`.toLowerCase();
+  return marker.includes("call");
+}
+
+/** Pull the messages array out of the several shapes GHL returns it in. */
+function extractGhlMessages(payload: JsonRecord): JsonRecord[] {
+  const messages = payload.messages;
+  if (Array.isArray(messages)) {
+    return messages as JsonRecord[];
+  }
+  if (messages && typeof messages === "object" && Array.isArray((messages as JsonRecord).messages)) {
+    return (messages as JsonRecord).messages as JsonRecord[];
+  }
+  return [];
+}
+
+/** Normalize a GHL call message into a lead-shaped record (type "call"). */
+function mapGhlCall(message: JsonRecord, conversation: JsonRecord): JsonRecord {
+  const meta = (message.meta || {}) as JsonRecord;
+  const call = (meta.call || {}) as JsonRecord;
+  const messageId = firstString(message.id, message._id, message.messageId) || "";
+  const direction = firstString(message.direction, call.direction);
+  const status = firstString(call.status, message.status);
+  const durationRaw = call.duration ?? call.callDuration ?? message.duration;
+  const durationSec = typeof durationRaw === "number" ? durationRaw : Number(durationRaw) || 0;
+
+  return {
+    id: `call-${messageId}`,
+    name: firstString(conversation.fullName, conversation.contactName, conversation.name),
+    phone: firstString(conversation.phone, message.from, call.from, message.to),
+    dateAdded: firstString(message.dateAdded, message.dateUpdated) || new Date(ghlDateMs(message.dateAdded)).toISOString(),
+    source: "call",
+    type: "call",
+    attribution: { medium: "call", source: direction },
+    call: {
+      direction,
+      durationSec,
+      status,
+      messageId,
+      conversationId: firstString(conversation.id, message.conversationId),
+      contactId: firstString(conversation.contactId, message.contactId),
+    },
+  };
+}
+
+/**
+ * Pull recent phone calls for a location from the Conversations API. Best-effort:
+ * conversations are sorted newest-first, so we stop once they fall outside the
+ * window; any failure returns an empty list with a diagnostic note. Recordings
+ * are fetched on demand elsewhere -- this only captures call metadata.
+ */
+async function fetchGhlRecentCalls(
+  headers: Record<string, string>,
+  locationId: string,
+  sinceIso: string,
+): Promise<{ calls: JsonRecord[]; diagnostic: string }> {
+  const notes: string[] = [];
+  const sinceMs = Date.parse(sinceIso);
+  const encodedLocation = encodeURIComponent(locationId);
+
+  try {
+    const convoPayload = await fetchJson(
+      `https://services.leadconnectorhq.com/conversations/search?locationId=${encodedLocation}&limit=${GHL_CALL_CONVO_SCAN}&sortBy=last_message_date&sort=desc`,
+      { headers },
+    );
+    const conversations = Array.isArray(convoPayload.conversations)
+      ? (convoPayload.conversations as JsonRecord[])
+      : [];
+
+    const calls: JsonRecord[] = [];
+    for (const conversation of conversations) {
+      if (calls.length >= GHL_CALL_CAP) {
+        break;
+      }
+      // Conversations are newest-first; once one has no activity in the window,
+      // everything after it is older too.
+      const lastMs = ghlDateMs(conversation.lastMessageDate);
+      if (lastMs && lastMs < sinceMs) {
+        break;
+      }
+
+      const convoId = firstString(conversation.id);
+      if (!convoId) {
+        continue;
+      }
+      const messagesPayload = await fetchJson(
+        `https://services.leadconnectorhq.com/conversations/${encodeURIComponent(convoId)}/messages?limit=100`,
+        { headers },
+      ).catch(() => ({}) as JsonRecord);
+
+      for (const message of extractGhlMessages(messagesPayload)) {
+        if (!isGhlCallMessage(message)) {
+          continue;
+        }
+        const dateMs = ghlDateMs(message.dateAdded);
+        if (dateMs && dateMs < sinceMs) {
+          continue;
+        }
+        calls.push(mapGhlCall(message, conversation));
+        if (calls.length >= GHL_CALL_CAP) {
+          break;
+        }
+      }
+    }
+
+    notes.push(`calls: ${calls.length} found`);
+    return { calls, diagnostic: notes.join("; ") };
+  } catch (error) {
+    notes.push(`calls error: ${error instanceof Error ? error.message : "unknown"}`);
+    return { calls: [], diagnostic: notes.join("; ") };
+  }
+}
+
 function readGhlMetaTotal(payload: JsonRecord) {
   const meta = (payload.meta || {}) as JsonRecord;
   return typeof meta.total === "number" ? meta.total : null;
@@ -1610,6 +1739,30 @@ async function mintGhlLocationToken(agencyKey: string, location: GhlAgencyLocati
     return null;
   }
   return typeof payload.access_token === "string" ? payload.access_token : null;
+}
+
+/**
+ * Resolve a location-scoped GoHighLevel token for on-demand, location-scoped
+ * reads (e.g. streaming a call recording). Mints a fresh location token from the
+ * connected agency credential (or the env agency key), falling back to the
+ * agency key directly. Returns null when GoHighLevel isn't connected.
+ */
+export async function getGhlLocationToken(context: TenantContext, locationId: string): Promise<string | null> {
+  const record = await getIntegrationConnection(context, "gohighlevel");
+  const connectionKey =
+    record && record.status === "connected" ? getIntegrationCredentials(record).accessToken : undefined;
+  const agencyKey = connectionKey || getServerEnv().gohighlevelAgencyApiKey || undefined;
+  if (!agencyKey) {
+    return null;
+  }
+
+  const jwtCompanyId = decodeJwtPayload(agencyKey).companyId;
+  const companyId =
+    (record?.externalAccountId ? String(record.externalAccountId) : undefined) ||
+    (typeof jwtCompanyId === "string" ? jwtCompanyId : undefined);
+
+  const minted = await mintGhlLocationToken(agencyKey, { id: locationId, name: "", companyId });
+  return minted || agencyKey;
 }
 
 async function fetchGhlLeadCountsWithToken(token: string, locationId: string): Promise<GhlLeadCounts> {
@@ -1646,7 +1799,10 @@ async function fetchGhlLeadCountsWithToken(token: string, locationId: string): P
   ).catch(() => ({}) as JsonRecord);
 
   const windowStart = new Date(Date.now() - GHL_LEAD_WINDOW_DAYS * 24 * 3600 * 1000).toISOString();
-  const { leads, diagnostic } = await fetchGhlRecentLeads(headers, locationId, windowStart);
+  const [{ leads, diagnostic }, { calls, diagnostic: callsDiagnostic }] = await Promise.all([
+    fetchGhlRecentLeads(headers, locationId, windowStart),
+    fetchGhlRecentCalls(headers, locationId, windowStart),
+  ]);
 
   return {
     newLeads30d,
@@ -1654,8 +1810,9 @@ async function fetchGhlLeadCountsWithToken(token: string, locationId: string): P
     pipelineOpportunities: readGhlMetaTotal(opportunitiesPayload),
     bookedJobsWon: readGhlMetaTotal(wonPayload),
     sampleContacts,
-    leads,
-    leadsDiagnostic: diagnostic,
+    // Calls first so they're visible even if the lead list is long and capped.
+    leads: [...calls, ...leads].slice(0, GHL_LEAD_PULL_CAP + GHL_CALL_CAP),
+    leadsDiagnostic: [diagnostic, callsDiagnostic].filter(Boolean).join(" | "),
   };
 }
 

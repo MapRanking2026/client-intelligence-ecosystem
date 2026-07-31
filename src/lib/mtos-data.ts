@@ -507,8 +507,12 @@ export interface VerifiedLead {
   reason?: string;
   /** 0-100 attribution + vetting confidence. */
   confidence?: number;
-  /** Best-effort call-recording link (Phase 3). */
+  /** Best-effort call-recording link (streamed on demand for call-type leads). */
   recordingUrl?: string;
+  /** Call metadata (for type "call"): duration in seconds, status, direction. */
+  callDurationSec?: number;
+  callStatus?: string;
+  callDirection?: string;
   /** Deep link into the contact in GoHighLevel. */
   contactUrl?: string;
   /** First message / snippet of context. */

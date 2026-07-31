@@ -168,6 +168,22 @@ function contactUrl(locationId: string, leadId: string): string | undefined {
   return `https://app.gohighlevel.com/v2/location/${locationId}/contacts/detail/${leadId}`;
 }
 
+/** First-pass verdict for a phone call from its metadata (duration + status). */
+function classifyCallHeuristic(call: JsonRecord): { status: LeadStatus; category: LeadCategory } {
+  const status = str(call.status).toLowerCase();
+  const duration = Number(call.durationSec) || 0;
+  const missed = /missed|no-?answer|no_answer|voicemail|busy|failed|cancel/.test(status);
+  // A very short connected call is almost always a misdial or hangup.
+  if (duration > 0 && duration < 10) {
+    return { status: "flagged", category: "wrong_number" };
+  }
+  if (duration >= 60) {
+    return { status: "valid", category: "valid_new_lead" };
+  }
+  // Missed / short / unknown -> let a human (or the AI) decide.
+  return { status: "needs_review", category: missed ? "wrong_number" : "valid_new_lead" };
+}
+
 // ---------------------------------------------------------------------------
 // Aggregation
 // ---------------------------------------------------------------------------
@@ -412,14 +428,47 @@ export async function runLeadVerification(
   const seen = new Set<string>();
   const baseLeads: VerifiedLead[] = rawLeads.map((raw) => {
     const id = str(raw.id) || `lead-${nanoid(8)}`;
-    const heuristic = classifyHeuristic(raw, seen);
     const phone = str(raw.phone);
+    const attribution = (raw.attribution || {}) as JsonRecord;
+    const call = (raw.call || null) as JsonRecord | null;
+
+    // Phone calls: metadata-driven verdict + an on-demand recording link.
+    if (str(raw.type) === "call" || call) {
+      const callData = call || {};
+      const heuristic = classifyCallHeuristic(callData);
+      const messageId = str(callData.messageId);
+      const durationSec = Number(callData.durationSec) || 0;
+      const direction = str(callData.direction) || undefined;
+      const callStatus = str(callData.status) || undefined;
+      const contactId = str(callData.contactId);
+      return {
+        id,
+        name: str(raw.name) || undefined,
+        phone: phone || undefined,
+        receivedAt: str(raw.dateAdded) || undefined,
+        rawSource: str(raw.source) || "call",
+        channel: resolveChannelHeuristic(raw),
+        type: "call",
+        status: heuristic.status,
+        category: heuristic.category,
+        callDurationSec: durationSec || undefined,
+        callStatus,
+        callDirection: direction,
+        reason: `${direction || "inbound"} call · ${durationSec}s${callStatus ? ` · ${callStatus}` : ""}`,
+        recordingUrl: messageId
+          ? `/api/clients/${clientId}/recording?messageId=${encodeURIComponent(messageId)}`
+          : undefined,
+        contactUrl: contactId ? contactUrl(locationId, contactId) : undefined,
+        verdictSource: "ai",
+      };
+    }
+
+    const heuristic = classifyHeuristic(raw, seen);
     const email = str(raw.email).toLowerCase();
     const key = phone || email;
     if (key) {
       seen.add(key);
     }
-    const attribution = (raw.attribution || {}) as JsonRecord;
     return {
       id,
       name: str(raw.name) || undefined,
@@ -458,9 +507,14 @@ export async function runLeadVerification(
           lead.status = verdict.status;
           lead.category = verdict.category;
           lead.channel = verdict.channel;
-          lead.type = verdict.type === "manual" ? lead.type : verdict.type;
+          // Preserve the call type/recording — the AI vets the call but doesn't reclassify it as a form.
+          if (lead.type !== "call") {
+            lead.type = verdict.type === "manual" ? lead.type : verdict.type;
+          }
           lead.confidence = verdict.confidence;
-          lead.reason = verdict.reason;
+          if (verdict.reason) {
+            lead.reason = verdict.reason;
+          }
         }
       }
     } else if (ai?.error) {

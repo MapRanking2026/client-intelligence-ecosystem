@@ -188,7 +188,14 @@ export function LeadVerificationTable({
                   </td>
                   <td className="px-4 py-3 text-slate-300">{formatDate(lead.receivedAt)}</td>
                   <td className="px-4 py-3 text-slate-300">{LEAD_CHANNEL_LABEL[lead.channel]}</td>
-                  <td className="px-4 py-3 text-slate-300">{LEAD_TYPE_LABEL[lead.type]}</td>
+                  <td className="px-4 py-3 text-slate-300">
+                    {LEAD_TYPE_LABEL[lead.type]}
+                    {lead.type === "call" && typeof lead.callDurationSec === "number" ? (
+                      <span className="block text-xs text-slate-500">
+                        {lead.callDurationSec}s{lead.callStatus ? ` · ${lead.callStatus}` : ""}
+                      </span>
+                    ) : null}
+                  </td>
                   <td className="px-4 py-3">
                     <InlineSelect
                       value={lead.status}

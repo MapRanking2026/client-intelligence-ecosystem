@@ -18,11 +18,7 @@ import { getMtosDataSource } from "@/src/lib/server/data/seed-mtos-data-source";
 import { getFirebaseAdminDb } from "@/src/lib/server/firebase/admin";
 import { integrationSnapshotPath, leadVerificationPath } from "@/src/lib/server/firebase/collections";
 import { getServerEnv } from "@/src/lib/server/env";
-import {
-  fetchGhlClientLeadsAndCalls,
-  getGhlPullWindowStartIso,
-  syncIntegrationProvider,
-} from "@/src/lib/server/integration-sync";
+import { fetchGhlClientLeadsAndCalls, getGhlPullWindowStartIso } from "@/src/lib/server/integration-sync";
 import { callLlmForJson, getNowIso, hasAnyLlmProvider, stripUndefinedDeep } from "@/src/lib/server/services/mtos-ai";
 import { getPromptText } from "@/src/lib/server/prompt-store";
 
@@ -388,19 +384,11 @@ export async function runLeadVerification(
     };
   }
 
-  // A forced refresh re-pulls GoHighLevel before reading. Best-effort: a scope or
-  // permission failure must not block verification against the existing snapshot.
-  if (options.forceRefresh) {
-    try {
-      await syncIntegrationProvider(context, "gohighlevel");
-    } catch (error) {
-      console.warn(
-        `Lead verification refresh: GoHighLevel sync failed, using existing snapshot: ${
-          error instanceof Error ? error.message : "unknown error"
-        }`,
-      );
-    }
-  }
+  // NOTE: we deliberately do NOT trigger a full GoHighLevel agency sync here (it
+  // iterates every client and was timing the request out). Verification always
+  // pulls THIS client's leads/calls directly and live below via
+  // fetchGhlClientLeadsAndCalls, so a refresh is inherently fresh.
+  void options.forceRefresh;
 
   const [crmPayload, googleAdsPayload, gbpPayload] = await Promise.all([
     loadSnapshotPayload(db, context.tenantId, "gohighlevel"),

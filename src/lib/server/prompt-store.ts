@@ -1,6 +1,7 @@
 import fs from "fs";
 import path from "path";
 
+import bundledPromptsJson from "@/src/prompts/mtos-prompts.json";
 import { getFirebaseAdminDb } from "@/src/lib/server/firebase/admin";
 
 export type PromptRole =
@@ -329,13 +330,39 @@ function locate(config: PromptConfig, key: string) {
   return null;
 }
 
+/** Index of the bundled prompt library, so a newly-added prompt can be resolved by key. */
+let bundledPromptIndex: Map<string, PromptDefinition> | null = null;
+function findBundledPrompt(key: string): PromptDefinition | null {
+  if (!bundledPromptIndex) {
+    bundledPromptIndex = new Map();
+    for (const phase of normalizePromptConfig(bundledPromptsJson)) {
+      for (const prompt of phase.prompts) {
+        bundledPromptIndex.set(prompt.key, prompt);
+      }
+    }
+  }
+  return bundledPromptIndex.get(key) ?? null;
+}
+
 export async function getPromptRecord(key: string): Promise<PromptDefinition | null> {
   const db = getFirebaseAdminDb();
   if (db) {
     // The runtime path: one document read, no matter how large the library is.
     await ensureSeeded(db);
     const doc = await promptsCollection(db).doc(key).get();
-    return doc.exists ? withDefaults(doc.data() as PromptDefinition) : null;
+    if (doc.exists) {
+      return withDefaults(doc.data() as PromptDefinition);
+    }
+
+    // The DB self-seeds only when empty, so a prompt added to the bundled library
+    // AFTER the first seed is missing in production. Lazily publish it on first use
+    // so new AI modules work without a manual `import:prompts`.
+    const bundled = findBundledPrompt(key);
+    if (bundled) {
+      await promptsCollection(db).doc(key).set(toStorable(bundled)).catch(() => undefined);
+      return bundled;
+    }
+    return null;
   }
 
   const config = await readFileConfig();

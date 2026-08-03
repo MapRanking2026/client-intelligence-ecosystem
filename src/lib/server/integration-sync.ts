@@ -1509,8 +1509,10 @@ const GHL_CALL_CAP = 100;
 const GHL_CALL_CONVO_SCAN = 60;
 /** Full per-client caps used by the direct verify-time fetch (stored per client, so larger is safe). */
 const GHL_LEAD_FULL_CAP = 500;
-const GHL_CALL_FULL_CAP = 300;
-const GHL_CALL_CONVO_FULL_SCAN = 200;
+const GHL_CALL_FULL_CAP = 200;
+const GHL_CALL_CONVO_FULL_SCAN = 80;
+/** How many conversation-message requests run in parallel (keeps the pull fast, under GHL rate limits). */
+const GHL_MESSAGE_FETCH_CONCURRENCY = 8;
 /** Hard page-loop guard for paginated pulls. */
 const GHL_MAX_PAGES = 20;
 
@@ -1718,49 +1720,61 @@ async function fetchGhlRecentCalls(
   const calls: JsonRecord[] = [];
 
   try {
+    // 1. Collect in-window conversations (newest-first, cheap). Stop once they
+    //    fall outside the window or the cap is hit. The seen-id guard keeps this
+    //    safe even if the API ignores `page`.
+    const conversations: JsonRecord[] = [];
     const seenConvos = new Set<string>();
-    let scanned = 0;
-    let reachedWindowEnd = false;
-
-    // Conversations are newest-first; page through until they fall outside the
-    // window or we hit the caps. The seen-id guard keeps it safe if `page` is a no-op.
-    for (let page = 1; page <= GHL_MAX_PAGES && calls.length < maxCalls && scanned < maxConversations; page += 1) {
+    for (let page = 1; page <= GHL_MAX_PAGES && conversations.length < maxConversations; page += 1) {
       const convoPayload = await fetchJson(
         `https://services.leadconnectorhq.com/conversations/search?locationId=${encodedLocation}&limit=100&page=${page}&sortBy=last_message_date&sort=desc`,
         { headers },
       );
-      const conversations = Array.isArray(convoPayload.conversations)
-        ? (convoPayload.conversations as JsonRecord[])
-        : [];
-      if (!conversations.length) {
+      const list = Array.isArray(convoPayload.conversations) ? (convoPayload.conversations as JsonRecord[]) : [];
+      if (!list.length) {
         break;
       }
-
       let progressed = false;
-      for (const conversation of conversations) {
+      let reachedWindowEnd = false;
+      for (const conversation of list) {
         const convoId = firstString(conversation.id);
         if (!convoId || seenConvos.has(convoId)) {
           continue;
         }
         seenConvos.add(convoId);
         progressed = true;
-        scanned += 1;
-
         const lastMs = ghlDateMs(conversation.lastMessageDate);
         if (lastMs && lastMs < sinceMs) {
           reachedWindowEnd = true;
           break;
         }
-        if (calls.length >= maxCalls || scanned >= maxConversations) {
+        conversations.push(conversation);
+        if (conversations.length >= maxConversations) {
           break;
         }
+      }
+      if (reachedWindowEnd || list.length < 100 || !progressed) {
+        break;
+      }
+    }
 
-        const messagesPayload = await fetchJson(
-          `https://services.leadconnectorhq.com/conversations/${encodeURIComponent(convoId)}/messages?limit=100`,
-          { headers },
-        ).catch(() => ({}) as JsonRecord);
+    // 2. Fetch each conversation's messages in PARALLEL batches (the slow part) and
+    //    extract call messages. Sequential per-conversation fetches were timing out.
+    for (let i = 0; i < conversations.length && calls.length < maxCalls; i += GHL_MESSAGE_FETCH_CONCURRENCY) {
+      const batch = conversations.slice(i, i + GHL_MESSAGE_FETCH_CONCURRENCY);
+      const fetched = await Promise.all(
+        batch.map(async (conversation) => {
+          const convoId = firstString(conversation.id) || "";
+          const messagesPayload = await fetchJson(
+            `https://services.leadconnectorhq.com/conversations/${encodeURIComponent(convoId)}/messages?limit=100`,
+            { headers },
+          ).catch(() => ({}) as JsonRecord);
+          return { conversation, messages: extractGhlMessages(messagesPayload) };
+        }),
+      );
 
-        for (const message of extractGhlMessages(messagesPayload)) {
+      for (const { conversation, messages } of fetched) {
+        for (const message of messages) {
           if (!isGhlCallMessage(message)) {
             continue;
           }
@@ -1773,10 +1787,9 @@ async function fetchGhlRecentCalls(
             break;
           }
         }
-      }
-
-      if (reachedWindowEnd || conversations.length < 100 || !progressed) {
-        break;
+        if (calls.length >= maxCalls) {
+          break;
+        }
       }
     }
 
@@ -1898,11 +1911,11 @@ async function fetchGhlLeadCountsWithToken(token: string, locationId: string): P
     { headers },
   ).catch(() => ({}) as JsonRecord);
 
+  // The shared agency sync runs for every matched client, so keep it LIGHT: just a
+  // small recent-leads sample for the scorecard. The full leads + calls pull (which
+  // is heavy) happens per-client on demand via fetchGhlClientLeadsAndCalls.
   const windowStart = getGhlPullWindowStartIso();
-  const [{ leads, diagnostic }, { calls, diagnostic: callsDiagnostic }] = await Promise.all([
-    fetchGhlRecentLeads(headers, locationId, windowStart),
-    fetchGhlRecentCalls(headers, locationId, windowStart),
-  ]);
+  const { leads, diagnostic } = await fetchGhlRecentLeads(headers, locationId, windowStart, GHL_LEAD_PULL_CAP);
 
   return {
     newLeads30d,
@@ -1910,9 +1923,8 @@ async function fetchGhlLeadCountsWithToken(token: string, locationId: string): P
     pipelineOpportunities: readGhlMetaTotal(opportunitiesPayload),
     bookedJobsWon: readGhlMetaTotal(wonPayload),
     sampleContacts,
-    // Calls first so they're visible even if the lead list is long and capped.
-    leads: [...calls, ...leads].slice(0, GHL_LEAD_PULL_CAP + GHL_CALL_CAP),
-    leadsDiagnostic: [diagnostic, callsDiagnostic].filter(Boolean).join(" | "),
+    leads: leads.slice(0, GHL_LEAD_PULL_CAP),
+    leadsDiagnostic: diagnostic,
   };
 }
 

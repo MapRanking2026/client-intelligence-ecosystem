@@ -18,7 +18,11 @@ import { getMtosDataSource } from "@/src/lib/server/data/seed-mtos-data-source";
 import { getFirebaseAdminDb } from "@/src/lib/server/firebase/admin";
 import { integrationSnapshotPath, leadVerificationPath } from "@/src/lib/server/firebase/collections";
 import { getServerEnv } from "@/src/lib/server/env";
-import { fetchGhlClientLeadsAndCalls, syncIntegrationProvider } from "@/src/lib/server/integration-sync";
+import {
+  fetchGhlClientLeadsAndCalls,
+  getGhlPullWindowStartIso,
+  syncIntegrationProvider,
+} from "@/src/lib/server/integration-sync";
 import { callLlmForJson, getNowIso, hasAnyLlmProvider, stripUndefinedDeep } from "@/src/lib/server/services/mtos-ai";
 import { getPromptText } from "@/src/lib/server/prompt-store";
 
@@ -51,9 +55,6 @@ const RECONCILED_CHANNELS: LeadChannel[] = ["google_ads", "gbp_call", "meta_ads"
 
 /** Cap how many leads are sent to Claude in one run, to bound token cost. */
 const AI_BATCH_CAP = 80;
-
-/** Verification window: last N days of leads/calls (matches the GHL pull). */
-const GHL_VERIFY_WINDOW_DAYS = 30;
 
 // ---------------------------------------------------------------------------
 // Firestore helpers
@@ -410,7 +411,7 @@ export async function runLeadVerification(
   const leadsByClient = (crmPayload?.leadsByClient || {}) as JsonRecord;
   const clientCrm = (leadsByClient[clientId] || null) as JsonRecord | null;
   const locationId = str(clientCrm?.locationId);
-  const windowStart = new Date(Date.now() - GHL_VERIFY_WINDOW_DAYS * 24 * 3600 * 1000).toISOString();
+  const windowStart = getGhlPullWindowStartIso();
 
   const warnings: string[] = [];
 
@@ -424,7 +425,8 @@ export async function runLeadVerification(
       if (direct && direct.leads.length) {
         rawLeads = direct.leads;
         if (direct.diagnostic) {
-          warnings.push(`GoHighLevel pull (last ${GHL_VERIFY_WINDOW_DAYS}d): ${direct.diagnostic}`);
+          const sinceLabel = new Date(windowStart).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+          warnings.push(`GoHighLevel pull (since ${sinceLabel}): ${direct.diagnostic}`);
         }
       }
     } catch (error) {

@@ -242,14 +242,18 @@ export function LeadVerificationTable({
                   </td>
                   <td className="px-4 py-3">
                     {lead.recordingUrl ? (
-                      <a
-                        href={lead.recordingUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="inline-flex items-center gap-1 text-slate-200 hover:text-white"
+                      // preload="none" so the audio is only fetched when the AM hits play,
+                      // not once per call row on page load.
+                      <audio
+                        controls
+                        preload="none"
+                        src={lead.recordingUrl}
+                        className="h-9 w-48 max-w-[220px]"
                       >
-                        Listen <ExternalLink className="h-3 w-3" />
-                      </a>
+                        <a href={lead.recordingUrl} target="_blank" rel="noreferrer">
+                          Listen
+                        </a>
+                      </audio>
                     ) : lead.contactUrl ? (
                       <a
                         href={lead.contactUrl}
@@ -257,8 +261,10 @@ export function LeadVerificationTable({
                         rel="noreferrer"
                         className="inline-flex items-center gap-1 text-slate-400 hover:text-slate-200"
                       >
-                        In GHL <ExternalLink className="h-3 w-3" />
+                        {lead.type === "call" ? "Listen in GHL" : "In GHL"} <ExternalLink className="h-3 w-3" />
                       </a>
+                    ) : lead.type === "call" ? (
+                      <span className="text-xs text-slate-600">no recording</span>
                     ) : (
                       <span className="text-slate-600">—</span>
                     )}

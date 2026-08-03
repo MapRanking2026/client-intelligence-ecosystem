@@ -1489,8 +1489,20 @@ const emptyGhlLeadCounts = (errorMessage?: string): GhlLeadCounts => ({
   errorMessage,
 });
 
-/** How many days back the lead-verification pull reaches. */
-const GHL_LEAD_WINDOW_DAYS = 30;
+/**
+ * The lead/call pull window start: the 1st of the PREVIOUS calendar month (UTC).
+ * So on Aug 2 it starts Jul 1 and on Jul 30 it starts Jun 1 -- always covering the
+ * whole previous month plus the current month-to-date (the owner reviews a full
+ * month even when a few days over 30). Overridable to a rolling window via env.
+ */
+export function getGhlPullWindowStartIso(): string {
+  const days = Number(process.env.GHL_LEAD_WINDOW_DAYS || "");
+  if (Number.isFinite(days) && days > 0) {
+    return new Date(Date.now() - days * 24 * 3600 * 1000).toISOString();
+  }
+  const now = new Date();
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1, 0, 0, 0)).toISOString();
+}
 /** Default (shared-snapshot) cap -- kept small so the shared snapshot doc stays under Firestore's 1MB limit. */
 const GHL_LEAD_PULL_CAP = 100;
 const GHL_CALL_CAP = 100;
@@ -1638,7 +1650,12 @@ function ghlDateMs(value: unknown): number {
 
 function isGhlCallMessage(message: JsonRecord): boolean {
   const marker = `${message.type ?? ""} ${message.messageType ?? ""}`.toLowerCase();
-  return marker.includes("call");
+  if (marker.includes("call")) {
+    return true;
+  }
+  // Some payloads only carry the call details under meta.call, not a "call" type string.
+  const meta = (message.meta || {}) as JsonRecord;
+  return Boolean(meta.call);
 }
 
 /** Pull the messages array out of the several shapes GHL returns it in. */
@@ -1657,7 +1674,7 @@ function extractGhlMessages(payload: JsonRecord): JsonRecord[] {
 function mapGhlCall(message: JsonRecord, conversation: JsonRecord): JsonRecord {
   const meta = (message.meta || {}) as JsonRecord;
   const call = (meta.call || {}) as JsonRecord;
-  const messageId = firstString(message.id, message._id, message.messageId) || "";
+  const messageId = firstString(message.id, message._id, message.messageId, message.altId, call.messageId) || "";
   const direction = firstString(message.direction, call.direction);
   const status = firstString(call.status, message.status);
   const durationRaw = call.duration ?? call.callDuration ?? message.duration;
@@ -1881,7 +1898,7 @@ async function fetchGhlLeadCountsWithToken(token: string, locationId: string): P
     { headers },
   ).catch(() => ({}) as JsonRecord);
 
-  const windowStart = new Date(Date.now() - GHL_LEAD_WINDOW_DAYS * 24 * 3600 * 1000).toISOString();
+  const windowStart = getGhlPullWindowStartIso();
   const [{ leads, diagnostic }, { calls, diagnostic: callsDiagnostic }] = await Promise.all([
     fetchGhlRecentLeads(headers, locationId, windowStart),
     fetchGhlRecentCalls(headers, locationId, windowStart),

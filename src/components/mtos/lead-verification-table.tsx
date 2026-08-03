@@ -422,57 +422,91 @@ const normPhone = (value?: string) => (value || "").replace(/\D/g, "").slice(-10
 const normEmail = (value?: string) => (value || "").trim().toLowerCase();
 
 /** Parse pasted/CSV rows: honor a header row if present, else positional name,phone,email,source,date. */
-/** Split one delimited line, respecting "quoted, fields" (Excel/Sheets export style). */
-function splitDelimited(line: string, delimiter: string): string[] {
-  const out: string[] = [];
-  let current = "";
+/**
+ * Full CSV/TSV tokenizer. Walks the ENTIRE text respecting "quoted" fields, so a
+ * newline *inside* a quoted cell (common in Excel/Sheets exports — e.g. a
+ * bilingual header like "Customer Name\nNombre del Cliente") stays part of that
+ * cell instead of shattering the row. Returns records → cells.
+ */
+function tokenizeDelimited(text: string, delimiter: string): string[][] {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let cell = "";
   let inQuotes = false;
-  for (let i = 0; i < line.length; i += 1) {
-    const ch = line[i];
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i];
     if (inQuotes) {
       if (ch === '"') {
-        if (line[i + 1] === '"') {
-          current += '"';
+        if (text[i + 1] === '"') {
+          cell += '"';
           i += 1;
         } else {
           inQuotes = false;
         }
       } else {
-        current += ch;
+        cell += ch;
       }
     } else if (ch === '"') {
       inQuotes = true;
     } else if (ch === delimiter) {
-      out.push(current);
-      current = "";
+      row.push(cell);
+      cell = "";
+    } else if (ch === "\n") {
+      row.push(cell);
+      cell = "";
+      rows.push(row);
+      row = [];
+    } else if (ch === "\r") {
+      // ignore — handled by the \n branch (covers \r\n and lone \r via lookahead)
+      if (text[i + 1] !== "\n") {
+        row.push(cell);
+        cell = "";
+        rows.push(row);
+        row = [];
+      }
     } else {
-      current += ch;
+      cell += ch;
     }
   }
-  out.push(current);
-  return out.map((cell) => cell.trim());
+  row.push(cell);
+  rows.push(row);
+  // Collapse whitespace/line breaks inside cells and drop fully-empty records.
+  return rows
+    .map((cells) => cells.map((value) => value.replace(/\s+/g, " ").trim()))
+    .filter((cells) => cells.some((value) => value.length > 0));
+}
+
+/** Pick the most likely delimiter by counting candidates outside the noise. */
+function detectDelimiter(text: string): string {
+  const sample = text.slice(0, 5000);
+  let tabs = 0;
+  let semis = 0;
+  let commas = 0;
+  for (const ch of sample) {
+    if (ch === "\t") tabs += 1;
+    else if (ch === ";") semis += 1;
+    else if (ch === ",") commas += 1;
+  }
+  if (tabs > 0 && tabs >= commas && tabs >= semis) return "\t";
+  if (semis > commas) return ";";
+  return ",";
 }
 
 function parseCompareRows(text: string): CompareRow[] {
-  const lines = text
-    .replace(/^﻿/, "") // strip BOM from Excel/Sheets CSV exports
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean);
-  if (!lines.length) {
+  const clean = text.replace(/^﻿/, ""); // strip BOM from Excel/Sheets exports
+  if (!clean.trim()) {
+    return [];
+  }
+  const delimiter = detectDelimiter(clean);
+  const records = tokenizeDelimited(clean, delimiter);
+  if (!records.length) {
     return [];
   }
 
-  // Detect the delimiter: tab, then semicolon (common in some locales), else comma.
-  const firstLine = lines[0];
-  const delimiter = firstLine.includes("\t")
-    ? "\t"
-    : firstLine.split(";").length > firstLine.split(",").length
-      ? ";"
-      : ",";
-
-  const headerCells = splitDelimited(lines[0], delimiter).map((cell) => cell.toLowerCase());
-  const hasHeader = headerCells.some((cell) => /name|phone|email|date|source|number|caller|contact/.test(cell));
+  const headerCells = records[0].map((cell) => cell.toLowerCase());
+  const hasHeader = headerCells.some((cell) =>
+    /name|phone|email|date|source|number|caller|contact|nombre|cliente|tel|correo|fecha|fuente/.test(cell),
+  );
   const findCol = (...needles: string[]) => {
     for (const needle of needles) {
       const index = headerCells.findIndex((cell) => cell.includes(needle));
@@ -484,18 +518,18 @@ function parseCompareRows(text: string): CompareRow[] {
   };
   const idx = hasHeader
     ? {
-        name: findCol("name", "caller", "contact", "full"),
-        phone: findCol("phone", "number", "mobile", "cell", "tel"),
-        email: findCol("email", "e-mail"),
-        source: findCol("source", "channel", "medium"),
-        date: findCol("date", "time", "received"),
+        // English + Spanish header synonyms (bilingual exports are common here).
+        name: findCol("name", "caller", "contact", "full", "nombre", "cliente"),
+        phone: findCol("phone", "mobile", "cell", "tel", "número", "numero", "number"),
+        email: findCol("email", "e-mail", "correo"),
+        source: findCol("source", "channel", "medium", "fuente"),
+        date: findCol("date", "time", "received", "fecha"),
       }
     : { name: 0, phone: 1, email: 2, source: 3, date: 4 };
-  const dataLines = hasHeader ? lines.slice(1) : lines;
+  const dataRecords = hasHeader ? records.slice(1) : records;
 
-  return dataLines
-    .map((line) => {
-      const parts = splitDelimited(line, delimiter);
+  return dataRecords
+    .map((parts) => {
       const at = (i: number) => (i >= 0 && i < parts.length ? parts[i] : "");
       return {
         name: at(idx.name) || undefined,

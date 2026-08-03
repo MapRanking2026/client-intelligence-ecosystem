@@ -17,6 +17,9 @@ export async function proxy(request: NextRequest) {
     path === "/sign-in" ||
     path === "/login" ||
     path === "/sign-up" ||
+    // Publicly readable (required by Meta / Google app review crawlers).
+    path === "/privacy-policy" ||
+    path === "/privacy" ||
     path.startsWith("/api/auth/session") ||
     path.startsWith("/api/auth/firebase-session") ||
     path.startsWith("/api/auth/firebase-signup") ||

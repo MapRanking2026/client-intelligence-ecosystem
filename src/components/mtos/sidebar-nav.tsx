@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useMemo } from "react";
@@ -12,7 +13,6 @@ import {
   Command,
   LayoutDashboard,
   Settings,
-  Sparkles,
 } from "lucide-react";
 
 import { cn } from "@/src/lib/utils";
@@ -42,8 +42,15 @@ export function SidebarNav() {
       <div className="space-y-6">
         <div className="rounded-[24px] border border-white/10 bg-white/5 p-4">
           <div className="flex items-center gap-3">
-            <div className="rounded-2xl bg-white/10 p-3">
-              <Sparkles className="h-5 w-5 text-[#d7f5ec]" />
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-white/10 bg-white/5">
+              <Image
+                src="/mtos-logo.png"
+                alt="MTOS logo"
+                width={48}
+                height={48}
+                className="h-full w-full object-contain"
+                priority
+              />
             </div>
             <div>
               <p className="font-medium text-white">Monthly Touch OS</p>

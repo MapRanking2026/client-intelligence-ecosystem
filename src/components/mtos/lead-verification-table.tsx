@@ -422,27 +422,80 @@ const normPhone = (value?: string) => (value || "").replace(/\D/g, "").slice(-10
 const normEmail = (value?: string) => (value || "").trim().toLowerCase();
 
 /** Parse pasted/CSV rows: honor a header row if present, else positional name,phone,email,source,date. */
+/** Split one delimited line, respecting "quoted, fields" (Excel/Sheets export style). */
+function splitDelimited(line: string, delimiter: string): string[] {
+  const out: string[] = [];
+  let current = "";
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i += 1) {
+    const ch = line[i];
+    if (inQuotes) {
+      if (ch === '"') {
+        if (line[i + 1] === '"') {
+          current += '"';
+          i += 1;
+        } else {
+          inQuotes = false;
+        }
+      } else {
+        current += ch;
+      }
+    } else if (ch === '"') {
+      inQuotes = true;
+    } else if (ch === delimiter) {
+      out.push(current);
+      current = "";
+    } else {
+      current += ch;
+    }
+  }
+  out.push(current);
+  return out.map((cell) => cell.trim());
+}
+
 function parseCompareRows(text: string): CompareRow[] {
   const lines = text
+    .replace(/^﻿/, "") // strip BOM from Excel/Sheets CSV exports
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter(Boolean);
   if (!lines.length) {
     return [];
   }
-  const delimiter = lines[0].includes("\t") ? "\t" : ",";
-  const cells = (line: string) => line.split(delimiter).map((cell) => cell.trim().replace(/^"(.*)"$/, "$1"));
-  const header = cells(lines[0]).map((cell) => cell.toLowerCase());
-  const hasHeader = header.some((cell) => /name|phone|email|date|source/.test(cell));
-  const find = (needle: string) => header.findIndex((cell) => cell.includes(needle));
+
+  // Detect the delimiter: tab, then semicolon (common in some locales), else comma.
+  const firstLine = lines[0];
+  const delimiter = firstLine.includes("\t")
+    ? "\t"
+    : firstLine.split(";").length > firstLine.split(",").length
+      ? ";"
+      : ",";
+
+  const headerCells = splitDelimited(lines[0], delimiter).map((cell) => cell.toLowerCase());
+  const hasHeader = headerCells.some((cell) => /name|phone|email|date|source|number|caller|contact/.test(cell));
+  const findCol = (...needles: string[]) => {
+    for (const needle of needles) {
+      const index = headerCells.findIndex((cell) => cell.includes(needle));
+      if (index >= 0) {
+        return index;
+      }
+    }
+    return -1;
+  };
   const idx = hasHeader
-    ? { name: find("name"), phone: find("phone"), email: find("email"), source: find("source"), date: find("date") }
+    ? {
+        name: findCol("name", "caller", "contact", "full"),
+        phone: findCol("phone", "number", "mobile", "cell", "tel"),
+        email: findCol("email", "e-mail"),
+        source: findCol("source", "channel", "medium"),
+        date: findCol("date", "time", "received"),
+      }
     : { name: 0, phone: 1, email: 2, source: 3, date: 4 };
   const dataLines = hasHeader ? lines.slice(1) : lines;
 
   return dataLines
     .map((line) => {
-      const parts = cells(line);
+      const parts = splitDelimited(line, delimiter);
       const at = (i: number) => (i >= 0 && i < parts.length ? parts[i] : "");
       return {
         name: at(idx.name) || undefined,
@@ -501,6 +554,7 @@ function CompareListPanel({
   const rows = results || [];
   const foundCount = rows.filter((r) => r.match).length;
   const notFoundIndexes = rows.map((r, i) => (r.match ? -1 : i)).filter((i) => i >= 0);
+  const parsedPreview = text.trim() ? parseCompareRows(text).length : 0;
 
   function toggle(index: number) {
     setSelected((current) => {
@@ -577,11 +631,23 @@ function CompareListPanel({
             }}
           />
         </label>
+        {text.trim() ? (
+          <span className="text-xs text-slate-400">{parsedPreview} row{parsedPreview === 1 ? "" : "s"} ready</span>
+        ) : null}
       </div>
+
+      {leads.length === 0 ? (
+        <p className="rounded-2xl border border-amber-400/20 bg-amber-400/5 px-4 py-3 text-xs text-amber-200/90">
+          No leads are loaded yet, so every row will come back “Not found.” Run <span className="font-semibold">Verify</span>{" "}
+          or <span className="font-semibold">Refresh from sources</span> first, then compare.
+        </p>
+      ) : null}
 
       {results ? (
         rows.length === 0 ? (
-          <p className="text-sm text-slate-400">No rows detected. Check the format and try again.</p>
+          <p className="text-sm text-slate-400">
+            No rows detected. Make sure the first columns are name, phone, email — or include a header row.
+          </p>
         ) : (
           <div className="space-y-3">
             <p className="text-sm text-slate-200">

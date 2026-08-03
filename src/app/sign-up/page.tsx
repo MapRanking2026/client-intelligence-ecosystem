@@ -6,6 +6,7 @@ import { createUserWithEmailAndPassword } from "firebase/auth";
 import { Suspense, useState, useTransition } from "react";
 
 import { getFirebaseClientAuth } from "@/src/lib/firebase/client";
+import { BrandWordmark } from "@/src/components/mtos/brand-wordmark";
 
 function getSafeNextPath(nextPath: string | null) {
   if (!nextPath || !nextPath.startsWith("/") || nextPath.startsWith("//")) {
@@ -34,12 +35,12 @@ function SignUpContent() {
   return (
     <main className="min-h-screen bg-[#223453] bg-[radial-gradient(circle_at_top,rgba(215,245,236,0.10),rgba(3,10,18,1)_55%)] px-6 py-16 text-white">
       <div className="mx-auto w-full max-w-lg">
+        <BrandWordmark className="mb-10" />
         <div className="rounded-[28px] border border-[#597f91] bg-[linear-gradient(180deg,rgba(255,255,255,0.06),rgba(255,255,255,0.02))] p-8 text-left shadow-[0_30px_80px_rgba(5,10,18,0.22)] backdrop-blur">
           <div className="space-y-2">
             <p className="text-left text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">
               ACCESS
             </p>
-            <h1 className="text-2xl font-semibold tracking-tight text-white">Monthly Touch OS</h1>
             <h2 className="text-[35px] font-bold tracking-tight text-white">Create Account</h2>
             <p className="text-sm text-slate-400">
               Create a Manager or Admin account for your organization.

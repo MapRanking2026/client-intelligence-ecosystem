@@ -138,27 +138,45 @@ async function callAnthropic(params: AdapterParams): Promise<string> {
 }
 
 async function callOpenAI(params: AdapterParams): Promise<string> {
-  const response = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      authorization: `Bearer ${params.apiKey}`,
-    },
-    body: JSON.stringify({
-      model: params.model,
-      temperature: params.temperature,
-      max_tokens: params.maxTokens,
-      response_format: { type: "json_object" },
-      messages: [
-        { role: "system", content: params.system },
-        { role: "user", content: params.userText },
-      ],
-    }),
-  });
-  const payload = (await response.json().catch(() => ({}))) as {
-    choices?: Array<{ message?: { content?: string } }>;
-    error?: { message?: string };
+  // Newer OpenAI models (gpt-5 / o-series and later) renamed `max_tokens` to
+  // `max_completion_tokens` and only accept the default temperature. Build the
+  // body accordingly, and if the API still rejects a param, retry without the
+  // optional ones so a model swap never silently breaks failover.
+  const postOpenAI = async (body: Record<string, unknown>) => {
+    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${params.apiKey}`,
+      },
+      body: JSON.stringify(body),
+    });
+    const payload = (await response.json().catch(() => ({}))) as {
+      choices?: Array<{ message?: { content?: string } }>;
+      error?: { message?: string; param?: string };
+    };
+    return { response, payload };
   };
+
+  const baseBody: Record<string, unknown> = {
+    model: params.model,
+    max_completion_tokens: params.maxTokens,
+    response_format: { type: "json_object" },
+    messages: [
+      { role: "system", content: params.system },
+      { role: "user", content: params.userText },
+    ],
+  };
+
+  // Attempt 1: include temperature (most models honor it).
+  let { response, payload } = await postOpenAI({ ...baseBody, temperature: params.temperature });
+
+  // Attempt 2: if the model rejects temperature (reasoning models only allow the
+  // default), retry without it rather than failing the whole provider.
+  if (!response.ok && /temperature/i.test(payload.error?.message || "")) {
+    ({ response, payload } = await postOpenAI(baseBody));
+  }
+
   if (!response.ok) {
     throw new Error(payload.error?.message || `OpenAI request failed with status ${response.status}`);
   }
@@ -169,23 +187,35 @@ async function callGemini(params: AdapterParams): Promise<string> {
   const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
     params.model,
   )}:generateContent?key=${encodeURIComponent(params.apiKey)}`;
-  const response = await fetch(endpoint, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      systemInstruction: { parts: [{ text: params.system }] },
-      contents: [{ role: "user", parts: [{ text: params.userText }] }],
-      generationConfig: {
-        temperature: params.temperature,
-        maxOutputTokens: params.maxTokens,
-        responseMimeType: "application/json",
-      },
-    }),
-  });
-  const payload = (await response.json().catch(() => ({}))) as {
-    candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
-    error?: { message?: string };
+
+  const attempt = async () => {
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: params.system }] },
+        contents: [{ role: "user", parts: [{ text: params.userText }] }],
+        generationConfig: {
+          temperature: params.temperature,
+          maxOutputTokens: params.maxTokens,
+          responseMimeType: "application/json",
+        },
+      }),
+    });
+    const payload = (await response.json().catch(() => ({}))) as {
+      candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+      error?: { message?: string };
+    };
+    return { response, payload };
   };
+
+  let { response, payload } = await attempt();
+  // Gemini frequently returns a transient 503 ("high demand"); retry once after a
+  // short backoff before giving up on the provider.
+  if (response.status === 503 || response.status === 429) {
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    ({ response, payload } = await attempt());
+  }
   if (!response.ok) {
     throw new Error(payload.error?.message || `Gemini request failed with status ${response.status}`);
   }

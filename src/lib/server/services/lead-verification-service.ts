@@ -322,33 +322,64 @@ async function classifyWithClaude(
     return { verdicts: new Map(), error: error instanceof Error ? error.message : "Prompt not available" };
   }
 
-  const userText = [
-    "Classify each of the following leads. Return one verdict per lead, preserving its id.",
-    "",
-    JSON.stringify({ leads }, null, 2),
-  ].join("\n");
-
-  try {
-    const result = await callLlmForJson({ env, system, userText, maxTokens: 4096 });
-    const parsed = verdictsResponseSchema.parse(result.data);
-    const map = new Map<string, AiVerdict>();
-    for (const verdict of parsed.verdicts) {
-      map.set(verdict.id, {
-        status: pickEnum(verdict.status, STATUSES, "needs_review"),
-        category: pickEnum(verdict.category, CATEGORIES, "valid_new_lead"),
-        channel: pickEnum(verdict.channel, CHANNELS, "unknown"),
-        type: pickEnum(verdict.type, TYPES, "form"),
-        confidence:
-          typeof verdict.confidence === "number"
-            ? Math.max(0, Math.min(100, Math.round(verdict.confidence)))
-            : undefined,
-        reason: str(verdict.reason) || undefined,
-      });
-    }
-    return { verdicts: map, provider: result.provider, model: result.model };
-  } catch (error) {
-    return { verdicts: new Map(), error: error instanceof Error ? error.message : "Lead classification failed" };
+  // Classify in small batches so a busy client's full month of leads never
+  // overflows the model's output cap — a single all-leads request was returning
+  // truncated JSON (parse error mid-array) and taking down the whole AI pass.
+  // Each batch fails independently: a failed batch just falls back to the
+  // deterministic heuristic for those leads (they're absent from the map).
+  const BATCH_SIZE = 25;
+  const batches: JsonRecord[][] = [];
+  for (let i = 0; i < leads.length; i += BATCH_SIZE) {
+    batches.push(leads.slice(i, i + BATCH_SIZE));
   }
+
+  const map = new Map<string, AiVerdict>();
+  let provider: string | undefined;
+  let model: string | undefined;
+  const errors: string[] = [];
+
+  const runBatch = async (batch: JsonRecord[]) => {
+    const userText = [
+      "Classify each of the following leads. Return one verdict per lead, preserving its id.",
+      "",
+      JSON.stringify({ leads: batch }, null, 2),
+    ].join("\n");
+    try {
+      const result = await callLlmForJson({ env, system, userText, maxTokens: 4096 });
+      const parsed = verdictsResponseSchema.parse(result.data);
+      provider = provider ?? result.provider;
+      model = model ?? result.model;
+      for (const verdict of parsed.verdicts) {
+        map.set(verdict.id, {
+          status: pickEnum(verdict.status, STATUSES, "needs_review"),
+          category: pickEnum(verdict.category, CATEGORIES, "valid_new_lead"),
+          channel: pickEnum(verdict.channel, CHANNELS, "unknown"),
+          type: pickEnum(verdict.type, TYPES, "form"),
+          confidence:
+            typeof verdict.confidence === "number"
+              ? Math.max(0, Math.min(100, Math.round(verdict.confidence)))
+              : undefined,
+          reason: str(verdict.reason) || undefined,
+        });
+      }
+    } catch (error) {
+      errors.push(error instanceof Error ? error.message : "batch failed");
+    }
+  };
+
+  // Limited concurrency keeps us well under the function timeout without
+  // hammering the provider's rate limit.
+  const CONCURRENCY = 3;
+  for (let i = 0; i < batches.length; i += CONCURRENCY) {
+    await Promise.all(batches.slice(i, i + CONCURRENCY).map(runBatch));
+  }
+
+  // Only surface an error when nothing at all classified — a partial result is
+  // still useful (the rest fall back to the heuristic).
+  if (map.size === 0 && errors.length) {
+    return { verdicts: map, error: errors[0] };
+  }
+  return { verdicts: map, provider, model };
 }
 
 // ---------------------------------------------------------------------------

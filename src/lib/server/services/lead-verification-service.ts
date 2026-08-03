@@ -49,8 +49,12 @@ const TYPES: LeadType[] = ["call", "form", "chat", "manual"];
 /** Reconcile only against channels whose platform reports its own number. */
 const RECONCILED_CHANNELS: LeadChannel[] = ["google_ads", "gbp_call", "meta_ads"];
 
-/** Cap how many leads are sent to Claude in one run, to bound token cost. */
-const AI_BATCH_CAP = 80;
+/**
+ * Cap how many leads are AI-vetted in one run, to bound token cost + runtime.
+ * `classifyWithClaude` splits this into small batched requests, so the cap can
+ * comfortably cover a busy client's full month. Override with LEAD_VET_CAP.
+ */
+const AI_BATCH_CAP = Number(process.env.LEAD_VET_CAP) || 400;
 
 // ---------------------------------------------------------------------------
 // Firestore helpers

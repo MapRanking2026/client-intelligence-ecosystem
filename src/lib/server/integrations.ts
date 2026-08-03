@@ -855,6 +855,12 @@ function canAutoRenew(provider: ProviderDefinition, record: IntegrationConnectio
   if (!provider.oauth || provider.oauth.refreshStrategy === "none") {
     return true;
   }
+  // Meta has no refresh token -- it self-renews by extending its long-lived
+  // access token (see the meta-ads branch in refreshIntegration).
+  if (provider.id === "meta-ads") {
+    const credentials = record.credentialCiphertext ? unsealCredentials(record.credentialCiphertext) : undefined;
+    return Boolean(credentials?.accessToken);
+  }
   const credentials = record.credentialCiphertext ? unsealCredentials(record.credentialCiphertext) : undefined;
   return Boolean(credentials?.refreshToken);
 }
@@ -1074,6 +1080,48 @@ async function exchangeOAuthToken(
   }
 
   return payload;
+}
+
+/**
+ * Meta doesn't issue refresh tokens: its OAuth returns a short-lived (~1-2h)
+ * token that must be exchanged for a long-lived (~60-day) one via
+ * `grant_type=fb_exchange_token`, and that long-lived token can itself be
+ * re-exchanged before expiry to extend it. This helper does that exchange — used
+ * both on connect (from the short-lived token) and on refresh (from the stored
+ * long-lived token) so Meta stays alive without a manual reconnect.
+ */
+async function exchangeMetaLongLivedToken(
+  provider: ProviderDefinition,
+  currentToken: string,
+  origin?: string,
+): Promise<{ accessToken: string; expiresInSeconds: number } | null> {
+  if (!provider.oauth || !currentToken) {
+    return null;
+  }
+  const clientConfig = getOAuthClientConfig(provider, origin);
+  if (!clientConfig?.configured) {
+    return null;
+  }
+
+  const url = new URL(provider.oauth.tokenUrl);
+  url.searchParams.set("grant_type", "fb_exchange_token");
+  url.searchParams.set("client_id", clientConfig.clientId);
+  url.searchParams.set("client_secret", clientConfig.clientSecret);
+  url.searchParams.set("fb_exchange_token", currentToken);
+
+  const response = await fetch(url, { method: "GET", headers: { accept: "application/json" } });
+  const payload = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+  if (!response.ok) {
+    throw new Error(
+      getStringFromPayload(payload, ["error_description", "error", "message"]) ||
+        `Meta long-lived token exchange failed with status ${response.status}`,
+    );
+  }
+
+  const accessToken = getStringFromPayload(payload, ["access_token", "accessToken"]);
+  // Meta long-lived tokens last ~60 days; default to that if expires_in is omitted.
+  const expiresInSeconds = getNumberFromPayload(payload, ["expires_in", "expiresIn"]) || 60 * 24 * 3600;
+  return accessToken ? { accessToken, expiresInSeconds } : null;
 }
 
 function buildAuthorizationUrl(provider: ProviderDefinition, context: TenantContext, origin?: string) {
@@ -1351,6 +1399,32 @@ export async function refreshIntegration(context: TenantContext, providerId: Int
       return toProviderView(provider, updatedRecord);
     }
 
+    // Meta has no refresh token -- extend the stored long-lived token instead.
+    if (provider.id === "meta-ads") {
+      const longLived = await exchangeMetaLongLivedToken(provider, credentials.accessToken || "", origin);
+      if (!longLived) {
+        throw new Error(`${provider.name} token could not be extended -- reconnect Meta Ads.`);
+      }
+      const updatedRecord = buildStoredRecord(
+        provider,
+        context,
+        {
+          ...existing,
+          status: "connected",
+          connectedAt: existing.connectedAt,
+          lastValidatedAt: now,
+          lastRefreshAt: now,
+          tokenExpiresAt: addMinutes(now, Math.max(Math.round(longLived.expiresInSeconds / 60), 1)),
+        },
+        {
+          ...credentials,
+          accessToken: longLived.accessToken,
+        },
+      );
+      await saveStoredConnection(updatedRecord);
+      return toProviderView(provider, updatedRecord);
+    }
+
     if (!credentials.refreshToken) {
       throw new Error(`${provider.name} does not have a refresh token saved`);
     }
@@ -1421,9 +1495,23 @@ export async function completeOAuthConnection(
 
   const payload = await exchangeOAuthToken(provider, { code: params.code }, origin);
   const now = getNowIso();
-  const accessToken = getStringFromPayload(payload, ["access_token", "accessToken"]);
+  let accessToken = getStringFromPayload(payload, ["access_token", "accessToken"]);
   const refreshToken = getStringFromPayload(payload, ["refresh_token", "refreshToken"]);
-  const expiresInSeconds = getNumberFromPayload(payload, ["expires_in", "expiresIn"]);
+  let expiresInSeconds = getNumberFromPayload(payload, ["expires_in", "expiresIn"]);
+
+  // Meta returns a short-lived token with no refresh token; upgrade it to the
+  // long-lived (~60-day) token so the connection survives and can auto-renew.
+  if (provider.id === "meta-ads" && accessToken) {
+    try {
+      const longLived = await exchangeMetaLongLivedToken(provider, accessToken, origin);
+      if (longLived) {
+        accessToken = longLived.accessToken;
+        expiresInSeconds = longLived.expiresInSeconds;
+      }
+    } catch (error) {
+      console.warn(`Meta long-lived token exchange failed: ${error instanceof Error ? error.message : "unknown"}`);
+    }
+  }
   const realmId = callbackUrl.searchParams.get("realmId") || undefined;
   const workspaceId = callbackUrl.searchParams.get("workspace_id") || undefined;
   const locationId = getStringFromPayload(payload, ["locationId", "location_id"]) || undefined;

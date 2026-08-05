@@ -47,12 +47,12 @@ export async function AppShell({ title, subtitle, children }: AppShellProps) {
                     <Bell className="h-4 w-4" />
                     3 alerts
                   </summary>
-                  <div className="mt-3 grid min-w-[280px] gap-2">
+                  <div className="mt-3 grid min-w-[280px] gap-2 rounded-2xl border border-white/10 bg-[#0b1524] p-2 shadow-[0_24px_60px_rgba(3,6,14,0.6)]">
                     {actionableAlerts.map((alert) => (
                       <Link
                         key={alert.label}
                         href={alert.href}
-                        className="rounded-2xl border border-white/8 bg-[#d7f5ec] px-3 py-2 text-sm font-medium text-[#0d1625] transition hover:bg-white"
+                        className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm font-medium text-slate-100 transition hover:bg-white/10 hover:text-white"
                       >
                         {alert.label}
                       </Link>

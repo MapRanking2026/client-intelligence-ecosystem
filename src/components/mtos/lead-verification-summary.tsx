@@ -22,11 +22,12 @@ export function LeadVerificationSummary({
 
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
         <StatTile label="Total" value={totals.total} tone="slate" />
         <StatTile label="Valid" value={totals.valid} tone="emerald" />
         <StatTile label="Flagged" value={totals.flagged} tone="rose" />
         <StatTile label="Needs review" value={totals.needsReview} tone="amber" />
+        <StatTile label="Missed calls" value={totals.missedCalls ?? 0} tone="sky" />
       </div>
 
       {byChannel.length ? (
@@ -111,7 +112,7 @@ function StatTile({
 }: {
   label: string;
   value: number;
-  tone: "slate" | "emerald" | "rose" | "amber";
+  tone: "slate" | "emerald" | "rose" | "amber" | "sky";
 }) {
   const toneClass =
     tone === "emerald"
@@ -120,7 +121,9 @@ function StatTile({
         ? "border-rose-400/20 bg-rose-500/10 text-rose-100"
         : tone === "amber"
           ? "border-amber-400/20 bg-amber-500/10 text-amber-100"
-          : "border-white/8 bg-white/4 text-slate-100";
+          : tone === "sky"
+            ? "border-sky-400/20 bg-sky-500/10 text-sky-100"
+            : "border-white/8 bg-white/4 text-slate-100";
   return (
     <div className={`rounded-2xl border px-4 py-3 text-center ${toneClass}`}>
       <p className="text-2xl font-semibold">{value}</p>

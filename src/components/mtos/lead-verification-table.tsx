@@ -42,6 +42,7 @@ const statusRowTone: Record<LeadStatus, string> = {
   valid: "border-l-2 border-l-emerald-400/50",
   flagged: "border-l-2 border-l-rose-400/50",
   needs_review: "border-l-2 border-l-amber-400/50",
+  missed_call: "border-l-2 border-l-sky-400/60",
 };
 
 export function LeadVerificationTable({

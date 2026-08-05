@@ -89,10 +89,11 @@ export function LeadVerificationQuickActions({ clientId, initialReview }: LeadVe
       </div>
 
       {totals ? (
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
           <SummaryPill label="Valid" value={totals.valid} tone="emerald" />
           <SummaryPill label="Flagged" value={totals.flagged} tone="rose" />
           <SummaryPill label="Needs review" value={totals.needsReview} tone="amber" />
+          <SummaryPill label="Missed calls" value={totals.missedCalls ?? 0} tone="sky" />
         </div>
       ) : (
         <p className="text-sm text-slate-400">
@@ -139,13 +140,23 @@ export function LeadVerificationQuickActions({ clientId, initialReview }: LeadVe
   );
 }
 
-function SummaryPill({ label, value, tone }: { label: string; value: number; tone: "emerald" | "rose" | "amber" }) {
+function SummaryPill({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: number;
+  tone: "emerald" | "rose" | "amber" | "sky";
+}) {
   const toneClass =
     tone === "emerald"
       ? "border-emerald-400/20 bg-emerald-500/10 text-emerald-100"
       : tone === "rose"
         ? "border-rose-400/20 bg-rose-500/10 text-rose-100"
-        : "border-amber-400/20 bg-amber-500/10 text-amber-100";
+        : tone === "sky"
+          ? "border-sky-400/20 bg-sky-500/10 text-sky-100"
+          : "border-amber-400/20 bg-amber-500/10 text-amber-100";
   return (
     <div className={`rounded-2xl border px-4 py-3 text-center ${toneClass}`}>
       <p className="text-2xl font-semibold">{value}</p>

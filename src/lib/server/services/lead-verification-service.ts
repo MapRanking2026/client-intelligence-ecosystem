@@ -24,7 +24,7 @@ import { getPromptText } from "@/src/lib/server/prompt-store";
 
 type JsonRecord = Record<string, unknown>;
 
-const STATUSES: LeadStatus[] = ["valid", "flagged", "needs_review"];
+const STATUSES: LeadStatus[] = ["valid", "flagged", "needs_review", "missed_call"];
 const CATEGORIES: LeadCategory[] = [
   "valid_new_lead",
   "spam",
@@ -34,6 +34,7 @@ const CATEGORIES: LeadCategory[] = [
   "sales_solicitation",
   "out_of_area",
   "incomplete",
+  "irrelevant",
 ];
 const CHANNELS: LeadChannel[] = [
   "google_ads",
@@ -176,7 +177,13 @@ function contactUrl(locationId: string, leadId: string): string | undefined {
 function classifyCallHeuristic(call: JsonRecord): { status: LeadStatus; category: LeadCategory } {
   const status = str(call.status).toLowerCase();
   const duration = Number(call.durationSec) || 0;
-  const missed = /missed|no-?answer|no_answer|voicemail|busy|failed|cancel/.test(status);
+  const missed = /missed|no-?answer|no_answer|voicemail|busy|failed|cancel|unanswered|declin/.test(status);
+  // Not answered / went to voicemail -> its own status so missed calls can be
+  // counted. Keep it a valid_new_lead category (a missed call is still a real
+  // potential customer the client didn't reach), not spam.
+  if (missed) {
+    return { status: "missed_call", category: "valid_new_lead" };
+  }
   // A very short connected call is almost always a misdial or hangup.
   if (duration > 0 && duration < 10) {
     return { status: "flagged", category: "wrong_number" };
@@ -184,8 +191,8 @@ function classifyCallHeuristic(call: JsonRecord): { status: LeadStatus; category
   if (duration >= 60) {
     return { status: "valid", category: "valid_new_lead" };
   }
-  // Missed / short / unknown -> let a human (or the AI) decide.
-  return { status: "needs_review", category: missed ? "wrong_number" : "valid_new_lead" };
+  // Short / unknown -> let a human (or the AI) decide.
+  return { status: "needs_review", category: "valid_new_lead" };
 }
 
 // ---------------------------------------------------------------------------
@@ -198,6 +205,7 @@ function computeTotals(leads: VerifiedLead[]): LeadVerificationReview["totals"] 
     valid: leads.filter((lead) => lead.status === "valid").length,
     flagged: leads.filter((lead) => lead.status === "flagged").length,
     needsReview: leads.filter((lead) => lead.status === "needs_review").length,
+    missedCalls: leads.filter((lead) => lead.status === "missed_call").length,
   };
 }
 
@@ -536,6 +544,13 @@ export async function runLeadVerification(
     };
   });
 
+  // Whether a call was answered is a FACT from its metadata, not a judgment —
+  // capture missed calls up front so the AI pass can't reclassify them away
+  // (the AM can still override an individual verdict by hand afterwards).
+  const missedCallIds = new Set(
+    baseLeads.filter((lead) => lead.type === "call" && lead.status === "missed_call").map((lead) => lead.id),
+  );
+
   // AI pass (bounded batch). Overrides the heuristic verdict where present.
   let source: LeadVerificationReview["source"] = "heuristic";
   let model: string | undefined;
@@ -570,6 +585,12 @@ export async function runLeadVerification(
       warnings.push(`AI vetting unavailable (${ai.error}) — showing a rules-based first pass. Verdicts can be adjusted by hand.`);
     } else if (!ai) {
       warnings.push("No AI provider is configured — showing a rules-based first pass. Verdicts can be adjusted by hand.");
+    }
+    // Re-assert the factual missed-call status the AI may have overwritten.
+    for (const lead of baseLeads) {
+      if (missedCallIds.has(lead.id)) {
+        lead.status = "missed_call";
+      }
     }
   }
 
@@ -693,7 +714,7 @@ function errorReview(clientId: string, message: string): LeadVerificationReview 
     status: "error",
     clientId,
     leads: [],
-    totals: { total: 0, valid: 0, flagged: 0, needsReview: 0 },
+    totals: { total: 0, valid: 0, flagged: 0, needsReview: 0, missedCalls: 0 },
     byChannel: [],
     reconciliation: [],
     warnings: [message],
@@ -707,7 +728,7 @@ function emptyReadyReview(clientId: string): LeadVerificationReview {
     status: "ready",
     clientId,
     leads: [],
-    totals: { total: 0, valid: 0, flagged: 0, needsReview: 0 },
+    totals: { total: 0, valid: 0, flagged: 0, needsReview: 0, missedCalls: 0 },
     byChannel: [],
     reconciliation: [],
     warnings: [],

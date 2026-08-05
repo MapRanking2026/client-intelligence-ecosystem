@@ -465,7 +465,7 @@ export interface QaReview {
  */
 export type LeadType = "call" | "form" | "chat" | "manual";
 
-export type LeadStatus = "valid" | "flagged" | "needs_review";
+export type LeadStatus = "valid" | "flagged" | "needs_review" | "missed_call";
 
 /** Resolved attribution channel a lead came in through. */
 export type LeadChannel =
@@ -486,7 +486,8 @@ export type LeadCategory =
   | "wrong_number"
   | "sales_solicitation"
   | "out_of_area"
-  | "incomplete";
+  | "incomplete"
+  | "irrelevant";
 
 export interface VerifiedLead {
   id: string;
@@ -549,6 +550,8 @@ export interface LeadVerificationReview {
     valid: number;
     flagged: number;
     needsReview: number;
+    /** Calls that rang through but were not answered (voicemail / no-answer). */
+    missedCalls: number;
   };
   byChannel: LeadChannelCount[];
   reconciliation: LeadReconciliation[];
@@ -583,12 +586,14 @@ export const LEAD_CATEGORY_LABEL: Record<LeadCategory, string> = {
   sales_solicitation: "Sales solicitation",
   out_of_area: "Out of area",
   incomplete: "Incomplete",
+  irrelevant: "Irrelevant",
 };
 
 export const LEAD_STATUS_LABEL: Record<LeadStatus, string> = {
   valid: "Valid",
   flagged: "Flagged",
   needs_review: "Needs review",
+  missed_call: "Missed call",
 };
 
 export const LEAD_TYPE_LABEL: Record<LeadType, string> = {

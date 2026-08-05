@@ -9,7 +9,7 @@ import {
   runLeadVerification,
 } from "@/src/lib/server/services/lead-verification-service";
 
-const statusEnum = z.enum(["valid", "flagged", "needs_review"]);
+const statusEnum = z.enum(["valid", "flagged", "needs_review", "missed_call"]);
 const categoryEnum = z.enum([
   "valid_new_lead",
   "spam",
@@ -19,6 +19,7 @@ const categoryEnum = z.enum([
   "sales_solicitation",
   "out_of_area",
   "incomplete",
+  "irrelevant",
 ]);
 const channelEnum = z.enum([
   "google_ads",
@@ -30,9 +31,15 @@ const channelEnum = z.enum([
   "unknown",
 ]);
 
+const windowSchema = z.object({
+  preset: z.enum(["last_7_days", "last_30_days", "last_90_days", "this_month", "last_month", "custom"]),
+  since: z.string().optional(),
+  until: z.string().optional(),
+});
+
 const requestSchema = z.discriminatedUnion("action", [
-  z.object({ action: z.literal("verify") }),
-  z.object({ action: z.literal("refresh") }),
+  z.object({ action: z.literal("verify"), window: windowSchema.optional() }),
+  z.object({ action: z.literal("refresh"), window: windowSchema.optional() }),
   z.object({
     action: z.literal("set_verdict"),
     verdicts: z.record(
@@ -84,10 +91,10 @@ export async function POST(
     let review;
     switch (payload.action) {
       case "verify":
-        review = await runLeadVerification(context, clientId);
+        review = await runLeadVerification(context, clientId, { window: payload.window });
         break;
       case "refresh":
-        review = await runLeadVerification(context, clientId, { forceRefresh: true });
+        review = await runLeadVerification(context, clientId, { forceRefresh: true, window: payload.window });
         break;
       case "set_verdict":
         review = await applyLeadVerdicts(context, clientId, payload.verdicts);

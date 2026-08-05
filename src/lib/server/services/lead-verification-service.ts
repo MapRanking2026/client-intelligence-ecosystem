@@ -11,6 +11,7 @@ import type {
   LeadStatus,
   LeadType,
   LeadVerificationReview,
+  LeadWindowInput,
   VerifiedLead,
 } from "@/src/lib/mtos-data";
 import { LEAD_CHANNEL_LABEL } from "@/src/lib/mtos-data";
@@ -18,7 +19,7 @@ import { getMtosDataSource } from "@/src/lib/server/data/seed-mtos-data-source";
 import { getFirebaseAdminDb } from "@/src/lib/server/firebase/admin";
 import { integrationSnapshotPath, leadVerificationPath } from "@/src/lib/server/firebase/collections";
 import { getServerEnv } from "@/src/lib/server/env";
-import { fetchGhlClientLeadsAndCalls, getGhlPullWindowStartIso } from "@/src/lib/server/integration-sync";
+import { fetchGhlClientLeadsAndCalls } from "@/src/lib/server/integration-sync";
 import { callLlmForJson, getNowIso, hasAnyLlmProvider, stripUndefinedDeep } from "@/src/lib/server/services/mtos-ai";
 import { getPromptText } from "@/src/lib/server/prompt-store";
 
@@ -193,6 +194,43 @@ function classifyCallHeuristic(call: JsonRecord): { status: LeadStatus; category
   }
   // Short / unknown -> let a human (or the AI) decide.
   return { status: "needs_review", category: "valid_new_lead" };
+}
+
+/**
+ * Resolve a pull window (since/until ISO) from the operator's choice. Defaults
+ * to a rolling last-30-days from "now" when nothing is specified — so both the
+ * button and every automatic re-run pull the last 30 days unless overridden.
+ */
+function resolveLeadWindow(input?: LeadWindowInput): { since: string; until?: string } {
+  const now = new Date();
+  const nowMs = now.getTime();
+  const daysAgo = (n: number) => new Date(nowMs - n * 86_400_000).toISOString();
+  const monthStart = (year: number, monthIndex: number) => new Date(Date.UTC(year, monthIndex, 1)).toISOString();
+
+  switch (input?.preset) {
+    case "last_7_days":
+      return { since: daysAgo(7) };
+    case "last_90_days":
+      return { since: daysAgo(90) };
+    case "this_month":
+      return { since: monthStart(now.getUTCFullYear(), now.getUTCMonth()) };
+    case "last_month": {
+      const since = monthStart(now.getUTCFullYear(), now.getUTCMonth() - 1);
+      // End = the last millisecond of the previous month.
+      const until = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1) - 1).toISOString();
+      return { since, until };
+    }
+    case "custom": {
+      const since = input.since
+        ? new Date(`${input.since}T00:00:00.000Z`).toISOString()
+        : daysAgo(30);
+      const until = input.until ? new Date(`${input.until}T23:59:59.999Z`).toISOString() : undefined;
+      return { since, until };
+    }
+    case "last_30_days":
+    default:
+      return { since: daysAgo(30) };
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -408,7 +446,7 @@ async function classifyWithClaude(
 export async function runLeadVerification(
   context: TenantContext,
   clientId: string,
-  options: { forceRefresh?: boolean } = {},
+  options: { forceRefresh?: boolean; window?: LeadWindowInput } = {},
 ): Promise<LeadVerificationReview> {
   const env = getServerEnv();
   const db = getFirebaseAdminDb();
@@ -442,19 +480,35 @@ export async function runLeadVerification(
   const leadsByClient = (crmPayload?.leadsByClient || {}) as JsonRecord;
   const clientCrm = (leadsByClient[clientId] || null) as JsonRecord | null;
   const locationId = str(clientCrm?.locationId);
-  const windowStart = getGhlPullWindowStartIso();
+  const { since: windowStart, until: windowEnd } = resolveLeadWindow(options.window);
+  const windowEndMs = windowEnd ? new Date(windowEnd).getTime() : null;
 
   const warnings: string[] = [];
+
+  // Keep only records inside the window's END (the pull is bounded by `since`;
+  // `until` matters for "Last month" / a custom range). Records without a
+  // parseable date are kept rather than silently dropped.
+  const withinWindowEnd = (records: JsonRecord[]) => {
+    if (windowEndMs === null) {
+      return records;
+    }
+    return records.filter((raw) => {
+      const call = (raw.call || null) as JsonRecord | null;
+      const dateStr = str(raw.dateAdded) || str(call?.dateAdded);
+      const ms = new Date(dateStr).getTime();
+      return Number.isNaN(ms) ? true : ms <= windowEndMs;
+    });
+  };
 
   // Pull the FULL window directly from GoHighLevel for this one client (paginated),
   // so a busy client's older leads/calls aren't truncated by the shared-snapshot
   // cap. Falls back to whatever the snapshot holds if the direct pull can't run.
-  let rawLeads = Array.isArray(clientCrm?.leads) ? (clientCrm?.leads as JsonRecord[]) : [];
+  let rawLeads = withinWindowEnd(Array.isArray(clientCrm?.leads) ? (clientCrm?.leads as JsonRecord[]) : []);
   if (locationId) {
     try {
       const direct = await fetchGhlClientLeadsAndCalls(context, locationId, windowStart);
       if (direct && direct.leads.length) {
-        rawLeads = direct.leads;
+        rawLeads = withinWindowEnd(direct.leads);
         if (direct.diagnostic) {
           const sinceLabel = new Date(windowStart).toLocaleDateString("en-US", { month: "short", day: "numeric" });
           warnings.push(`GoHighLevel pull (since ${sinceLabel}): ${direct.diagnostic}`);
@@ -603,7 +657,7 @@ export async function runLeadVerification(
   const review = assembleReview(clientId, baseLeads, platformCounts, {
     source,
     warnings,
-    window: { since: windowStart, until: getNowIso() },
+    window: { since: windowStart, until: windowEnd ?? getNowIso() },
     model,
     provider,
   });

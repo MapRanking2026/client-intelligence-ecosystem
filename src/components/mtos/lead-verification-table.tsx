@@ -8,18 +8,22 @@ import {
   LEAD_CHANNEL_LABEL,
   LEAD_STATUS_LABEL,
   LEAD_TYPE_LABEL,
+  LEAD_WINDOW_LABEL,
 } from "@/src/lib/mtos-data";
 import type {
   LeadCategory,
   LeadChannel,
   LeadStatus,
   LeadVerificationReview,
+  LeadWindowInput,
+  LeadWindowPreset,
   VerifiedLead,
 } from "@/src/lib/mtos-data";
 import { LeadVerificationSummary } from "@/src/components/mtos/lead-verification-summary";
 
 const STATUS_OPTIONS = Object.keys(LEAD_STATUS_LABEL) as LeadStatus[];
 const CATEGORY_OPTIONS = Object.keys(LEAD_CATEGORY_LABEL) as LeadCategory[];
+const WINDOW_OPTIONS = Object.keys(LEAD_WINDOW_LABEL) as LeadWindowPreset[];
 const CHANNEL_OPTIONS = Object.keys(LEAD_CHANNEL_LABEL) as LeadChannel[];
 
 interface ActionResponse {
@@ -60,6 +64,19 @@ export function LeadVerificationTable({
   const [statusFilter, setStatusFilter] = useState<LeadStatus | "all">("all");
   const [showManual, setShowManual] = useState(false);
   const [showCompare, setShowCompare] = useState(false);
+  // Pull window — defaults to a rolling last 30 days for every refresh.
+  const [windowPreset, setWindowPreset] = useState<LeadWindowPreset>("last_30_days");
+  const [customSince, setCustomSince] = useState("");
+  const [customUntil, setCustomUntil] = useState("");
+
+  function buildWindow(): LeadWindowInput {
+    if (windowPreset === "custom") {
+      return { preset: "custom", since: customSince || undefined, until: customUntil || undefined };
+    }
+    return { preset: windowPreset };
+  }
+
+  const customIncomplete = windowPreset === "custom" && !customSince;
 
   function post(body: unknown, actionLabel: string) {
     startTransition(async () => {
@@ -99,10 +116,43 @@ export function LeadVerificationTable({
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-2">
+          <label className="inline-flex items-center gap-2 rounded-full border border-white/12 bg-white/4 px-3 py-2 text-xs text-slate-300">
+            <span className="uppercase tracking-[0.14em] text-slate-500">Period</span>
+            <select
+              value={windowPreset}
+              onChange={(event) => setWindowPreset(event.target.value as LeadWindowPreset)}
+              className="bg-transparent text-sm font-medium text-slate-100 outline-none [&>option]:bg-[#0b1524]"
+            >
+              {WINDOW_OPTIONS.map((preset) => (
+                <option key={preset} value={preset}>
+                  {LEAD_WINDOW_LABEL[preset]}
+                </option>
+              ))}
+            </select>
+          </label>
+          {windowPreset === "custom" ? (
+            <div className="inline-flex items-center gap-1.5 rounded-full border border-white/12 bg-white/4 px-3 py-1.5 text-xs text-slate-300">
+              <input
+                type="date"
+                value={customSince}
+                max={customUntil || undefined}
+                onChange={(event) => setCustomSince(event.target.value)}
+                className="bg-transparent text-sm text-slate-100 outline-none [color-scheme:dark]"
+              />
+              <span className="text-slate-500">→</span>
+              <input
+                type="date"
+                value={customUntil}
+                min={customSince || undefined}
+                onChange={(event) => setCustomUntil(event.target.value)}
+                className="bg-transparent text-sm text-slate-100 outline-none [color-scheme:dark]"
+              />
+            </div>
+          ) : null}
           <button
             type="button"
-            onClick={() => post({ action: "refresh" }, "refresh")}
-            disabled={isPending}
+            onClick={() => post({ action: "refresh", window: buildWindow() }, "refresh")}
+            disabled={isPending || customIncomplete}
             style={{ color: "#0d1625" }}
             className="inline-flex items-center gap-2 rounded-full border border-[#d7f5ec]/20 bg-[#d7f5ec] px-4 py-2 text-sm font-semibold text-[#0d1625] transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-60"
           >

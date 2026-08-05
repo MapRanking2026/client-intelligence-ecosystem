@@ -541,6 +541,31 @@ export interface LeadReconciliation {
   note?: string;
 }
 
+/** Time window to pull leads/calls for. Default is a rolling last 30 days. */
+export type LeadWindowPreset =
+  | "last_7_days"
+  | "last_30_days"
+  | "last_90_days"
+  | "this_month"
+  | "last_month"
+  | "custom";
+
+export const LEAD_WINDOW_LABEL: Record<LeadWindowPreset, string> = {
+  last_7_days: "Last 7 days",
+  last_30_days: "Last 30 days",
+  last_90_days: "Last 90 days",
+  this_month: "This month",
+  last_month: "Last month",
+  custom: "Custom range",
+};
+
+export interface LeadWindowInput {
+  preset: LeadWindowPreset;
+  /** For preset "custom": inclusive YYYY-MM-DD start / end. */
+  since?: string;
+  until?: string;
+}
+
 export interface LeadVerificationReview {
   status: "not_started" | "ready" | "error";
   clientId: string;

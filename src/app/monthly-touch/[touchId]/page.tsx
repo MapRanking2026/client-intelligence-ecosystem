@@ -1,8 +1,11 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
-import { CheckCircle2 } from "lucide-react";
+import type { ReactNode } from "react";
+import { ArrowLeft, Play, CheckCircle2, Sparkles } from "lucide-react";
 
 import { AppShell } from "@/src/components/mtos/app-shell";
+import { DataError } from "@/src/components/mtos/data-error";
+import { FiveQuestions, type QStep } from "@/src/components/mtos/five-questions";
 import { CallGuideActions } from "@/src/components/mtos/call-guide-actions";
 import { LeadVerificationSummary } from "@/src/components/mtos/lead-verification-summary";
 import { MonthlyTouchPrepActions } from "@/src/components/mtos/monthly-touch-prep-actions";
@@ -18,11 +21,49 @@ import {
   StrategicActionPanel,
 } from "@/src/components/mtos/prep-pack-sections";
 import { RecommendationCard } from "@/src/components/mtos/recommendation-card";
-import { ScorePill } from "@/src/components/mtos/score-pill";
-import { SectionCard } from "@/src/components/mtos/section-card";
 import { resolveTenantContext } from "@/src/lib/auth/resolve-tenant-context";
 import { getMonthlyTouchWorkspaceView } from "@/src/lib/server/services/monthly-touch-service";
-import { healthTone } from "@/src/lib/utils";
+
+function Section({
+  eyebrow,
+  title,
+  subtitle,
+  children,
+}: {
+  eyebrow: string;
+  title: string;
+  subtitle?: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className="card mt-4">
+      <div className="mb-4">
+        <div className="eyebrow muted">{eyebrow}</div>
+        <div className="h4 mt-1.5">{title}</div>
+        {subtitle ? <p className="muted mt-1 text-[0.82rem]">{subtitle}</p> : null}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function Bullets({ items, tone }: { items: string[]; tone: "good" | "risk" | "info" }) {
+  if (!items.length) return <p className="muted text-[0.86rem]">Nothing recorded yet.</p>;
+  return (
+    <div className="flex flex-col gap-2.5">
+      {items.map((it) => (
+        <div
+          key={it}
+          className="flex items-start gap-2.5 rounded-[10px] p-3 text-[0.88rem]"
+          style={{ background: "var(--surface-2)", border: "1px solid var(--hair)", color: "var(--text)" }}
+        >
+          <span className={`sig-dot ${tone === "info" ? "" : tone}`} style={{ marginTop: 6, background: tone === "info" ? "var(--info)" : undefined }} />
+          <span>{it}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 export default async function MonthlyTouchPage({
   params,
@@ -30,379 +71,233 @@ export default async function MonthlyTouchPage({
   params: Promise<{ touchId: string }>;
 }) {
   const { touchId } = await params;
-  const payload = await getMonthlyTouchWorkspaceView(await resolveTenantContext(), touchId);
-
-  if (!payload) {
-    notFound();
+  let payload: Awaited<ReturnType<typeof getMonthlyTouchWorkspaceView>>;
+  try {
+    payload = await getMonthlyTouchWorkspaceView(await resolveTenantContext(), touchId);
+  } catch {
+    return (
+      <AppShell>
+        <DataError title="Couldn't load this Monthly Touch" />
+      </AppShell>
+    );
   }
+  if (!payload) notFound();
 
   const { touch, client } = payload;
   const prepPack = touch.prepPack;
-  const readinessChecks = [
+
+  const steps: QStep[] = [
     {
-      label: "Client context compiled into a stored prep pack",
-      done: Boolean(prepPack),
+      n: 1,
+      title: "What happened?",
+      tone: "good",
+      summary: touch.wins.length ? `${touch.wins.length} measurable wins this period` : "Review the period's results",
+      content: (
+        <div>
+          <Bullets items={touch.wins} tone="good" />
+          {prepPack ? <p className="muted mt-3 text-[0.8rem]">Full business scorecard is below.</p> : null}
+        </div>
+      ),
     },
     {
-      label: "Historical commitments reviewed",
-      done: Boolean(prepPack?.openCommitments.length),
+      n: 2,
+      title: "What caused it?",
+      tone: "risk",
+      summary: touch.risks.length ? `${touch.risks.length} risks / drivers identified` : "Identify the drivers",
+      content: <Bullets items={touch.risks} tone="risk" />,
     },
     {
-      label: "Top growth opportunities reviewed",
-      done: Boolean(prepPack?.activeOpportunities.length),
+      n: 3,
+      title: "What does this mean?",
+      tone: "info",
+      summary: "Translate the numbers into business meaning",
+      content: (
+        <div className="flex flex-col gap-3">
+          {touch.executiveBrief.split("\n\n").map((p, i) => (
+            <p key={i} className="text-[0.9rem] leading-6" style={{ color: "var(--text)" }}>
+              {p}
+            </p>
+          ))}
+          {touch.talkingPoints.length ? (
+            <div>
+              <div className="eyebrow muted mb-2 mt-1">How to say it</div>
+              <Bullets items={touch.talkingPoints} tone="info" />
+            </div>
+          ) : null}
+        </div>
+      ),
     },
     {
-      label: "Connected integration evidence attached",
-      done: Boolean(prepPack?.integrationSources.length),
+      n: 4,
+      title: "What opportunities do we see?",
+      tone: "good",
+      summary: touch.opportunities.length ? `${touch.opportunities.length} opportunities to raise` : "Surface the next opportunities",
+      content: <Bullets items={touch.opportunities} tone="good" />,
     },
     {
-      label: "Google Calendar next-touch mapping detected",
-      done: Boolean(touch.scheduledAt || touch.calendarEventId),
-    },
-    {
-      label: "Claude recommendations generated",
-      done: prepPack?.claude.status === "generated",
+      n: 5,
+      title: "What are we doing next?",
+      tone: "good",
+      summary: "The committed plan and owners",
+      content: (
+        <div className="flex flex-col gap-4">
+          <Bullets items={touch.commitments} tone="info" />
+          {prepPack?.strategicAction?.nextSteps ? (
+            <div className="rounded-[10px] p-3" style={{ background: "var(--accent-soft)", color: "var(--accent-ink)" }}>
+              <div className="eyebrow" style={{ color: "var(--accent-ink)" }}>
+                Strategic next step
+              </div>
+              <p className="mt-1.5 text-[0.88rem]">{prepPack.strategicAction.nextSteps}</p>
+            </div>
+          ) : null}
+        </div>
+      ),
     },
   ];
 
-  const isOaklineTouch = touch.id === "touch-oakline-july";
-  const oaklineRingSurfaceStyle = isOaklineTouch
-    ? {
-        backgroundColor: "var(--tw-ring-offset-color)",
-      }
-    : undefined;
-  const oaklineSummaryButtonStyle = isOaklineTouch
-    ? {
-        backgroundColor: "var(--tw-ring-offset-color)",
-        borderWidth: "1px",
-        borderStyle: "solid",
-        borderColor: "var(--tw-ring-color)",
-        color: "#223554",
-      }
-    : undefined;
-
   return (
-    <AppShell
-      title={`${client.name} Monthly Touch`}
-      subtitle="Preparation, live support, and post-meeting execution live in a single operational environment so the Account Manager never has to reassemble context."
-    >
-      <div className="grid gap-6 xl:grid-cols-[1.3fr_minmax(0,0.9fr)]">
-        <SectionCard
-          eyebrow="Preparation"
-          title="Executive brief"
-          subtitle="Readable in under five minutes, evidence-backed, and directly tied to the client's growth and relationship health."
-          aside={
-            <div className="flex flex-wrap gap-2">
-              <ScorePill label="Readiness" value={touch.readinessScore} tone={healthTone(touch.readinessScore)} />
-              <ScorePill
-                label="Meeting confidence"
-                value={touch.confidenceScore}
-                tone={healthTone(touch.confidenceScore)}
-              />
-            </div>
-          }
-        >
-          <div className="rounded-[24px] border border-white/8 bg-black/20 p-5">
-            {touch.executiveBrief.split("\n\n").map((paragraph, index) => (
-              <p key={index} className="text-sm leading-7 text-slate-200 [&:not(:first-child)]:mt-4">
-                {paragraph}
-              </p>
-            ))}
-          </div>
-        </SectionCard>
+    <AppShell>
+      <Link
+        href={`/clients/${client.id}`}
+        className="mb-4 inline-flex items-center gap-2 text-[0.82rem]"
+        style={{ color: "var(--slate-400)" }}
+      >
+        <ArrowLeft style={{ width: 15, height: 15 }} />
+        Back to {client.name}
+      </Link>
 
-        <SectionCard
-          eyebrow="Readiness"
-          title={`${touch.status} status`}
-          subtitle="Preparation quality, source coverage, and Claude generation remain visible before the conversation begins."
-        >
-          <div className="space-y-3">
-            <MonthlyTouchPrepActions
-              touchId={touch.id}
-              preparedAt={prepPack?.preparedAt}
-              claudeStatus={prepPack?.claude.status}
-              claudeError={prepPack?.claude.errorMessage}
-              claudeProvider={prepPack?.claude.provider}
-            />
-            {readinessChecks.map((item) => (
-              <div key={item.label} className="flex items-center gap-3 rounded-2xl border border-white/8 bg-white/4 px-4 py-3">
-                <CheckCircle2 className={`h-4 w-4 ${item.done ? "text-emerald-300" : "text-slate-500"}`} />
-                <span className="text-sm text-slate-200">{item.label}</span>
-              </div>
-            ))}
+      {/* Header */}
+      <div className="card glow" style={{ padding: 24 }}>
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <div className="eyebrow">
+              <Play />
+              <span>Monthly Touch run-sheet</span>
+            </div>
+            <h2 className="h2 mt-3" style={{ fontSize: "var(--t-h3)" }}>
+              {client.name}
+            </h2>
+            <p className="muted mt-1.5 text-[0.86rem]">
+              The five strategic questions, pre-answered from the prep pack. Walk the client top to bottom.
+            </p>
           </div>
-        </SectionCard>
+          <div className="flex flex-col items-end gap-3">
+            <div className="flex flex-wrap gap-2">
+              <span className="chip">
+                Readiness <b style={{ color: "var(--text)" }}>{touch.readinessScore}</b>
+              </span>
+              <span className="chip">
+                Confidence <b style={{ color: "var(--text)" }}>{touch.confidenceScore}</b>
+              </span>
+              <span className={`chip ${touch.status === "Ready" ? "good" : "watch"}`}>{touch.status}</span>
+            </div>
+            <Link href={`/monthly-touch/${touch.id}/summary`} className="btn btn-primary btn-sm">
+              <CheckCircle2 style={{ width: 16, height: 16 }} />
+              Capture &amp; close out
+            </Link>
+          </div>
+        </div>
+        <div className="mt-4">
+          <MonthlyTouchPrepActions
+            touchId={touch.id}
+            preparedAt={prepPack?.preparedAt}
+            claudeStatus={prepPack?.claude.status}
+            claudeError={prepPack?.claude.errorMessage}
+            claudeProvider={prepPack?.claude.provider}
+          />
+        </div>
       </div>
 
-      {prepPack ? <DataGapsBanner gaps={prepPack.dataGaps} /> : null}
+      {prepPack ? (
+        <div className="mt-4">
+          <DataGapsBanner gaps={prepPack.dataGaps} />
+        </div>
+      ) : null}
 
+      {/* The five questions */}
+      <div className="mt-5">
+        <FiveQuestions steps={steps} />
+      </div>
+
+      {/* Supporting detail — real prep-pack panels (styled via the global compatibility layer) */}
+      <div>
       {touch.leadVerification ? (
-        <SectionCard
+        <Section
           eyebrow="Lead & call verification"
           title="Leads, calls & forms — vetted and reconciled"
-          subtitle="Auto-run during prep: each lead vetted as valid or flagged, attributed to a channel, and the counts reconciled against Google Ads and Google Business Profile. Open the full page to review lead-by-lead."
+          subtitle="Auto-run during prep: each lead vetted, attributed to a channel, and reconciled against Google Ads and GBP."
         >
           <LeadVerificationSummary review={touch.leadVerification} clientId={client.id} />
-        </SectionCard>
+        </Section>
       ) : null}
 
       {prepPack ? (
-        <SectionCard
-          eyebrow="Scorecard"
-          title="Business scorecard"
-          subtitle="Leads, calls, bookings, and visibility -- the business numbers, reviewed before the services."
-        >
+        <Section eyebrow="Scorecard" title="Business scorecard" subtitle="The business numbers, reviewed before the services.">
           <ScorecardGrid scorecard={prepPack.businessScorecard} />
-        </SectionCard>
+        </Section>
       ) : null}
 
       {prepPack ? (
-        <SectionCard
-          eyebrow="SEO & GBP"
-          title="Keyword heatmaps & profile performance"
-          subtitle="Pulled from the connected Rank Tracker and Google Business Profile syncs -- read Average Ranking, Map Pack %, and Market Share together, never Average Ranking alone."
-        >
+        <Section eyebrow="SEO & GBP" title="Keyword heatmaps & profile performance" subtitle="Read Average Ranking, Map Pack %, and Market Share together.">
           <SeoPerformancePanel seo={prepPack.seoPerformance} />
-        </SectionCard>
+        </Section>
       ) : null}
 
       {prepPack ? (
-        <SectionCard
-          eyebrow="Paid media"
-          title="Google Ads & Meta Ads"
-          subtitle="Only run this section of the call if the channel is active for this client."
-        >
+        <Section eyebrow="Paid media" title="Google Ads & Meta Ads" subtitle="Only run this section if the channel is active for this client.">
           <AdsPerformancePanel ads={prepPack.adsPerformance} />
-        </SectionCard>
+        </Section>
       ) : null}
 
       {prepPack ? (
-        <div className="grid gap-6 xl:grid-cols-2">
-          <SectionCard
-            eyebrow="Strategic action"
-            title="Agreed action & implementation %"
-            subtitle="The high-impact action from last cycle -- report what it produced and the next step."
-          >
+        <div className="mt-4 grid gap-4 xl:grid-cols-2">
+          <div className="card">
+            <div className="mb-4">
+              <div className="eyebrow muted">Strategic action</div>
+              <div className="h4 mt-1.5">Agreed action &amp; implementation %</div>
+            </div>
             <StrategicActionPanel action={prepPack.strategicAction} />
-          </SectionCard>
-
-          <SectionCard
-            eyebrow="Readiness"
-            title="Client participation"
-            subtitle="Confirm the basics before recommending advanced strategy."
-          >
+          </div>
+          <div className="card">
+            <div className="mb-4">
+              <div className="eyebrow muted">Readiness</div>
+              <div className="h4 mt-1.5">Client participation</div>
+            </div>
             <ParticipationChecklist participation={prepPack.clientParticipation} />
-          </SectionCard>
+          </div>
         </div>
       ) : null}
 
       {prepPack ? (
-        <SectionCard
-          eyebrow="Issues"
-          title="Issues, business impact & solutions"
-          subtitle="Every issue arrives with a proposed solution, an owner, and a date -- anticipate the client."
-        >
+        <Section eyebrow="Issues" title="Issues, business impact & solutions" subtitle="Every issue arrives with a proposed solution, an owner, and a date.">
           <IssuesSolutionsList items={prepPack.issuesAndSolutions} />
-        </SectionCard>
+        </Section>
       ) : null}
 
       {prepPack ? (
-        <div className="grid gap-6 xl:grid-cols-2">
-          <SectionCard
-            eyebrow="Lead quality"
-            title="Questions to ask live"
-            subtitle="Separate marketing performance from sales / operations."
-          >
+        <div className="mt-4 grid gap-4 xl:grid-cols-2">
+          <div className="card">
+            <div className="mb-4">
+              <div className="eyebrow muted">Lead quality</div>
+              <div className="h4 mt-1.5">Questions to ask live</div>
+            </div>
             <LeadQualityQuestionList questions={prepPack.leadQualityQuestions} />
-          </SectionCard>
-
-          <SectionCard
-            eyebrow="Recap"
-            title="Five-question close"
-            subtitle="Use this framework to close the meeting -- fill it in during the recap."
-          >
+          </div>
+          <div className="card">
+            <div className="mb-4">
+              <div className="eyebrow muted">Recap</div>
+              <div className="h4 mt-1.5">Five-question close</div>
+            </div>
             <RecapQuestionList questions={prepPack.recapQuestions} />
-          </SectionCard>
+          </div>
         </div>
       ) : null}
 
-      <SectionCard
-        eyebrow="Agenda"
-        title="Meeting structure"
-        subtitle="The platform drives clarity through a sequenced agenda so every Monthly Touch feels deliberate and evidence-backed."
-      >
-        <div className="space-y-3">
-          {touch.agenda.map((item, index) => (
-            <div key={item} className="flex gap-4 rounded-[24px] border border-white/8 bg-white/4 p-4">
-              <div
-                style={oaklineRingSurfaceStyle}
-                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white text-sm font-semibold text-slate-950"
-              >
-                {index + 1}
-              </div>
-              <div>
-                <p className="text-sm font-medium text-white">{item}</p>
-                <p className="mt-1 text-sm text-slate-400">
-                  Keep the conversation tied to evidence, action, and business value.
-                </p>
-              </div>
-            </div>
-          ))}
-        </div>
-      </SectionCard>
-
-      <SectionCard
-        eyebrow="Live meeting"
-        title="Live call guide"
-        subtitle="A timed, section-by-section guide generated from the prep pack -- built for the AM to follow live, with client prompts that keep the client engaged as a co-pilot rather than an audience."
-      >
+      <Section eyebrow="Live meeting" title="Live call guide" subtitle="A timed, section-by-section guide generated from the prep pack.">
         <CallGuideActions touchId={touch.id} callGuide={touch.callGuide} />
-      </SectionCard>
+      </Section>
 
-      <SectionCard
-        eyebrow="Prep pack"
-        title="Repeatable preparation bundle"
-        subtitle="This bundle turns upcoming Monthly Touches into a reusable operating package built from MTOS workflow data and the latest connected integration snapshots."
-      >
-        <div className="grid gap-6 xl:grid-cols-[0.95fr_1.05fr]">
-          <div className="space-y-4">
-            <div className="rounded-[24px] border border-white/8 bg-black/20 p-5">
-              <p className="text-[11px] uppercase tracking-[0.24em] text-slate-400">Focus areas</p>
-              <div className="mt-3 space-y-3">
-                {(prepPack?.focusAreas.length ? prepPack.focusAreas : ["Run the prep engine to generate the first preparation bundle."]).map((item) => (
-                  <div key={item} className="rounded-2xl border border-white/8 bg-white/4 px-4 py-3 text-sm text-slate-200">
-                    {item}
-                  </div>
-                ))}
-              </div>
-            </div>
-            <div className="rounded-[24px] border border-white/8 bg-black/20 p-5">
-              <p className="text-[11px] uppercase tracking-[0.24em] text-slate-400">Key facts</p>
-              <div className="mt-3 space-y-3">
-                {(prepPack?.keyFacts.length ? prepPack.keyFacts : ["No prepared facts are stored yet."]).map((item) => (
-                  <div key={item} className="rounded-2xl border border-white/8 bg-white/4 px-4 py-3 text-sm text-slate-200">
-                    {item}
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          <div className="space-y-4">
-            <div className="rounded-[24px] border border-white/8 bg-black/20 p-5">
-              <div className="flex items-center justify-between gap-3">
-                <p className="text-[11px] uppercase tracking-[0.24em] text-slate-400">Connected sources</p>
-                <p className="text-xs text-slate-500">
-                  {prepPack?.preparedAt ? `Prepared ${new Date(prepPack.preparedAt).toLocaleString("en-US")}` : "Not prepared"}
-                </p>
-              </div>
-              <div className="mt-3 space-y-3">
-                {prepPack?.integrationSources.length ? (
-                  prepPack.integrationSources.map((source) => (
-                    <div key={source.providerId} className="rounded-2xl border border-white/8 bg-white/4 p-4">
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <p className="text-sm font-semibold text-white">{source.label}</p>
-                          <p className="mt-1 text-sm text-slate-300">{source.summary}</p>
-                        </div>
-                        <p className="text-xs text-slate-500">{new Date(source.syncedAt).toLocaleString("en-US")}</p>
-                      </div>
-                      <div className="mt-3 space-y-2">
-                        {source.bullets.map((bullet) => (
-                          <div key={bullet} className="rounded-2xl border border-white/8 bg-black/20 px-3 py-2 text-sm text-slate-300">
-                            {bullet}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  ))
-                ) : (
-                  <div className="rounded-2xl border border-white/8 bg-white/4 px-4 py-3 text-sm text-slate-300">
-                    No integration snapshots are attached yet. Connect and sync providers, then refresh the prep pack.
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
-      </SectionCard>
-
-      <div className="grid gap-6 xl:grid-cols-[1fr_1fr_1.1fr]">
-        <SectionCard eyebrow="Wins" title="What to celebrate" subtitle="Wins without measurable value should not be surfaced.">
-          <div className="space-y-3">
-            {touch.wins.slice(0, 3).map((win) => (
-              <div key={win} className="rounded-2xl border border-emerald-400/10 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-100">
-                {win}
-              </div>
-            ))}
-            {touch.wins.length > 3 ? (
-              <details className="group rounded-2xl border border-white/8 bg-white/4 px-4 py-3">
-                <summary className="cursor-pointer text-xs uppercase tracking-[0.2em] text-slate-400 [&::-webkit-details-marker]:hidden">
-                  View all {touch.wins.length} wins
-                </summary>
-                <div className="mt-3 space-y-2">
-                  {touch.wins.slice(3).map((win) => (
-                    <div key={win} className="rounded-2xl border border-emerald-400/10 bg-emerald-500/5 px-4 py-3 text-sm text-emerald-100/90">
-                      {win}
-                    </div>
-                  ))}
-                </div>
-              </details>
-            ) : null}
-          </div>
-        </SectionCard>
-
-        <SectionCard eyebrow="Risks" title="What requires attention" subtitle="Risks stay visible and actionable.">
-          <div className="space-y-3">
-            {touch.risks.slice(0, 2).map((risk) => (
-              <div key={risk} className="rounded-2xl border border-rose-400/10 bg-rose-500/10 px-4 py-3 text-sm text-rose-100">
-                {risk}
-              </div>
-            ))}
-            {touch.risks.length > 2 ? (
-              <details className="group rounded-2xl border border-white/8 bg-white/4 px-4 py-3">
-                <summary className="cursor-pointer text-xs uppercase tracking-[0.2em] text-slate-400 [&::-webkit-details-marker]:hidden">
-                  View all {touch.risks.length} risks
-                </summary>
-                <div className="mt-3 space-y-2">
-                  {touch.risks.slice(2).map((risk) => (
-                    <div key={risk} className="rounded-2xl border border-rose-400/10 bg-rose-500/5 px-4 py-3 text-sm text-rose-100/90">
-                      {risk}
-                    </div>
-                  ))}
-                </div>
-              </details>
-            ) : null}
-          </div>
-        </SectionCard>
-
-        <SectionCard eyebrow="Action planning" title="Talking points and commitments" subtitle="Recommendations must create confident delivery and accountable follow-through.">
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <p className="text-[11px] uppercase tracking-[0.24em] text-slate-400">Talking points</p>
-              {touch.talkingPoints.map((point) => (
-                <div key={point} className="rounded-2xl border border-white/8 bg-white/4 px-4 py-3 text-sm text-slate-200">
-                  {point}
-                </div>
-              ))}
-            </div>
-            <div className="space-y-2">
-              <p className="text-[11px] uppercase tracking-[0.24em] text-slate-400">Commitments to confirm</p>
-              {touch.commitments.map((item) => (
-                <div key={item} className="rounded-2xl border border-white/8 bg-black/20 px-4 py-3 text-sm text-slate-200">
-                  {item}
-                </div>
-              ))}
-            </div>
-          </div>
-        </SectionCard>
-      </div>
-
-      <SectionCard
-        eyebrow="AI assistance"
-        title="Evidence-backed recommendations"
-        subtitle="AI supports preparation by showing what to say, why it matters, and what evidence supports the recommendation."
-      >
+      <Section eyebrow="AI assistance" title="Evidence-backed recommendations" subtitle="What to say, why it matters, and the evidence behind it.">
         {touch.aiRecommendations.length ? (
           <div className="grid gap-4 xl:grid-cols-2">
             {touch.aiRecommendations.map((item) => (
@@ -410,25 +305,21 @@ export default async function MonthlyTouchPage({
             ))}
           </div>
         ) : (
-          <div className="rounded-[24px] border border-white/8 bg-black/20 px-5 py-4 text-sm text-slate-300">
-            Run the preparation engine to generate deterministic recommendations, then use Claude to upgrade them with a sharper executive brief and meeting guidance.
-          </div>
+          <p className="muted text-[0.86rem]">Run the preparation engine to generate recommendations.</p>
         )}
-      </SectionCard>
+      </Section>
 
-      <SectionCard
-        eyebrow="Post-meeting"
-        title="Complete the follow-through workflow"
-        subtitle="Preparation should flow directly into summary, ownership, and execution once the meeting ends."
-      >
-        <Link
-          href={`/monthly-touch/${touch.id}/summary`}
-          style={oaklineSummaryButtonStyle}
-          className="inline-flex items-center gap-2 rounded-full border border-white/12 bg-white px-4 py-3 text-sm font-semibold text-[#0d1625] transition hover:bg-[#d7f5ec]"
-        >
-          Open post-meeting summary
-        </Link>
-      </SectionCard>
+      <Section eyebrow="Post-meeting" title="Complete the follow-through" subtitle="Flow directly into summary, ownership, and execution once the meeting ends.">
+        <div className="flex items-center gap-3">
+          <span className="insight-icon" style={{ background: "var(--accent-soft)", color: "var(--accent)" }}>
+            <Sparkles />
+          </span>
+          <Link href={`/monthly-touch/${touch.id}/summary`} className="btn btn-primary btn-sm">
+            Open post-meeting summary
+          </Link>
+        </div>
+      </Section>
+      </div>
     </AppShell>
   );
 }

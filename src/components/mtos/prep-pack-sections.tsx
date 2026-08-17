@@ -146,6 +146,9 @@ function deltaLabel(value: number | null, previousValue: number | null) {
   return `${diff > 0 ? "+" : ""}${diff} vs. prior period`;
 }
 
+/** Metrics where a decrease is the good outcome (cost, missed calls). */
+const METRIC_LOWER_IS_BETTER = (label: string) => /cost|missed/i.test(label);
+
 export function ScorecardGrid({ scorecard }: { scorecard: BusinessScorecard }) {
   const metrics = [
     scorecard.totalLeads,
@@ -162,25 +165,46 @@ export function ScorecardGrid({ scorecard }: { scorecard: BusinessScorecard }) {
 
   return (
     <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-      {metrics.map((item) => {
-        const delta = deltaLabel(item.value, item.previousValue);
+      {metrics.map((m) => {
+        const avail = m.availability === "available";
+        const hasDelta = m.value !== null && m.previousValue !== null && m.previousValue !== 0;
+        const diff = hasDelta ? (m.value as number) - (m.previousValue as number) : 0;
+        const pct = hasDelta ? Math.round((diff / Math.abs(m.previousValue as number)) * 100) : 0;
+        const good = diff === 0 ? null : METRIC_LOWER_IS_BETTER(m.label) ? diff < 0 : diff > 0;
+        const deltaColor = good === null ? "var(--slate-400)" : good ? "var(--good)" : "var(--risk)";
         return (
           <div
-            key={item.label}
-            className={`rounded-2xl border px-4 py-3 ${
-              item.availability === "available" ? "border-white/8 bg-white/4" : "border-white/8 bg-black/20"
-            }`}
+            key={m.label}
+            style={{
+              padding: 15,
+              borderRadius: "var(--r-lg)",
+              border: "1px solid var(--hair)",
+              background: avail ? "var(--surface-2)" : "var(--surface-3)",
+            }}
           >
-            <p className="text-[11px] uppercase tracking-[0.2em] text-slate-400">{item.label}</p>
-            <p
-              className={`mt-2 text-lg font-semibold ${
-                item.availability === "available" ? "text-white" : "text-slate-500"
-              }`}
-            >
-              {formatMetric(item)}
-            </p>
-            {delta ? <p className="mt-1 text-xs text-slate-400">{delta}</p> : null}
-            <p className="mt-1 text-[11px] text-slate-500">{item.source}</p>
+            <div className="stat-label" style={{ minHeight: 30 }}>
+              {m.label}
+            </div>
+            <div className="stat-val" style={{ fontSize: "1.5rem", marginTop: 8, color: avail ? "var(--text)" : "var(--slate-400)" }}>
+              {formatMetric(m)}
+            </div>
+            {hasDelta && diff !== 0 ? (
+              <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 5, fontSize: "0.78rem", fontWeight: 650, color: deltaColor }}>
+                <span>{diff > 0 ? "▲" : "▼"}</span>
+                <span>
+                  {pct > 0 ? "+" : ""}
+                  {pct}%
+                </span>
+                <span className="muted" style={{ fontWeight: 500, fontSize: "0.68rem" }}>vs prior</span>
+              </div>
+            ) : (
+              <div className="muted" style={{ marginTop: 8, fontSize: "0.72rem" }}>
+                {avail ? "No prior data" : "Not available"}
+              </div>
+            )}
+            <div className="muted" style={{ fontSize: "0.66rem", marginTop: 6 }}>
+              {m.source}
+            </div>
           </div>
         );
       })}

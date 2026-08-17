@@ -1,46 +1,108 @@
-import { AppShell } from "@/src/components/mtos/app-shell";
-import { SectionCard } from "@/src/components/mtos/section-card";
-import { getClients, getCommitments } from "@/src/lib/mtos-data";
+import Link from "next/link";
+import { BadgeCheck } from "lucide-react";
 
-export default function CommitmentsPage() {
-  const commitments = getCommitments();
-  const clientMap = new Map(getClients().map((client) => [client.id, client.name]));
+import { AppShell } from "@/src/components/mtos/app-shell";
+import { DataError } from "@/src/components/mtos/data-error";
+import { resolveTenantContext } from "@/src/lib/auth/resolve-tenant-context";
+import { getMtosDataSource } from "@/src/lib/server/data/seed-mtos-data-source";
+import type { ClientRecord, CommitmentRecord } from "@/src/lib/mtos-data";
+
+function statusTone(status: CommitmentRecord["status"]): "good" | "watch" | "risk" {
+  if (status === "Overdue") return "risk";
+  if (status === "Completed") return "good";
+  return "watch";
+}
+
+export default async function CommitmentsPage() {
+  const context = await resolveTenantContext();
+  let clients: ClientRecord[];
+  let commitments: CommitmentRecord[];
+  try {
+    const ds = getMtosDataSource(context);
+    [clients, commitments] = await Promise.all([ds.getClients(), ds.getCommitments()]);
+  } catch {
+    return (
+      <AppShell>
+        <DataError title="Couldn't load your commitments" />
+      </AppShell>
+    );
+  }
+
+  const clientMap = new Map(clients.map((c) => [c.id, c.name]));
+  const overdue = commitments.filter((c) => c.status === "Overdue").length;
+  const inProgress = commitments.filter((c) => c.status === "Open" || c.status === "In Progress").length;
+  const done = commitments.filter((c) => c.status === "Completed").length;
+
+  const summary = [
+    { label: "Overdue", value: overdue, tone: "risk" as const },
+    { label: "Open / in progress", value: inProgress, tone: "watch" as const },
+    { label: "Completed", value: done, tone: "good" as const },
+  ];
 
   return (
-    <AppShell
-      title="Commitment Workspace"
-      subtitle="Every promise remains visible until resolved, with clear ownership, due dates, and source-meeting context."
-    >
-      <SectionCard
-        eyebrow="Register"
-        title="Active commitments"
-        subtitle="This first slice establishes the structure for overdue work, ownership, and client-facing accountability."
-      >
-        <div className="overflow-hidden rounded-[28px] border border-white/8 bg-black/20">
-          <div className="grid grid-cols-[2.2fr_1.1fr_1fr_0.9fr_1.2fr] gap-4 border-b border-white/8 px-5 py-4 text-[11px] uppercase tracking-[0.24em] text-slate-400">
-            <span>Commitment</span>
-            <span>Client</span>
-            <span>Owner</span>
-            <span>Status</span>
-            <span>Due date</span>
+    <AppShell>
+      <div className="section-head" style={{ marginTop: 0 }}>
+        <div>
+          <div className="eyebrow muted">
+            <BadgeCheck />
+            <span>Promise tracker · nothing falls through</span>
           </div>
-          {commitments.map((commitment) => (
-            <div
-              key={commitment.id}
-              className="grid grid-cols-[2.2fr_1.1fr_1fr_0.9fr_1.2fr] gap-4 border-b border-white/6 px-5 py-4 text-sm text-slate-200 last:border-b-0"
-            >
-              <div>
-                <p className="font-medium text-white">{commitment.title}</p>
-                <p className="mt-1 text-xs text-slate-400">{commitment.sourceMeeting}</p>
-              </div>
-              <span>{clientMap.get(commitment.clientId)}</span>
-              <span>{commitment.owner}</span>
-              <span>{commitment.status}</span>
-              <span>{commitment.dueDate}</span>
-            </div>
-          ))}
+          <h2 className="h2 mt-2">Commitments</h2>
         </div>
-      </SectionCard>
+      </div>
+
+      <div className="mb-5 grid grid-cols-3 gap-4">
+        {summary.map((s) => (
+          <div key={s.label} className="card" style={{ padding: "16px 18px" }}>
+            <div className="flex items-center justify-between">
+              <span className="stat-label">{s.label}</span>
+              <span className={`sig-dot ${s.tone}`} />
+            </div>
+            <div className="stat-val mt-3" style={{ color: `var(--${s.tone})` }}>
+              {s.value}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="card" style={{ padding: 8 }}>
+        <div className="table-scroll">
+          <table className="tbl">
+            <thead>
+              <tr>
+                <th>Commitment</th>
+                <th>Client</th>
+                <th>Owner</th>
+                <th>Category</th>
+                <th>Due</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {commitments.map((c) => {
+                const tone = statusTone(c.status);
+                return (
+                  <tr key={c.id} className="row-link">
+                    <td style={{ maxWidth: 300 }}>
+                      <Link href={`/clients/${c.clientId}`} style={{ color: "var(--text)", fontWeight: 500 }}>
+                        {c.title}
+                      </Link>
+                      {c.sourceMeeting ? <div className="muted text-[0.72rem]">{c.sourceMeeting}</div> : null}
+                    </td>
+                    <td className="muted">{clientMap.get(c.clientId) ?? "—"}</td>
+                    <td className="muted">{c.owner}</td>
+                    <td className="muted">{c.category}</td>
+                    <td className="muted">{c.dueDate}</td>
+                    <td>
+                      <span className={`chip ${tone}`}>{c.status}</span>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
     </AppShell>
   );
 }

@@ -1,196 +1,316 @@
 import Link from "next/link";
-import { ArrowRight, CalendarClock, ShieldAlert, Sparkles, Target } from "lucide-react";
+import {
+  Sparkles,
+  ShieldAlert,
+  Target,
+  ArrowRight,
+  TrendingUp,
+  Clock,
+  BadgeCheck,
+  Users,
+} from "lucide-react";
 
 import { AppShell } from "@/src/components/mtos/app-shell";
-import { AiVisibilityCard } from "@/src/components/mtos/ai-visibility-card";
-import { ScorePill } from "@/src/components/mtos/score-pill";
-import { SectionCard } from "@/src/components/mtos/section-card";
+import { DataError } from "@/src/components/mtos/data-error";
 import { resolveTenantContext } from "@/src/lib/auth/resolve-tenant-context";
 import { getCommandCenterView } from "@/src/lib/server/services/command-center-service";
-import { healthTone } from "@/src/lib/utils";
+import type { ClientRecord, HealthTone } from "@/src/lib/mtos-data";
+
+const TONE_CLASS: Record<HealthTone, "good" | "watch" | "risk"> = {
+  excellent: "good",
+  healthy: "good",
+  needs_attention: "watch",
+  at_risk: "risk",
+  critical: "risk",
+};
+const TONE_LABEL: Record<HealthTone, string> = {
+  excellent: "Excellent",
+  healthy: "Healthy",
+  needs_attention: "Needs attention",
+  at_risk: "At risk",
+  critical: "Critical",
+};
+const SEVERITY: Record<HealthTone, number> = {
+  critical: 0,
+  at_risk: 1,
+  needs_attention: 2,
+  healthy: 3,
+  excellent: 4,
+};
+
+function initials(name: string) {
+  return name
+    .split(" ")
+    .slice(0, 2)
+    .map((w) => w[0])
+    .join("")
+    .toUpperCase();
+}
+
+function Gauge({ value, size = 78, stroke = 7 }: { value: number; size?: number; stroke?: number }) {
+  const r = (size - stroke) / 2;
+  const c = 2 * Math.PI * r;
+  const off = c * (1 - value / 100);
+  return (
+    <div className="gauge" style={{ width: size, height: size }}>
+      <svg width={size} height={size}>
+        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="var(--surface-3)" strokeWidth={stroke} />
+        <circle
+          cx={size / 2}
+          cy={size / 2}
+          r={r}
+          fill="none"
+          stroke="var(--accent)"
+          strokeWidth={stroke}
+          strokeLinecap="round"
+          strokeDasharray={c}
+          strokeDashoffset={off}
+        />
+      </svg>
+      <div className="gauge-val" style={{ fontSize: "1.15rem", fontWeight: 700, color: "var(--text)" }}>
+        {value}
+      </div>
+    </div>
+  );
+}
+
+function PriorityIcon({ tone }: { tone: "good" | "watch" | "risk" }) {
+  if (tone === "good") return <TrendingUp />;
+  if (tone === "watch") return <Clock />;
+  return <ShieldAlert />;
+}
 
 export default async function CommandCenterPage() {
-  const { snapshot, clients } = await getCommandCenterView(await resolveTenantContext());
+  let view: Awaited<ReturnType<typeof getCommandCenterView>>;
+  try {
+    view = await getCommandCenterView(await resolveTenantContext());
+  } catch {
+    return (
+      <AppShell>
+        <DataError title="Couldn't load your Command Center" />
+      </AppShell>
+    );
+  }
+  const { snapshot, clients, commitments } = view;
+
+  const needAttention = clients.filter((c) => SEVERITY[c.tone] <= 2);
+  const priority = [...clients].sort((a, b) => SEVERITY[a.tone] - SEVERITY[b.tone]).slice(0, 4);
+  const upcoming = [...clients]
+    .sort((a, b) => Date.parse(a.touchDate) - Date.parse(b.touchDate))
+    .slice(0, 4);
+  const openCommitments = commitments.filter((c) => c.status !== "Completed");
+  const overdue = commitments.filter((c) => c.status === "Overdue").length;
+  const avgGrowth = Math.round(
+    clients.reduce((sum, c) => sum + c.growthReadiness, 0) / Math.max(clients.length, 1),
+  );
+
+  const stats = [
+    { label: "Active clients", value: String(clients.length), sub: "in your book", icon: <Users /> },
+    {
+      label: "Need attention",
+      value: String(needAttention.length),
+      sub: "flagged today",
+      icon: <ShieldAlert />,
+      tone: "risk" as const,
+    },
+    {
+      label: "Open commitments",
+      value: String(openCommitments.length),
+      sub: `${overdue} overdue`,
+      icon: <BadgeCheck />,
+      tone: overdue > 0 ? ("risk" as const) : undefined,
+    },
+    { label: "Avg growth score", value: `${avgGrowth}`, sub: "portfolio", icon: <TrendingUp />, tone: "good" as const },
+  ];
 
   return (
-    <AppShell
-      title="Command Center"
-      subtitle="Start from the clearest operational picture: what changed, what matters, and what the Account Manager should do next for each Monthly Touch."
-    >
-      <div className="grid gap-6">
-        <SectionCard
-          eyebrow="Today"
-          title={snapshot.focusDate}
-          subtitle="The Command Center is intentionally selective. It surfaces the highest-impact priorities instead of every possible data point."
-          aside={
-            <div className="flex flex-wrap gap-2">
-              {snapshot.alerts.map((alert) => (
-                <ScorePill
-                  key={alert.label}
-                  label="Signal"
-                  value={alert.label}
-                  tone={
-                    alert.tone === "positive"
-                      ? "positive"
-                      : alert.tone === "warning"
-                        ? "warning"
-                        : "danger"
-                  }
-                />
-              ))}
-            </div>
-          }
-        >
-          <div className="space-y-6">
-            <div className="grid gap-4 lg:grid-cols-3">
-              {snapshot.priorities.map((priority, index) => (
-                <article
-                  key={priority}
-                  className="rounded-[24px] border border-white/8 bg-white/4 p-5"
-                >
-                  <div className="mb-4 flex items-center justify-between">
-                    <span className="rounded-full bg-white/8 px-3 py-1 text-[11px] uppercase tracking-[0.24em] text-slate-300">
-                      Priority {index + 1}
-                    </span>
-                    <Sparkles className="h-4 w-4 text-[#d7f5ec]" />
-                  </div>
-                  <p className="text-sm leading-7 text-slate-100">{priority}</p>
-                </article>
-              ))}
-            </div>
-
-            <section className="rounded-[24px] border border-white/8 bg-white/3 p-5">
-              <div className="border-b border-white/8 pb-4">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">
-                  Meeting readiness
-                </p>
-                <div className="mt-2 space-y-1">
-                  <h2 className="text-xl font-semibold tracking-tight text-white">
-                    Upcoming Monthly Touches
-                  </h2>
-                  <p className="max-w-2xl text-sm text-slate-400">
-                    The Account Manager should be able to judge readiness, relationship health, and
-                    next action from a single surface before each meeting.
-                  </p>
-                </div>
-              </div>
-
-              <div className="pt-5">
-                <div className="space-y-3">
-                  {clients.map((client) => (
-                    <Link
-                      key={client.id}
-                      href={`/monthly-touch/${client.touchId}`}
-                      className="flex flex-col gap-4 rounded-[24px] border border-white/8 bg-white/4 p-5 transition hover:border-white/16 hover:bg-white/6"
-                    >
-                      <div className="flex flex-wrap items-start justify-between gap-3">
-                        <div>
-                          <p className="text-lg font-semibold text-white">{client.name}</p>
-                          <p className="text-sm text-slate-400">
-                            {client.industry} · next touch {client.touchDate}
-                          </p>
-                        </div>
-                        <ScorePill
-                          label="Health"
-                          value={client.healthScore}
-                          tone={healthTone(client.healthScore)}
-                        />
-                      </div>
-                      <p className="text-sm leading-6 text-slate-300">{client.summary}</p>
-                      <div className="flex flex-wrap items-center gap-4 text-xs text-slate-400">
-                        <span className="inline-flex items-center gap-2">
-                          <CalendarClock className="h-4 w-4" />
-                          {client.commitmentsOpen} open commitments
-                        </span>
-                        <span className="inline-flex items-center gap-2">
-                          <ShieldAlert className="h-4 w-4" />
-                          {client.topRisks[0]}
-                        </span>
-                        <span className="inline-flex items-center gap-2">
-                          <Target className="h-4 w-4" />
-                          {client.topOpportunities[0]}
-                        </span>
-                      </div>
-                    </Link>
-                  ))}
-                </div>
-              </div>
-            </section>
+    <AppShell>
+      {/* Hero briefing */}
+      <section className="flex flex-wrap items-start justify-between gap-5">
+        <div className="max-w-2xl">
+          <div className="eyebrow">
+            <Sparkles />
+            <span>Daily Intelligence Briefing · {snapshot.focusDate}</span>
           </div>
-        </SectionCard>
+          <h1 className="h1 mt-3.5">
+            Good morning.
+            <br />
+            <span style={{ color: "var(--accent)" }}>
+              {needAttention.length} {needAttention.length === 1 ? "client needs" : "clients need"} your attention today.
+            </span>
+          </h1>
+          <p className="lead mt-3.5">
+            The system reviewed all {clients.length} accounts and ranked them by what moves your book. Start at the top:
+            each item is the client, what changed, and the next best action.
+          </p>
+        </div>
+        <div className="card glow" style={{ minWidth: 230, padding: "18px 20px" }}>
+          <div className="stat-label">Portfolio health</div>
+          <div className="mt-3 flex items-center gap-4">
+            <Gauge value={avgGrowth} />
+            <div>
+              <div className="text-[0.78rem]" style={{ color: "var(--slate-400)" }}>
+                Avg growth score
+              </div>
+              <div className="mt-2 flex items-center gap-2 text-[0.82rem]">
+                <span className="sig-dot risk" />
+                {needAttention.length} need attention
+              </div>
+              <div className="mt-1.5 flex items-center gap-2 text-[0.82rem]">
+                <span className="sig-dot good" />
+                {clients.length - needAttention.length} healthy
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* Stat strip */}
+      <div className="mt-7 grid grid-cols-2 gap-4 lg:grid-cols-4">
+        {stats.map((s) => (
+          <div key={s.label} className="card" style={{ padding: "16px 18px" }}>
+            <div className="flex items-center justify-between">
+              <div className="stat-label">{s.label}</div>
+              <span
+                className="grid h-8 w-8 place-items-center rounded-[9px]"
+                style={{
+                  background: s.tone ? `var(--${s.tone}-bg)` : "var(--surface-2)",
+                  color: s.tone ? `var(--${s.tone})` : "var(--accent)",
+                }}
+              >
+                {s.icon}
+              </span>
+            </div>
+            <div className="stat-val mt-3.5" style={s.tone ? { color: `var(--${s.tone})` } : undefined}>
+              {s.value}
+            </div>
+            <div className="muted mt-1.5 text-[0.76rem]">{s.sub}</div>
+          </div>
+        ))}
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-[1.1fr_1fr]">
-        <SectionCard
-          eyebrow="Client portfolio"
-          title="Relationship and growth overview"
-          subtitle="The portfolio layer keeps the Account Manager focused on confidence, retention, and real expansion readiness."
-        >
-          <div className="grid gap-4 md:grid-cols-3">
-            {clients.map((client) => (
-              <Link
-                key={client.id}
-                href={`/clients/${client.id}`}
-                className="min-w-0 rounded-[24px] border border-white/8 bg-black/15 p-5 transition hover:bg-black/25"
-              >
-                <p className="text-base font-semibold text-white">{client.name}</p>
-                <div className="mt-4 grid gap-1.5">
-                  <ScorePill
-                    label="Health"
-                    value={client.healthScore}
-                    tone={healthTone(client.healthScore)}
-                    className="flex w-full flex-col rounded-xl px-2.5 py-1.5"
-                    contentClassName="flex-col items-start gap-1"
-                    labelClassName="text-[10px] tracking-[0.18em]"
-                    valueClassName="text-xs"
-                  />
-                  <ScorePill
-                    label="Relationship"
-                    value={client.relationshipScore}
-                    tone={healthTone(client.relationshipScore)}
-                    className="flex w-full flex-col rounded-xl px-2.5 py-1.5"
-                    contentClassName="flex-col items-start gap-1"
-                    labelClassName="text-[10px] tracking-[0.18em]"
-                    valueClassName="text-xs"
-                  />
-                  <ScorePill
-                    label="Growth Readiness"
-                    value={client.growthReadiness}
-                    tone={healthTone(client.growthReadiness)}
-                    className="flex w-full flex-col rounded-xl px-2.5 py-1.5"
-                    contentClassName="flex-col items-start gap-1"
-                    labelClassName="text-[10px] tracking-[0.18em]"
-                    valueClassName="text-xs"
-                  />
-                </div>
-              </Link>
-            ))}
-          </div>
-        </SectionCard>
-
-        <SectionCard
-          eyebrow="Guiding principle"
-          title="The five-answer standard"
-          subtitle="Every workflow in MTOS is designed to help the Account Manager answer these questions before the Monthly Touch ends."
-        >
-          <div className="grid gap-3">
-            {[
-              "What happened?",
-              "Why did it happen?",
-              "What are we doing about it?",
-              "What should happen next?",
-              "How does this help the client grow?",
-            ].map((question) => (
-              <div
-                key={question}
-                className="flex items-center justify-between rounded-2xl border border-white/8 bg-white/4 px-4 py-4"
-              >
-                <span className="text-sm text-slate-100">{question}</span>
-                <ArrowRight className="h-4 w-4 text-slate-400" />
+      {/* Two columns */}
+      <div className="mt-4 grid items-start gap-4 lg:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
+        {/* Priority queue */}
+        <div>
+          <div className="section-head">
+            <div>
+              <div className="eyebrow muted">
+                <Target />
+                <span>What needs your attention</span>
               </div>
-            ))}
+              <div className="h3 mt-2">Priority queue</div>
+            </div>
           </div>
-        </SectionCard>
+          <div className="flex flex-col gap-3.5">
+            {priority.map((c: ClientRecord) => {
+              const tone = TONE_CLASS[c.tone];
+              return (
+                <div key={c.id} className={`insight ${tone}`}>
+                  <div className="insight-icon">
+                    <PriorityIcon tone={tone} />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="mb-2 flex flex-wrap items-center gap-2">
+                      <span className={`chip ${tone}`}>{TONE_LABEL[c.tone]}</span>
+                      <span className="muted text-[0.76rem]">
+                        {c.name} · {c.industry}
+                        {c.location ? ` · ${c.location}` : ""}
+                      </span>
+                    </div>
+                    <div className="h4" style={{ lineHeight: 1.35 }}>
+                      {c.summary}
+                    </div>
+                    {c.topRisks?.length ? (
+                      <div
+                        className="mt-3 rounded-[12px] p-3"
+                        style={{ background: "var(--surface-2)", border: "1px solid var(--hair)" }}
+                      >
+                        <div className="flex items-start gap-2">
+                          <span className="eyebrow muted shrink-0" style={{ marginTop: 2 }}>
+                            Top risks
+                          </span>
+                          <span className="text-[0.82rem]" style={{ color: "var(--text-2)" }}>
+                            {c.topRisks.join(" · ")}
+                          </span>
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                  <div className="flex shrink-0 flex-col items-end gap-2.5">
+                    <span className="muted whitespace-nowrap text-[0.74rem]">Touch {c.touchDate}</span>
+                    <Link href={`/clients/${c.id}`} className="btn btn-primary btn-sm">
+                      Review client
+                      <ArrowRight />
+                    </Link>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Right rail */}
+        <div className="flex flex-col gap-4">
+          <div className="card">
+            <div className="card-head">
+              <div className="card-title">This week&apos;s touches</div>
+              <span className="chip">{upcoming.length}</span>
+            </div>
+            {upcoming.map((c) => {
+              const tone = TONE_CLASS[c.tone];
+              return (
+                <Link
+                  key={c.id}
+                  href={`/clients/${c.id}`}
+                  className="list-row"
+                  style={{ padding: 12 }}
+                >
+                  <div className="av-sm" style={{ width: 34, height: 34, background: "var(--accent)" }}>
+                    {initials(c.name)}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="text-[0.86rem] font-semibold" style={{ color: "var(--text)" }}>
+                      {c.name}
+                    </div>
+                    <div className="muted text-[0.76rem]">
+                      {c.industry} · Touch {c.touchDate}
+                    </div>
+                  </div>
+                  <span className={`chip ${tone}`}>
+                    <span className={`sig-dot ${tone}`} />
+                    {TONE_LABEL[c.tone]}
+                  </span>
+                </Link>
+              );
+            })}
+          </div>
+
+          <div className="card">
+            <div className="card-head">
+              <div className="card-title">Promise tracker</div>
+              <Link href="/commitments" className={`chip ${overdue > 0 ? "risk" : ""}`}>
+                {overdue > 0 ? `${overdue} overdue` : "On track"}
+              </Link>
+            </div>
+            {openCommitments.slice(0, 5).map((c) => {
+              const tone = c.status === "Overdue" ? "risk" : "watch";
+              return (
+                <div key={c.id} className="border-t py-2.5" style={{ borderColor: "var(--hair)" }}>
+                  <div className="flex items-start justify-between gap-3">
+                    <span className="text-[0.84rem]" style={{ color: "var(--text)", maxWidth: "72%" }}>
+                      {c.title}
+                    </span>
+                    <span className={`chip ${tone}`} style={{ whiteSpace: "nowrap" }}>
+                      {c.status === "Overdue" ? "Overdue" : c.dueDate}
+                    </span>
+                  </div>
+                  <div className="muted mt-1.5 text-[0.72rem]">{c.owner}</div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
       </div>
     </AppShell>
   );

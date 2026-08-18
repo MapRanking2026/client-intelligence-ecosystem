@@ -3,6 +3,8 @@ import { ClipboardCheck } from "lucide-react";
 
 import { AppShell } from "@/src/components/mtos/app-shell";
 import { DataError } from "@/src/components/mtos/data-error";
+import { Linkified } from "@/src/components/mtos/annotate";
+import { ClientHint } from "@/src/components/mtos/client-hint";
 import { resolveTenantContext } from "@/src/lib/auth/resolve-tenant-context";
 import { getQaClientIndexView } from "@/src/lib/server/services/qa-service";
 
@@ -63,7 +65,7 @@ export default async function QaPage() {
           {cards.map((item) => {
             const rt = riskTone(item.retentionRisk);
             return (
-              <Link key={item.client.id} href={`/qa/${item.client.id}`} className="card is-hover">
+              <div key={item.client.id} className="card">
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex items-center gap-3">
                     <div className="av-sm" style={{ width: 42, height: 42, borderRadius: 12, fontSize: "0.9rem", background: "var(--accent)" }}>
@@ -71,7 +73,7 @@ export default async function QaPage() {
                     </div>
                     <div>
                       <div className="font-semibold" style={{ color: "var(--text)" }}>
-                        {item.client.name}
+                        <ClientHint client={item.client} />
                       </div>
                       <div className="muted text-[0.78rem]">{item.client.industry}</div>
                     </div>
@@ -90,10 +92,15 @@ export default async function QaPage() {
                 </div>
 
                 <p className="mt-4 text-[0.86rem] leading-6" style={{ color: "var(--text-2)" }}>
-                  {item.client.summary}
+                  <Linkified text={item.client.summary} clientId={item.client.id} />
                 </p>
-                <div className="muted mt-3 text-[0.76rem]">Latest touch · {item.latestTouchDate}</div>
-              </Link>
+                <div className="mt-3 flex items-center justify-between">
+                  <span className="muted text-[0.76rem]">Latest touch · {item.latestTouchDate}</span>
+                  <Link href={`/qa/${item.client.id}`} className="ilink text-[0.78rem]">
+                    View reviews →
+                  </Link>
+                </div>
+              </div>
             );
           })}
         </div>

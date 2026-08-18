@@ -1,3 +1,6 @@
+import Link from "next/link";
+
+import { Preview } from "@/src/components/mtos/preview";
 import type {
   AdsPerformancePack,
   BusinessScorecard,
@@ -11,6 +14,53 @@ import type {
   SeoPerformancePack,
   StrategicActionStatus,
 } from "@/src/lib/mtos-data";
+
+function formatValue(value: number | null, unit?: ScorecardMetric["unit"]) {
+  if (value === null) return "—";
+  if (unit === "currency") return `$${value.toLocaleString()}`;
+  if (unit === "percent") return `${value}%`;
+  return value.toLocaleString();
+}
+
+/** §9 — hover preview for a single scorecard metric (current / previous / change / source). */
+function MetricPreviewCard({ m, clientId }: { m: ScorecardMetric; clientId?: string }) {
+  const lowerBetter = /cost|missed/i.test(m.label);
+  const hasDelta = m.value !== null && m.previousValue !== null;
+  const diff = hasDelta ? (m.value as number) - (m.previousValue as number) : 0;
+  const pct = hasDelta && m.previousValue ? Math.round((diff / Math.abs(m.previousValue as number)) * 100) : 0;
+  const good = diff === 0 ? null : lowerBetter ? diff < 0 : diff > 0;
+  const color = good === null ? "var(--slate-400)" : good ? "var(--good)" : "var(--risk)";
+  return (
+    <span className="block" style={{ minWidth: 214 }}>
+      <span className="h4 block" style={{ fontSize: "0.9rem", marginBottom: 8 }}>
+        {m.label}
+      </span>
+      <span className="grid" style={{ gridTemplateColumns: "1fr 1fr", gap: 7, marginBottom: 8 }}>
+        <span className="hint-stat block">
+          <span className="muted block" style={{ fontSize: "0.62rem" }}>Current</span>
+          <span className="block" style={{ fontWeight: 700, color: "var(--text)" }}>{formatValue(m.value, m.unit)}</span>
+        </span>
+        <span className="hint-stat block">
+          <span className="muted block" style={{ fontSize: "0.62rem" }}>Previous</span>
+          <span className="block" style={{ fontWeight: 700, color: "var(--text)" }}>{formatValue(m.previousValue, m.unit)}</span>
+        </span>
+      </span>
+      {hasDelta && diff !== 0 ? (
+        <span className="block" style={{ fontSize: "0.78rem", fontWeight: 650, color, marginBottom: 8 }}>
+          {diff > 0 ? "▲" : "▼"} {pct > 0 ? "+" : ""}{pct}% vs prior period
+        </span>
+      ) : null}
+      <span className="muted block" style={{ fontSize: "0.7rem", marginBottom: clientId ? 8 : 0 }}>
+        Source: {m.source}
+      </span>
+      {clientId ? (
+        <Link href={`/clients/${clientId}?tab=performance`} className="ilink" style={{ fontSize: "0.76rem" }}>
+          View performance →
+        </Link>
+      ) : null}
+    </span>
+  );
+}
 
 function rankFill(rank: number | null) {
   if (rank === null) return "#475569";
@@ -149,7 +199,7 @@ function deltaLabel(value: number | null, previousValue: number | null) {
 /** Metrics where a decrease is the good outcome (cost, missed calls). */
 const METRIC_LOWER_IS_BETTER = (label: string) => /cost|missed/i.test(label);
 
-export function ScorecardGrid({ scorecard }: { scorecard: BusinessScorecard }) {
+export function ScorecardGrid({ scorecard, clientId }: { scorecard: BusinessScorecard; clientId?: string }) {
   const metrics = [
     scorecard.totalLeads,
     scorecard.qualifiedLeads,
@@ -185,8 +235,15 @@ export function ScorecardGrid({ scorecard }: { scorecard: BusinessScorecard }) {
             <div className="stat-label" style={{ minHeight: 30 }}>
               {m.label}
             </div>
-            <div className="stat-val" style={{ fontSize: "1.5rem", marginTop: 8, color: avail ? "var(--text)" : "var(--slate-400)" }}>
-              {formatMetric(m)}
+            <div style={{ marginTop: 8 }}>
+              <Preview content={<MetricPreviewCard m={m} clientId={clientId} />}>
+                <span
+                  className="stat-val"
+                  style={{ fontSize: "1.5rem", color: avail ? "var(--text)" : "var(--slate-400)", borderBottom: "1px dotted var(--hair-strong)", cursor: "help" }}
+                >
+                  {formatMetric(m)}
+                </span>
+              </Preview>
             </div>
             {hasDelta && diff !== 0 ? (
               <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 5, fontSize: "0.78rem", fontWeight: 650, color: deltaColor }}>

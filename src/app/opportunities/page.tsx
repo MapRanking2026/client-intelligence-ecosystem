@@ -1,8 +1,9 @@
-import Link from "next/link";
 import { BriefcaseBusiness, ArrowRight } from "lucide-react";
 
 import { AppShell } from "@/src/components/mtos/app-shell";
 import { DataError } from "@/src/components/mtos/data-error";
+import { Linkified } from "@/src/components/mtos/annotate";
+import { ClientHint } from "@/src/components/mtos/client-hint";
 import { resolveTenantContext } from "@/src/lib/auth/resolve-tenant-context";
 import { getMtosDataSource } from "@/src/lib/server/data/seed-mtos-data-source";
 import type { ClientRecord, OpportunityRecord } from "@/src/lib/mtos-data";
@@ -29,7 +30,7 @@ export default async function OpportunitiesPage() {
     );
   }
 
-  const clientMap = new Map(clients.map((c) => [c.id, c.name]));
+  const clientById = new Map(clients.map((c) => [c.id, c]));
 
   return (
     <AppShell>
@@ -61,28 +62,35 @@ export default async function OpportunitiesPage() {
                 </span>
               </div>
               <div className="flex flex-col gap-3">
-                {items.map((o) => (
-                  <Link key={o.id} href={`/clients/${o.clientId}`} className="card is-hover" style={{ padding: 18 }}>
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="muted text-[0.78rem]">{clientMap.get(o.clientId) ?? "—"}</span>
-                      {o.value ? (
-                        <span className="font-bold" style={{ color: "var(--accent)" }}>
-                          {o.value}
+                {items.map((o) => {
+                  const client = clientById.get(o.clientId);
+                  return (
+                    <div key={o.id} className="card" style={{ padding: 18 }}>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="muted text-[0.78rem]">
+                          {client ? <ClientHint client={client} /> : "—"}
                         </span>
+                        {o.value ? (
+                          <span className="font-bold" style={{ color: "var(--accent)" }}>
+                            {o.value}
+                          </span>
+                        ) : null}
+                      </div>
+                      <div className="h4 mt-2.5" style={{ fontSize: "0.98rem" }}>
+                        {o.title}
+                      </div>
+                      {o.readiness ? <div className="muted mt-1.5 text-[0.78rem]">Readiness · {o.readiness}</div> : null}
+                      {o.nextStep ? (
+                        <div className="mt-3 flex items-start gap-2 text-[0.82rem]" style={{ color: "var(--text-2)" }}>
+                          <ArrowRight style={{ width: 15, height: 15, marginTop: 2, color: "var(--accent)", flexShrink: 0 }} />
+                          <span>
+                            <Linkified text={o.nextStep} clientId={o.clientId} />
+                          </span>
+                        </div>
                       ) : null}
                     </div>
-                    <div className="h4 mt-2.5" style={{ fontSize: "0.98rem" }}>
-                      {o.title}
-                    </div>
-                    {o.readiness ? <div className="muted mt-1.5 text-[0.78rem]">Readiness · {o.readiness}</div> : null}
-                    {o.nextStep ? (
-                      <div className="mt-3 flex items-start gap-2 text-[0.82rem]" style={{ color: "var(--text-2)" }}>
-                        <ArrowRight style={{ width: 15, height: 15, marginTop: 2, color: "var(--accent)", flexShrink: 0 }} />
-                        <span>{o.nextStep}</span>
-                      </div>
-                    ) : null}
-                  </Link>
-                ))}
+                  );
+                })}
                 {items.length === 0 ? <p className="muted text-[0.8rem]">Nothing here yet.</p> : null}
               </div>
             </div>

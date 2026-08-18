@@ -5,6 +5,7 @@ import { ArrowLeft, Play, CheckCircle2, Sparkles } from "lucide-react";
 
 import { AppShell } from "@/src/components/mtos/app-shell";
 import { DataError } from "@/src/components/mtos/data-error";
+import { Linkified } from "@/src/components/mtos/annotate";
 import { FiveQuestions, type QStep } from "@/src/components/mtos/five-questions";
 import { CallGuideActions } from "@/src/components/mtos/call-guide-actions";
 import { LeadVerificationSummary } from "@/src/components/mtos/lead-verification-summary";
@@ -47,7 +48,7 @@ function Section({
   );
 }
 
-function Bullets({ items, tone }: { items: string[]; tone: "good" | "risk" | "info" }) {
+function Bullets({ items, tone, clientId }: { items: string[]; tone: "good" | "risk" | "info"; clientId?: string }) {
   if (!items.length) return <p className="muted text-[0.86rem]">Nothing recorded yet.</p>;
   return (
     <div className="flex flex-col gap-2.5">
@@ -58,7 +59,9 @@ function Bullets({ items, tone }: { items: string[]; tone: "good" | "risk" | "in
           style={{ background: "var(--surface-2)", border: "1px solid var(--hair)", color: "var(--text)" }}
         >
           <span className={`sig-dot ${tone === "info" ? "" : tone}`} style={{ marginTop: 6, background: tone === "info" ? "var(--info)" : undefined }} />
-          <span>{it}</span>
+          <span>
+            <Linkified text={it} clientId={clientId} />
+          </span>
         </div>
       ))}
     </div>
@@ -94,7 +97,7 @@ export default async function MonthlyTouchPage({
       summary: touch.wins.length ? `${touch.wins.length} measurable wins this period` : "Review the period's results",
       content: (
         <div>
-          <Bullets items={touch.wins} tone="good" />
+          <Bullets items={touch.wins} tone="good" clientId={client.id} />
           {prepPack ? <p className="muted mt-3 text-[0.8rem]">Full business scorecard is below.</p> : null}
         </div>
       ),
@@ -104,7 +107,7 @@ export default async function MonthlyTouchPage({
       title: "What caused it?",
       tone: "risk",
       summary: touch.risks.length ? `${touch.risks.length} risks / drivers identified` : "Identify the drivers",
-      content: <Bullets items={touch.risks} tone="risk" />,
+      content: <Bullets items={touch.risks} tone="risk" clientId={client.id} />,
     },
     {
       n: 3,
@@ -115,13 +118,13 @@ export default async function MonthlyTouchPage({
         <div className="flex flex-col gap-3">
           {touch.executiveBrief.split("\n\n").map((p, i) => (
             <p key={i} className="text-[0.9rem] leading-6" style={{ color: "var(--text)" }}>
-              {p}
+              <Linkified text={p} clientId={client.id} />
             </p>
           ))}
           {touch.talkingPoints.length ? (
             <div>
               <div className="eyebrow muted mb-2 mt-1">How to say it</div>
-              <Bullets items={touch.talkingPoints} tone="info" />
+              <Bullets items={touch.talkingPoints} tone="info" clientId={client.id} />
             </div>
           ) : null}
         </div>
@@ -132,7 +135,7 @@ export default async function MonthlyTouchPage({
       title: "What opportunities do we see?",
       tone: "good",
       summary: touch.opportunities.length ? `${touch.opportunities.length} opportunities to raise` : "Surface the next opportunities",
-      content: <Bullets items={touch.opportunities} tone="good" />,
+      content: <Bullets items={touch.opportunities} tone="good" clientId={client.id} />,
     },
     {
       n: 5,
@@ -141,7 +144,7 @@ export default async function MonthlyTouchPage({
       summary: "The committed plan and owners",
       content: (
         <div className="flex flex-col gap-4">
-          <Bullets items={touch.commitments} tone="info" />
+          <Bullets items={touch.commitments} tone="info" clientId={client.id} />
           {prepPack?.strategicAction?.nextSteps ? (
             <div className="rounded-[10px] p-3" style={{ background: "var(--accent-soft)", color: "var(--accent-ink)" }}>
               <div className="eyebrow" style={{ color: "var(--accent-ink)" }}>
@@ -233,7 +236,7 @@ export default async function MonthlyTouchPage({
 
       {prepPack ? (
         <Section eyebrow="Scorecard" title="Business scorecard" subtitle="The business numbers, reviewed before the services.">
-          <ScorecardGrid scorecard={prepPack.businessScorecard} />
+          <ScorecardGrid scorecard={prepPack.businessScorecard} clientId={client.id} />
         </Section>
       ) : null}
 

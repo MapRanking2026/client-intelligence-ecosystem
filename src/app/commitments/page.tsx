@@ -3,6 +3,7 @@ import { BadgeCheck } from "lucide-react";
 
 import { AppShell } from "@/src/components/mtos/app-shell";
 import { DataError } from "@/src/components/mtos/data-error";
+import { ClientHint } from "@/src/components/mtos/client-hint";
 import { resolveTenantContext } from "@/src/lib/auth/resolve-tenant-context";
 import { getMtosDataSource } from "@/src/lib/server/data/seed-mtos-data-source";
 import type { ClientRecord, CommitmentRecord } from "@/src/lib/mtos-data";
@@ -28,7 +29,7 @@ export default async function CommitmentsPage() {
     );
   }
 
-  const clientMap = new Map(clients.map((c) => [c.id, c.name]));
+  const clientById = new Map(clients.map((c) => [c.id, c]));
   const overdue = commitments.filter((c) => c.status === "Overdue").length;
   const inProgress = commitments.filter((c) => c.status === "Open" || c.status === "In Progress").length;
   const done = commitments.filter((c) => c.status === "Completed").length;
@@ -81,6 +82,7 @@ export default async function CommitmentsPage() {
             <tbody>
               {commitments.map((c) => {
                 const tone = statusTone(c.status);
+                const cl = clientById.get(c.clientId);
                 return (
                   <tr key={c.id} className="row-link">
                     <td style={{ maxWidth: 300 }}>
@@ -89,7 +91,7 @@ export default async function CommitmentsPage() {
                       </Link>
                       {c.sourceMeeting ? <div className="muted text-[0.72rem]">{c.sourceMeeting}</div> : null}
                     </td>
-                    <td className="muted">{clientMap.get(c.clientId) ?? "—"}</td>
+                    <td>{cl ? <ClientHint client={cl} /> : <span className="muted">—</span>}</td>
                     <td className="muted">{c.owner}</td>
                     <td className="muted">{c.category}</td>
                     <td className="muted">{c.dueDate}</td>

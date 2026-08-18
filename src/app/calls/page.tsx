@@ -1,8 +1,10 @@
 import Link from "next/link";
-import { Phone, ArrowRight, Sparkles, ShieldAlert, PhoneMissed, BadgeCheck } from "lucide-react";
+import { Phone, ArrowRight, Sparkles, ShieldAlert, BadgeCheck } from "lucide-react";
 
 import { AppShell } from "@/src/components/mtos/app-shell";
 import { LeadVerificationQuickActions } from "@/src/components/mtos/lead-verification-quick-actions";
+import { Callout, Hl } from "@/src/components/mtos/annotate";
+import { ClientHint } from "@/src/components/mtos/client-hint";
 import { resolveTenantContext } from "@/src/lib/auth/resolve-tenant-context";
 import { getClientsDirectoryView } from "@/src/lib/server/services/clients-service";
 import { getStoredLeadVerification } from "@/src/lib/server/services/lead-verification-service";
@@ -126,17 +128,18 @@ function Analytics({ review }: { review: LeadVerificationReview }) {
       </div>
 
       {review.totals.missedCalls > 0 ? (
-        <div className="insight risk mt-4" style={{ gridTemplateColumns: "auto 1fr" }}>
-          <div className="insight-icon">
-            <PhoneMissed />
-          </div>
-          <div>
-            <div className="h4">{review.totals.missedCalls} missed calls in this window</div>
-            <p className="muted mt-1.5 text-[0.85rem]">
-              Every missed call is a lead that rang through but wasn&apos;t answered. Listen to the recordings below and
-              recover the ones that matter — this is where revenue leaks.
-            </p>
-          </div>
+        <div className="mt-4">
+          <Callout
+            tone="critical"
+            title={
+              <>
+                <Hl tone="critical">{review.totals.missedCalls} missed calls</Hl> in this window
+              </>
+            }
+          >
+            Every missed call is a lead that rang through but wasn&apos;t answered. Listen to the recordings below and
+            recover the ones that matter — <Hl tone="critical">this is where revenue leaks</Hl>.
+          </Callout>
         </div>
       ) : null}
     </>
@@ -214,7 +217,9 @@ export default async function CallIntelligencePage({
               <div className="av-sm" style={{ width: 38, height: 38, borderRadius: 11, background: "var(--accent)" }}>
                 {initials(selected.name)}
               </div>
-              <div className="h3">{selected.name}</div>
+              <div className="h3">
+                <ClientHint client={selected} />
+              </div>
             </div>
             {review?.generatedAt ? (
               <span className="chip good">

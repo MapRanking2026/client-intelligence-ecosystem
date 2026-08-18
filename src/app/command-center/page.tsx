@@ -12,6 +12,8 @@ import {
 
 import { AppShell } from "@/src/components/mtos/app-shell";
 import { DataError } from "@/src/components/mtos/data-error";
+import { Linkified, Callout } from "@/src/components/mtos/annotate";
+import { ClientHint } from "@/src/components/mtos/client-hint";
 import { resolveTenantContext } from "@/src/lib/auth/resolve-tenant-context";
 import { getCommandCenterView } from "@/src/lib/server/services/command-center-service";
 import type { ClientRecord, HealthTone } from "@/src/lib/mtos-data";
@@ -214,26 +216,21 @@ export default async function CommandCenterPage() {
                     <div className="mb-2 flex flex-wrap items-center gap-2">
                       <span className={`chip ${tone}`}>{TONE_LABEL[c.tone]}</span>
                       <span className="muted text-[0.76rem]">
-                        {c.name} · {c.industry}
+                        <ClientHint client={c} /> · {c.industry}
                         {c.location ? ` · ${c.location}` : ""}
                       </span>
                     </div>
                     <div className="h4" style={{ lineHeight: 1.35 }}>
-                      {c.summary}
+                      <Linkified text={c.summary} clients={clients} clientId={c.id} />
                     </div>
                     {c.topRisks?.length ? (
-                      <div
-                        className="mt-3 rounded-[12px] p-3"
-                        style={{ background: "var(--surface-2)", border: "1px solid var(--hair)" }}
-                      >
-                        <div className="flex items-start gap-2">
-                          <span className="eyebrow muted shrink-0" style={{ marginTop: 2 }}>
-                            Top risks
-                          </span>
-                          <span className="text-[0.82rem]" style={{ color: "var(--text-2)" }}>
-                            {c.topRisks.join(" · ")}
-                          </span>
-                        </div>
+                      <div className="mt-3">
+                        <Callout
+                          tone={tone === "risk" ? "critical" : tone === "watch" ? "important" : "info"}
+                          title="Top risks"
+                        >
+                          <Linkified text={c.topRisks.join(" · ")} clients={clients} clientId={c.id} />
+                        </Callout>
                       </div>
                     ) : null}
                   </div>

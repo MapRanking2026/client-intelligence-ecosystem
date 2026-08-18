@@ -30,6 +30,11 @@ export default function RootLayout({
       suppressHydrationWarning
     >
       <body className="min-h-full" suppressHydrationWarning>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `(function(){try{var q=new URLSearchParams(location.search);var t=q.get('theme')||localStorage.getItem('mtos-theme');if(t==='dark'||t==='light')document.documentElement.setAttribute('data-theme',t);if((q.get('anno')||localStorage.getItem('mtos-annotations'))==='on')document.documentElement.setAttribute('data-annotations','on');if(q.get('hints')==='preview')document.documentElement.setAttribute('data-hints','preview');}catch(e){}})();`,
+          }}
+        />
         {children}
       </body>
     </html>

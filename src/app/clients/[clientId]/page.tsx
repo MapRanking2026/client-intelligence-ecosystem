@@ -15,6 +15,7 @@ import { AppShell } from "@/src/components/mtos/app-shell";
 import { DataError } from "@/src/components/mtos/data-error";
 import { ClientTabs } from "@/src/components/mtos/client-tabs";
 import { ClientAttachments } from "@/src/components/mtos/client-attachments";
+import { Linkified, Callout } from "@/src/components/mtos/annotate";
 import { countClientAttachments } from "@/src/lib/server/services/client-attachments-service";
 import { ClientProfileMappings } from "@/src/components/mtos/client-profile-mappings";
 import { LeadVerificationQuickActions } from "@/src/components/mtos/lead-verification-quick-actions";
@@ -129,7 +130,7 @@ export default async function ClientWorkspacePage({
       <div className="card">
         <div className="card-title">Who they are</div>
         <p className="lead mt-3.5" style={{ fontSize: "1rem" }}>
-          {client.summary}
+          <Linkified text={client.summary} clientId={client.id} />
         </p>
         <div className="hr" />
         <div className="grid gap-4 sm:grid-cols-2">
@@ -176,12 +177,9 @@ export default async function ClientWorkspacePage({
             </Link>
           </div>
         ) : null}
-        <div className="card">
-          <div className="card-title">Next best action</div>
-          <p className="mt-3 text-[0.9rem] leading-6" style={{ color: "var(--text)" }}>
-            {client.nextBestAction}
-          </p>
-        </div>
+        <Callout tone="info" title="Next best action">
+          <Linkified text={client.nextBestAction} clientId={client.id} />
+        </Callout>
       </div>
     </div>
   );
@@ -203,7 +201,7 @@ export default async function ClientWorkspacePage({
                   <ShieldAlert />
                 </div>
                 <div className="text-[0.92rem]" style={{ color: "var(--text)", fontWeight: 600 }}>
-                  {r}
+                  <Linkified text={r} clientId={client.id} />
                 </div>
               </div>
             ))}
@@ -226,7 +224,7 @@ export default async function ClientWorkspacePage({
                   <TrendingUp />
                 </div>
                 <div className="text-[0.92rem]" style={{ color: "var(--text)", fontWeight: 600 }}>
-                  {o}
+                  <Linkified text={o} clientId={client.id} />
                 </div>
               </div>
             ))}
@@ -252,7 +250,9 @@ export default async function ClientWorkspacePage({
                 <div className="muted mt-1.5 text-[0.8rem]">Readiness {o.readiness}</div>
                 <div className="mt-3 flex items-start gap-2 text-[0.84rem]" style={{ color: "var(--text-2)" }}>
                   <ArrowRight style={{ width: 15, height: 15, marginTop: 2, color: "var(--accent)" }} />
-                  {o.nextStep}
+                  <span>
+                    <Linkified text={o.nextStep} clientId={client.id} />
+                  </span>
                 </div>
               </div>
             ))}
@@ -281,13 +281,13 @@ export default async function ClientWorkspacePage({
             <div>
               <div className="eyebrow muted">Results so far</div>
               <p className="mt-2 text-[0.88rem]" style={{ color: "var(--text-2)" }}>
-                {client.strategicAction.resultsSoFar}
+                <Linkified text={client.strategicAction.resultsSoFar} clientId={client.id} />
               </p>
             </div>
             <div>
               <div className="eyebrow muted">Next steps</div>
               <p className="mt-2 text-[0.88rem]" style={{ color: "var(--text-2)" }}>
-                {client.strategicAction.nextSteps}
+                <Linkified text={client.strategicAction.nextSteps} clientId={client.id} />
               </p>
             </div>
           </div>
@@ -296,7 +296,7 @@ export default async function ClientWorkspacePage({
       <div className="card">
         <div className="card-title">Next best action</div>
         <p className="mt-3 text-[0.92rem] leading-6" style={{ color: "var(--text)" }}>
-          {client.nextBestAction}
+          <Linkified text={client.nextBestAction} clientId={client.id} />
         </p>
       </div>
     </div>
@@ -369,7 +369,7 @@ export default async function ClientWorkspacePage({
     <div className="flex flex-col gap-4">
       <div className="card">
         <div className="card-title mb-4">Business scorecard</div>
-        <ScorecardGrid scorecard={prep.businessScorecard} />
+        <ScorecardGrid scorecard={prep.businessScorecard} clientId={client.id} />
       </div>
       <div className="card">
         <div className="card-title mb-4">SEO &amp; Google Business Profile</div>

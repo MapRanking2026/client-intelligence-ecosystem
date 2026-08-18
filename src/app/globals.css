@@ -357,3 +357,89 @@ a { color: inherit; text-decoration: none; }
 /* Tighten the old oversized radii to the new scale */
 [class*="rounded-[20px]"], [class*="rounded-[22px]"], [class*="rounded-[24px]"],
 [class*="rounded-[26px]"], [class*="rounded-[28px]"] { border-radius: var(--r-lg) !important; }
+
+/* ============================================================================
+   ANNOTATION SYSTEM — semantic, theme-aware tokens + primitives.
+   Native extension of the MTOS palette. Inline highlights toggle with the
+   Annotations control; structural callouts/badges are always present.
+   ============================================================================ */
+:root {
+  --annotation-critical-bg: #FDECEC;  --annotation-critical-border: #EF5B5B; --annotation-critical-text: #B4232F;
+  --annotation-important-bg: #FFF5DF;  --annotation-important-border: #E9A23B; --annotation-important-text: #8A5A12;
+  --annotation-positive-bg: #E8F7F1;   --annotation-positive-border: #21A67A;  --annotation-positive-text: #137052;
+  --annotation-info-bg: #EAF5F7;       --annotation-info-border: #2799A3;      --annotation-info-text: #176A73;
+  --annotation-reference-bg: #F2F0FA;  --annotation-reference-border: #8075B7; --annotation-reference-text: #5D548C;
+}
+:root[data-theme="dark"] {
+  --annotation-critical-bg: #3A2228;   --annotation-critical-border: #F06A72; --annotation-critical-text: #FFD9DC;
+  --annotation-important-bg: #382F1F;  --annotation-important-border: #E9AD55; --annotation-important-text: #FFE8B5;
+  --annotation-positive-bg: #17362E;   --annotation-positive-border: #42C99A;  --annotation-positive-text: #C9F5E4;
+  --annotation-info-bg: #17343A;       --annotation-info-border: #43B5BC;      --annotation-info-text: #D0F2F3;
+  --annotation-reference-bg: #29283D;  --annotation-reference-border: #9990D0; --annotation-reference-text: #E5E1FF;
+}
+
+/* Level 1 — inline highlight. Bold always (accessible emphasis via weight);
+   the semantic tint appears only when Annotations are ON. */
+.hl { font-weight: 620; }
+[data-annotations="on"] .hl { border-radius: 4px; padding: 0.5px 4px; box-shadow: inset 2px 0 0 var(--_ab, transparent); }
+[data-annotations="on"] .hl.critical  { background: var(--annotation-critical-bg);  color: var(--annotation-critical-text);  --_ab: var(--annotation-critical-border); }
+[data-annotations="on"] .hl.important { background: var(--annotation-important-bg); color: var(--annotation-important-text); --_ab: var(--annotation-important-border); }
+[data-annotations="on"] .hl.positive  { background: var(--annotation-positive-bg);  color: var(--annotation-positive-text);  --_ab: var(--annotation-positive-border); }
+[data-annotations="on"] .hl.info       { background: var(--annotation-info-bg);       color: var(--annotation-info-text);       --_ab: var(--annotation-info-border); }
+[data-annotations="on"] .hl.reference  { background: var(--annotation-reference-bg);  color: var(--annotation-reference-text);  --_ab: var(--annotation-reference-border); }
+
+/* Level 3 — annotated callout. Structural (always visible); left border + icon
+   pick up the semantic color only when Annotations are ON, so OFF reads neutral. */
+.callout { display: grid; grid-template-columns: auto 1fr; gap: 12px; padding: 13px 15px; border-radius: var(--r-md); border: 1px solid var(--hair); background: var(--surface-2); position: relative; overflow: hidden; }
+.callout::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--hair-strong); }
+.callout-ic { width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center; flex-shrink: 0; background: var(--surface-3); color: var(--slate-400); }
+.callout-ic svg { width: 16px; height: 16px; }
+.callout-title { font-weight: 700; font-size: 0.8rem; color: var(--text); display: inline-flex; align-items: center; gap: 6px; }
+.callout-body { font-size: 0.85rem; color: var(--text-2); margin-top: 3px; line-height: 1.55; }
+[data-annotations="on"] .callout.critical::before  { background: var(--annotation-critical-border); }
+[data-annotations="on"] .callout.important::before { background: var(--annotation-important-border); }
+[data-annotations="on"] .callout.positive::before  { background: var(--annotation-positive-border); }
+[data-annotations="on"] .callout.info::before      { background: var(--annotation-info-border); }
+[data-annotations="on"] .callout.reference::before { background: var(--annotation-reference-border); }
+[data-annotations="on"] .callout.critical  .callout-ic { background: var(--annotation-critical-bg);  color: var(--annotation-critical-border); }
+[data-annotations="on"] .callout.important .callout-ic { background: var(--annotation-important-bg); color: var(--annotation-important-border); }
+[data-annotations="on"] .callout.positive  .callout-ic { background: var(--annotation-positive-bg);  color: var(--annotation-positive-border); }
+[data-annotations="on"] .callout.info      .callout-ic { background: var(--annotation-info-bg);      color: var(--annotation-info-border); }
+[data-annotations="on"] .callout.reference .callout-ic { background: var(--annotation-reference-bg); color: var(--annotation-reference-border); }
+
+/* Quick-reference / Cornell strip — structural, always visible */
+.quick-ref { border: 1px solid var(--hair); border-radius: var(--r-md); background: var(--surface-2); padding: 13px 15px; }
+.quick-ref-label { font-size: 0.64rem; letter-spacing: 0.1em; text-transform: uppercase; font-weight: 700; color: var(--slate-400); }
+
+/* Internal content links — teal, with a clear (non-color-only) affordance */
+.ilink { color: var(--accent); font-weight: 550; text-decoration: none; border-bottom: 1px dashed color-mix(in srgb, var(--accent) 45%, transparent); cursor: pointer; transition: border-color var(--dur) var(--ease), background var(--dur) var(--ease); border-radius: 2px; }
+.ilink:hover { border-bottom-style: solid; background: var(--accent-soft); }
+
+/* Destination highlight when navigated to via an internal link */
+@keyframes anno-flash { 0% { box-shadow: 0 0 0 3px var(--accent-soft); } 100% { box-shadow: 0 0 0 3px transparent; } }
+.anno-target { animation: anno-flash 1.8s var(--ease-out); border-radius: var(--r-md); }
+
+/* Nav control: active (toggled-on) state for icon buttons */
+.icon-btn.on, .theme-toggle.on { background: var(--accent-soft); color: var(--accent); border-color: color-mix(in srgb, var(--accent) 30%, transparent); }
+
+/* Notifications bell */
+.bell-wrap { position: relative; }
+.bell-dot { position: absolute; top: 6px; right: 7px; width: 8px; height: 8px; border-radius: 50%; background: var(--risk); box-shadow: 0 0 0 2px var(--bg); }
+.bell-dot::after { content: ""; position: absolute; inset: -1px; border-radius: 50%; background: var(--risk); opacity: 0.55; animation: bell-ping 1.8s cubic-bezier(0,0,0.2,1) infinite; }
+@keyframes bell-ping { 70%, 100% { transform: scale(2.4); opacity: 0; } }
+.bell-ring { animation: bell-swing 0.9s var(--ease); transform-origin: top center; }
+@keyframes bell-swing { 0%,100% { transform: rotate(0); } 15% { transform: rotate(14deg); } 35% { transform: rotate(-11deg); } 55% { transform: rotate(7deg); } 75% { transform: rotate(-4deg); } }
+.notif-panel { position: absolute; top: 46px; right: 0; width: min(340px, 86vw); background: var(--surface); border: 1px solid var(--hair); border-radius: var(--r-lg); box-shadow: var(--sh-lg); z-index: 50; overflow: hidden; }
+.notif-item { display: flex; gap: 11px; padding: 12px 14px; border-top: 1px solid var(--hair); }
+.notif-item:hover { background: var(--surface-2); }
+
+/* §9 — contextual hover preview (used selectively on key references) */
+.hint-wrap { position: relative; }
+.hint-pop { position: absolute; bottom: calc(100% + 8px); left: 0; width: max-content; max-width: 290px; background: var(--surface); border: 1px solid var(--hair); border-radius: var(--r-md); box-shadow: var(--sh-lg); padding: 13px 14px; z-index: 60; display: none; white-space: normal; font-weight: 400; }
+.hint-pop.on { display: block; animation: hint-in 0.14s var(--ease-out); }
+[data-hints="preview"] .hint-pop { display: block; }
+@keyframes hint-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+.hint-stat { padding: 7px 9px; border-radius: 8px; border: 1px solid var(--hair); background: var(--surface-2); }
+/* Let the popover escape clipping ancestors only while it is visible. */
+.insight:has(.hint-pop.on), .card:has(.hint-pop.on), .table-scroll:has(.hint-pop.on) { overflow: visible; }
+[data-hints="preview"] .insight:has(.hint-pop), [data-hints="preview"] .card:has(.hint-pop), [data-hints="preview"] .table-scroll:has(.hint-pop) { overflow: visible; }

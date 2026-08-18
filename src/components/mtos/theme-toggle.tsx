@@ -14,10 +14,21 @@ export function ThemeToggle() {
     const next = !dark;
     setDark(next);
     document.documentElement.setAttribute("data-theme", next ? "dark" : "light");
+    try {
+      localStorage.setItem("mtos-theme", next ? "dark" : "light");
+    } catch {
+      /* ignore */
+    }
   }
 
   return (
-    <button className="theme-toggle" onClick={toggle} aria-label="Toggle color theme" type="button">
+    <button
+      className="theme-toggle"
+      onClick={toggle}
+      aria-label="Toggle light / dark theme"
+      title={dark ? "Switch to light" : "Switch to dark"}
+      type="button"
+    >
       {dark ? <Sun /> : <Moon />}
     </button>
   );

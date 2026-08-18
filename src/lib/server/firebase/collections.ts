@@ -10,6 +10,15 @@ export function clientsCollectionPath(tenantId: string) {
   return `${tenantPath(tenantId)}/clients`;
 }
 
+/** AM-uploaded supporting documents / screenshots / notes attached to a client. */
+export function clientAttachmentsCollectionPath(tenantId: string, clientId: string) {
+  return `${clientPath(tenantId, clientId)}/attachments`;
+}
+
+export function clientAttachmentPath(tenantId: string, clientId: string, attachmentId: string) {
+  return `${clientAttachmentsCollectionPath(tenantId, clientId)}/${attachmentId}`;
+}
+
 export function monthlyTouchesCollectionPath(tenantId: string) {
   return `${tenantPath(tenantId)}/monthlyTouches`;
 }

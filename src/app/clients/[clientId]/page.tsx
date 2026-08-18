@@ -14,6 +14,8 @@ import {
 import { AppShell } from "@/src/components/mtos/app-shell";
 import { DataError } from "@/src/components/mtos/data-error";
 import { ClientTabs } from "@/src/components/mtos/client-tabs";
+import { ClientAttachments } from "@/src/components/mtos/client-attachments";
+import { countClientAttachments } from "@/src/lib/server/services/client-attachments-service";
 import { ClientProfileMappings } from "@/src/components/mtos/client-profile-mappings";
 import { LeadVerificationQuickActions } from "@/src/components/mtos/lead-verification-quick-actions";
 import {
@@ -101,13 +103,15 @@ export default async function ClientWorkspacePage({
   const { client, touch, commitments: clientCommitments, opportunities: clientOpportunities } = payload;
   let mappingView: Awaited<ReturnType<typeof getClientMappingView>> = null;
   let leadVerification: Awaited<ReturnType<typeof getStoredLeadVerification>> = null;
+  let attachmentCount = 0;
   try {
-    [mappingView, leadVerification] = await Promise.all([
+    [mappingView, leadVerification, attachmentCount] = await Promise.all([
       getClientMappingView(context, clientId),
       getStoredLeadVerification(context, clientId),
+      countClientAttachments(context, clientId),
     ]);
   } catch {
-    // Secondary data (integration mappings, stored lead verification) is optional — degrade to none.
+    // Secondary data (integration mappings, stored lead verification, attachments) is optional — degrade to none.
   }
 
   const tone = TONE_CLASS[client.tone];
@@ -434,12 +438,15 @@ export default async function ClientWorkspacePage({
               </div>
             </div>
           </div>
-          {touch ? (
-            <Link href={`/monthly-touch/${touch.id}`} className="btn btn-primary btn-sm">
-              <Play />
-              Run Monthly Touch
-            </Link>
-          ) : null}
+          <div className="flex flex-col items-end gap-2">
+            {touch ? (
+              <Link href={`/monthly-touch/${touch.id}`} className="btn btn-primary btn-sm">
+                <Play />
+                Run Monthly Touch
+              </Link>
+            ) : null}
+            <ClientAttachments clientId={client.id} clientName={client.name} initialCount={attachmentCount} />
+          </div>
         </div>
 
         <div className="mt-5 grid grid-cols-2 gap-3.5 lg:grid-cols-4">

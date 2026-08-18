@@ -407,6 +407,10 @@ a { color: inherit; text-decoration: none; }
 [data-annotations="on"] .callout.info      .callout-ic { background: var(--annotation-info-bg);      color: var(--annotation-info-border); }
 [data-annotations="on"] .callout.reference .callout-ic { background: var(--annotation-reference-bg); color: var(--annotation-reference-border); }
 
+/* Smart auto-formatted body text — breaks walls of text into readable paragraphs */
+.smart-text p { font-size: 0.89rem; line-height: 1.62; color: var(--text-2); }
+.smart-text p + p { margin-top: 10px; }
+
 /* Quick-reference / Cornell strip — structural, always visible */
 .quick-ref { border: 1px solid var(--hair); border-radius: var(--r-md); background: var(--surface-2); padding: 13px 15px; }
 .quick-ref-label { font-size: 0.64rem; letter-spacing: 0.1em; text-transform: uppercase; font-weight: 700; color: var(--slate-400); }

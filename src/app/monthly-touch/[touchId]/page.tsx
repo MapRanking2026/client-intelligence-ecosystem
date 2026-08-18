@@ -5,7 +5,7 @@ import { ArrowLeft, Play, CheckCircle2, Sparkles } from "lucide-react";
 
 import { AppShell } from "@/src/components/mtos/app-shell";
 import { DataError } from "@/src/components/mtos/data-error";
-import { Linkified } from "@/src/components/mtos/annotate";
+import { Linkified, SmartText } from "@/src/components/mtos/annotate";
 import { FiveQuestions, type QStep } from "@/src/components/mtos/five-questions";
 import { CallGuideActions } from "@/src/components/mtos/call-guide-actions";
 import { LeadVerificationSummary } from "@/src/components/mtos/lead-verification-summary";
@@ -116,11 +116,7 @@ export default async function MonthlyTouchPage({
       summary: "Translate the numbers into business meaning",
       content: (
         <div className="flex flex-col gap-3">
-          {touch.executiveBrief.split("\n\n").map((p, i) => (
-            <p key={i} className="text-[0.9rem] leading-6" style={{ color: "var(--text)" }}>
-              <Linkified text={p} clientId={client.id} />
-            </p>
-          ))}
+          <SmartText text={touch.executiveBrief} clientId={client.id} />
           {touch.talkingPoints.length ? (
             <div>
               <div className="eyebrow muted mb-2 mt-1">How to say it</div>

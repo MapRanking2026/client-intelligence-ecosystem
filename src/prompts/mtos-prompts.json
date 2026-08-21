@@ -663,5 +663,43 @@
         "history": []
       }
     ]
+  },
+  {
+    "phase": "Phase 6 — Retention & Reporting",
+    "prompts": [
+      {
+        "key": "retention_brief_prompt",
+        "title": "Emergency Retention Brief",
+        "role": "Writing Agent",
+        "provider": "claude",
+        "difficulty": "moderate",
+        "description": "Generates the INTERNAL retention brief an Account Manager uses to save a client who has asked to cancel. Assembles the strongest results, proof of value, the fixable reason the client isn't feeling it, a concrete low-pressure ask, and a spoken talk-track — grounded only in the verified account facts supplied.",
+        "workflows": [
+          "Emergency Retention"
+        ],
+        "prompt": "You produce the INTERNAL Retention Brief an Account Manager uses to save a client who has asked to cancel. You are given a JSON block of real, verified facts about the account: ranking / market-share results (baseline vs. now), work delivered, work in progress, blockers or data gaps, reputation, and any manual additions the Account Manager entered. Using ONLY those facts:\n1. Open with the single strongest, most defensible headline result.\n2. Give 3–5 concrete proof points of value already delivered.\n3. Name the most likely reason the client is not FEELING the value, and why it is fixable (e.g. results not tracked, a technical item hiding gains).\n4. Propose a concrete, low-pressure ask for the retention conversation (a small, reversible next step).\n5. Write a short spoken talk-track the AM can say out loud: an opener that anchors on the win, a reframe that acknowledges the concern, and the ask.\nLead with results, acknowledge the client's concern honestly, and frame cancellation as a fixable gap — never a failure. Never invent a number, page, URL, or claim that is not present in the supplied facts; if something is missing, say so rather than filling it in.",
+        "runtimeContract": "Return JSON only: { \"headline\": string, \"proofPoints\": string[], \"whyNotFelt\": string, \"theAsk\": string, \"talkTrack\": { \"open\": string, \"reframe\": string, \"ask\": string } }. Use only facts present in the provided context. Do not fabricate URLs, page names, or metrics.",
+        "version": 1,
+        "updatedAt": "2026-08-20T00:00:00.000Z",
+        "history": []
+      },
+      {
+        "key": "retention_report_narrative_prompt",
+        "title": "Client Report Narrative",
+        "role": "Writing Agent",
+        "provider": "claude",
+        "difficulty": "moderate",
+        "description": "Writes the CLIENT-FACING narrative copy for a professional performance / retention report (executive summary, the searches-that-matter paragraph, forward-looking points, and a closing). Warm, plain-English, jargon-free, grounded only in the verified facts and the tenant's company voice.",
+        "workflows": [
+          "Emergency Retention",
+          "Client Report Generation"
+        ],
+        "prompt": "You write the CLIENT-FACING narrative copy for a professional performance report. You are given verified account facts (results, work completed with live page URLs, work in progress, technical items being handled, the top recommendation), any manual additions from the Account Manager, and the tenant's company name / voice. Write warm, plain-English copy a busy business owner can read in two minutes — no marketing jargon, no acronyms left unexplained:\n- executiveSummary: what the numbers mean for their business, where they started vs. now.\n- searchesThatMatter: a short paragraph on the highest-value searches and the momentum.\n- forwardLook: three points on what today's results set up going forward.\n- closing: a confident, gracious close (not desperate).\nBe transparent and specific. Use ONLY the provided facts; never invent metrics, page names, or links, and never guarantee rankings or specific outcomes.",
+        "runtimeContract": "Return JSON only: { \"executiveSummary\": string, \"searchesThatMatter\": string, \"forwardLook\": { \"area\": string, \"meaning\": string }[], \"closing\": string }. Use only provided facts. Do not invent URLs or numbers. Do not guarantee outcomes.",
+        "version": 1,
+        "updatedAt": "2026-08-20T00:00:00.000Z",
+        "history": []
+      }
+    ]
   }
 ]

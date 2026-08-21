@@ -77,6 +77,25 @@ export function knowledgeChunkPath(tenantId: string, chunkId: string) {
   return `${knowledgeChunksCollectionPath(tenantId)}/${chunkId}`;
 }
 
+/** Tenant-scoped configuration documents (report branding, future settings). */
+export function tenantSettingsCollectionPath(tenantId: string) {
+  return `${tenantPath(tenantId)}/settings`;
+}
+
+/** One document holding this tenant's report branding (logo, colors, fonts, company name). */
+export function reportBrandPath(tenantId: string) {
+  return `${tenantSettingsCollectionPath(tenantId)}/reportBrand`;
+}
+
+/** AM-run emergency retention sessions for a client (assembled case + generated report metadata). */
+export function retentionSessionsCollectionPath(tenantId: string, clientId: string) {
+  return `${clientPath(tenantId, clientId)}/retentionSessions`;
+}
+
+export function retentionSessionPath(tenantId: string, clientId: string, sessionId: string) {
+  return `${retentionSessionsCollectionPath(tenantId, clientId)}/${sessionId}`;
+}
+
 export function tenantUsersCollectionPath(tenantId: string) {
   return `${tenantPath(tenantId)}/users`;
 }

@@ -44,6 +44,18 @@ export const PROMPT_BINDINGS: Record<string, PromptBinding[]> = {
       source: "src/lib/server/services/lead-verification-service.ts",
     },
   ],
+  retention_brief_prompt: [
+    {
+      module: "Emergency Retention (internal save-the-account brief)",
+      source: "src/lib/server/services/retention-service.ts",
+    },
+  ],
+  retention_report_narrative_prompt: [
+    {
+      module: "Client report generation (retention & performance reports)",
+      source: "src/lib/server/services/retention-service.ts",
+    },
+  ],
 };
 
 export function getPromptBindings(key: string): PromptBinding[] {

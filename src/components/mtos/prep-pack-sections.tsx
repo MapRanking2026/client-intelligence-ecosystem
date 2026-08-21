@@ -200,6 +200,8 @@ function deltaLabel(value: number | null, previousValue: number | null) {
 const METRIC_LOWER_IS_BETTER = (label: string) => /cost|missed/i.test(label);
 
 export function ScorecardGrid({ scorecard, clientId }: { scorecard: BusinessScorecard; clientId?: string }) {
+  // Older persisted scorecards may omit a metric — drop any that are missing
+  // rather than crashing on m.availability of an undefined entry.
   const metrics = [
     scorecard.totalLeads,
     scorecard.qualifiedLeads,
@@ -211,7 +213,7 @@ export function ScorecardGrid({ scorecard, clientId }: { scorecard: BusinessScor
     scorecard.shareOfLocalVoice,
     scorecard.top3Coverage,
     scorecard.mapCheckIns,
-  ];
+  ].filter((m): m is ScorecardMetric => Boolean(m));
 
   return (
     <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
@@ -419,7 +421,15 @@ function ProfileEvidenceBlock({ profile }: { profile: RankTrackerProfileEvidence
 }
 
 export function SeoPerformancePanel({ seo }: { seo: SeoPerformancePack }) {
-  const profiles = seo.profiles || [];
+  // Persisted prep packs can predate some of these fields, so default every
+  // collection to an empty array — a missing field must never crash the page.
+  const profiles = seo.profiles ?? [];
+  const matchedBusinesses = seo.matchedBusinesses ?? [];
+  const keywordScanHistory = seo.keywordScanHistory ?? [];
+  const heatmapGrids = seo.heatmapGrids ?? [];
+  const checkinBusinesses = seo.checkinBusinesses ?? [];
+  const gbpPerformance = seo.gbpPerformance ?? [];
+  const notes = seo.notes ?? [];
   const activeProfiles = profiles.filter((profile) => profile.status === "active");
   const inactiveProfiles = profiles.filter((profile) => profile.status === "inactive");
   const hasProfileView = profiles.length > 0;
@@ -444,27 +454,27 @@ export function SeoPerformancePanel({ seo }: { seo: SeoPerformancePack }) {
         ))
       ) : (
         <>
-          {seo.matchedBusinesses.length ? (
+          {matchedBusinesses.length ? (
             <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-              {seo.matchedBusinesses.map((business) => (
+              {matchedBusinesses.map((business) => (
                 <div key={`${business.businessName}-${business.placeId}`} className="rounded-2xl border border-white/8 bg-white/4 p-4">
                   <p className="text-sm font-semibold text-white">{business.businessName}</p>
                   <p className="mt-1 text-xs text-slate-400">{business.address || "Address not on file"}</p>
                   <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-slate-300">
                     <span>{business.rating ?? "n/a"}★ rating</span>
                     <span>{business.reviews ?? "n/a"} reviews</span>
-                    <span>{business.keywords.length} keywords tracked</span>
+                    <span>{(business.keywords ?? []).length} keywords tracked</span>
                   </div>
                 </div>
               ))}
             </div>
           ) : null}
 
-          <KeywordScanTable entries={seo.keywordScanHistory} showBusiness />
+          <KeywordScanTable entries={keywordScanHistory} showBusiness />
 
-          {seo.heatmapGrids.length ? (
+          {heatmapGrids.length ? (
             <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-              {seo.heatmapGrids.map((grid) => (
+              {heatmapGrids.map((grid) => (
                 <div key={`${grid.keyword}-${grid.scanDate}`} className="rounded-2xl border border-white/8 bg-white/4 p-3">
                   <HeatmapGridSvg grid={grid} />
                   <div className="space-y-1 px-1 pt-3">
@@ -490,9 +500,9 @@ export function SeoPerformancePanel({ seo }: { seo: SeoPerformancePack }) {
         </>
       )}
 
-      {seo.checkinBusinesses.length ? (
+      {checkinBusinesses.length ? (
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-          {seo.checkinBusinesses.map((business) => (
+          {checkinBusinesses.map((business) => (
             <div key={business.businessName} className="rounded-2xl border border-white/8 bg-black/20 p-4">
               <p className="text-[11px] uppercase tracking-[0.2em] text-slate-400">Map Check-Ins</p>
               <p className="mt-1 text-sm font-semibold text-white">{business.businessName}</p>
@@ -528,9 +538,9 @@ export function SeoPerformancePanel({ seo }: { seo: SeoPerformancePack }) {
         </div>
       ) : null}
 
-      {seo.gbpPerformance.length ? (
+      {gbpPerformance.length ? (
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-          {seo.gbpPerformance.map((row) => (
+          {gbpPerformance.map((row) => (
             <div key={row.locationId} className="rounded-2xl border border-white/8 bg-black/20 p-4">
               <p className="text-[11px] uppercase tracking-[0.2em] text-slate-400">
                 GBP performance -- {row.periodStart} to {row.periodEnd}
@@ -554,9 +564,9 @@ export function SeoPerformancePanel({ seo }: { seo: SeoPerformancePack }) {
         </div>
       ) : null}
 
-      {seo.notes.length ? (
+      {notes.length ? (
         <div className="space-y-2">
-          {seo.notes.map((note) => (
+          {notes.map((note) => (
             <div key={note} className="rounded-2xl border border-amber-400/15 bg-amber-500/8 px-4 py-3 text-sm text-amber-100">
               {note}
             </div>
@@ -570,7 +580,7 @@ export function SeoPerformancePanel({ seo }: { seo: SeoPerformancePack }) {
 export function AdsPerformancePanel({ ads }: { ads: AdsPerformancePack[] }) {
   return (
     <div className="grid gap-3 sm:grid-cols-2">
-      {ads.map((channel) => (
+      {(ads ?? []).map((channel) => (
         <div key={channel.channel} className="rounded-2xl border border-white/8 bg-white/4 p-4">
           <p className="text-sm font-semibold text-white">{channel.channel}</p>
           {channel.connected ? (
@@ -613,9 +623,10 @@ export function StrategicActionPanel({ action }: { action: StrategicActionStatus
 }
 
 export function ParticipationChecklist({ participation }: { participation: ClientParticipation }) {
+  const items = participation?.items ?? [];
   return (
     <div className="space-y-2">
-      {participation.items.map((item) => (
+      {items.map((item) => (
         <div
           key={item.label}
           className="flex items-center justify-between rounded-2xl border border-white/8 bg-white/4 px-4 py-3"
@@ -635,7 +646,7 @@ export function ParticipationChecklist({ participation }: { participation: Clien
 }
 
 export function IssuesSolutionsList({ items }: { items: IssueSolutionItem[] }) {
-  if (!items.length) {
+  if (!items?.length) {
     return (
       <div className="rounded-2xl border border-white/8 bg-white/4 px-4 py-3 text-sm text-slate-300">
         No issues identified for this cycle.
@@ -662,7 +673,7 @@ export function IssuesSolutionsList({ items }: { items: IssueSolutionItem[] }) {
 export function LeadQualityQuestionList({ questions }: { questions: string[] }) {
   return (
     <div className="space-y-2">
-      {questions.map((question) => (
+      {(questions ?? []).map((question) => (
         <div key={question} className="rounded-2xl border border-white/8 bg-white/4 px-4 py-3 text-sm text-slate-200">
           {question}
         </div>
@@ -674,7 +685,7 @@ export function LeadQualityQuestionList({ questions }: { questions: string[] }) 
 export function RecapQuestionList({ questions }: { questions: { question: string; answer: string }[] }) {
   return (
     <div className="space-y-2">
-      {questions.map((item) => (
+      {(questions ?? []).map((item) => (
         <div key={item.question} className="rounded-2xl border border-white/8 bg-black/20 px-4 py-3">
           <p className="text-sm font-semibold text-white">{item.question}</p>
           <p className="mt-1 text-xs text-slate-500">Capture live during the recap (Step 6).</p>
@@ -685,7 +696,7 @@ export function RecapQuestionList({ questions }: { questions: { question: string
 }
 
 export function DataGapsBanner({ gaps }: { gaps: string[] }) {
-  if (!gaps.length) {
+  if (!gaps?.length) {
     return null;
   }
 

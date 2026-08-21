@@ -254,6 +254,30 @@ export interface MonthlyTouchPrepPack {
   dataGaps: string[];
   clickupContext?: ClickupClientContext;
   claude: PrepPackClaudeState;
+  /** This month's rotated meeting format, so no two touches feel identical. */
+  meetingFormat?: MeetingFormat;
+  /** Interactive decisions the client co-owns this touch (client-as-copilot). */
+  decisionsTogether?: DecisionTogether[];
+  /** Soft variety guardrail note — how this touch differs from the last, or a warning if too similar. */
+  varietyNote?: string;
+}
+
+/** A rotating meeting "format" that changes the angle/structure of a touch month to month. */
+export interface MeetingFormat {
+  id: string;
+  name: string;
+  /** One-line description of the angle this format takes. */
+  angle: string;
+  /** What to put in the spotlight for this format. */
+  spotlight: string;
+}
+
+/** An interactive decision the client makes with the AM during the touch. */
+export interface DecisionTogether {
+  question: string;
+  options: string[];
+  /** Why this decision matters now. */
+  why: string;
 }
 
 export interface ClickupBookPage {
@@ -647,6 +671,8 @@ export interface MonthlyTouchRecord {
   aiRecommendations: RecommendationItem[];
   prepPack?: MonthlyTouchPrepPack;
   callGuide?: CallGuide;
+  /** AM overrides for which screen each call-guide section suggests presenting (section index → screen key). */
+  callGuideScreens?: Record<string, string>;
   postMeeting?: PostMeetingReview;
   qaReview?: QaReview;
   /** Latest lead & call verification captured during prep (optional, additive). */

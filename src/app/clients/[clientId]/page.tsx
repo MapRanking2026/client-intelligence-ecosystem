@@ -15,6 +15,7 @@ import { AppShell } from "@/src/components/mtos/app-shell";
 import { DataError } from "@/src/components/mtos/data-error";
 import { ClientTabs } from "@/src/components/mtos/client-tabs";
 import { ClientAttachments } from "@/src/components/mtos/client-attachments";
+import { RetentionButton } from "@/src/components/mtos/retention-button";
 import { Linkified, Callout, SmartText } from "@/src/components/mtos/annotate";
 import { countClientAttachments } from "@/src/lib/server/services/client-attachments-service";
 import { ClientProfileMappings } from "@/src/components/mtos/client-profile-mappings";
@@ -445,6 +446,7 @@ export default async function ClientWorkspacePage({
                 Run Monthly Touch
               </Link>
             ) : null}
+            <RetentionButton clientId={client.id} clientName={client.name} />
             <ClientAttachments clientId={client.id} clientName={client.name} initialCount={attachmentCount} />
           </div>
         </div>

@@ -6,6 +6,7 @@ import { ArrowLeft, Play, CheckCircle2, Sparkles } from "lucide-react";
 import { AppShell } from "@/src/components/mtos/app-shell";
 import { DataError } from "@/src/components/mtos/data-error";
 import { Linkified, SmartText } from "@/src/components/mtos/annotate";
+import { SectionAdditions } from "@/src/components/mtos/section-additions";
 import { FiveQuestions, type QStep } from "@/src/components/mtos/five-questions";
 import { CallGuideActions } from "@/src/components/mtos/call-guide-actions";
 import { LeadVerificationSummary } from "@/src/components/mtos/lead-verification-summary";
@@ -99,6 +100,7 @@ export default async function MonthlyTouchPage({
         <div>
           <Bullets items={touch.wins} tone="good" clientId={client.id} />
           {prepPack ? <p className="muted mt-3 text-[0.8rem]">Full business scorecard is below.</p> : null}
+          <SectionAdditions clientId={client.id} sectionKey="q1-what-happened" />
         </div>
       ),
     },
@@ -107,7 +109,12 @@ export default async function MonthlyTouchPage({
       title: "What caused it?",
       tone: "risk",
       summary: touch.risks.length ? `${touch.risks.length} risks / drivers identified` : "Identify the drivers",
-      content: <Bullets items={touch.risks} tone="risk" clientId={client.id} />,
+      content: (
+        <div>
+          <Bullets items={touch.risks} tone="risk" clientId={client.id} />
+          <SectionAdditions clientId={client.id} sectionKey="q2-what-caused" />
+        </div>
+      ),
     },
     {
       n: 3,
@@ -123,6 +130,7 @@ export default async function MonthlyTouchPage({
               <Bullets items={touch.talkingPoints} tone="info" clientId={client.id} />
             </div>
           ) : null}
+          <SectionAdditions clientId={client.id} sectionKey="q3-what-means" />
         </div>
       ),
     },
@@ -131,7 +139,12 @@ export default async function MonthlyTouchPage({
       title: "What opportunities do we see?",
       tone: "good",
       summary: touch.opportunities.length ? `${touch.opportunities.length} opportunities to raise` : "Surface the next opportunities",
-      content: <Bullets items={touch.opportunities} tone="good" clientId={client.id} />,
+      content: (
+        <div>
+          <Bullets items={touch.opportunities} tone="good" clientId={client.id} />
+          <SectionAdditions clientId={client.id} sectionKey="q4-opportunities" />
+        </div>
+      ),
     },
     {
       n: 5,
@@ -149,6 +162,7 @@ export default async function MonthlyTouchPage({
               <p className="mt-1.5 text-[0.88rem]">{prepPack.strategicAction.nextSteps}</p>
             </div>
           ) : null}
+          <SectionAdditions clientId={client.id} sectionKey="q5-next" />
         </div>
       ),
     },
@@ -213,10 +227,54 @@ export default async function MonthlyTouchPage({
         </div>
       ) : null}
 
+      {prepPack?.meetingFormat ? (
+        <div className="card mt-4" style={{ borderLeft: "3px solid var(--accent)" }}>
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <div className="eyebrow muted">This month&apos;s format · keep it fresh</div>
+              <div className="h4 mt-1">{prepPack.meetingFormat.name}</div>
+              <p className="muted mt-1 text-[0.85rem]">{prepPack.meetingFormat.angle}</p>
+            </div>
+            <span className="chip info">
+              <span className="sig-dot" style={{ background: "var(--info)" }} />
+              Fresh angle
+            </span>
+          </div>
+          {prepPack.varietyNote ? (
+            <div className="mt-3 rounded-[10px] p-3 text-[0.85rem]" style={{ background: "var(--accent-soft)", color: "var(--accent-ink)" }}>
+              {prepPack.varietyNote}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
       {/* The five questions */}
       <div className="mt-5">
         <FiveQuestions steps={steps} />
       </div>
+
+      {prepPack?.decisionsTogether?.length ? (
+        <Section
+          eyebrow="Client as copilot"
+          title="Decisions to make together"
+          subtitle="Put these to the client live and let them choose — it makes them a copilot, not a passenger. Record what they pick so it flows into next month's prep and the report."
+        >
+          <div className="flex flex-col gap-3">
+            {prepPack.decisionsTogether.map((d, i) => (
+              <div key={i} className="rounded-[12px] p-4" style={{ background: "var(--surface-2)", border: "1px solid var(--hair)" }}>
+                <div className="h4" style={{ fontSize: "0.95rem" }}>{d.question}</div>
+                <div className="mt-2.5 flex flex-wrap gap-2">
+                  {d.options.map((o) => (
+                    <span key={o} className="chip" style={{ background: "var(--surface)", borderColor: "var(--hair-strong)" }}>{o}</span>
+                  ))}
+                </div>
+                <p className="muted mt-2 text-[0.8rem]">{d.why}</p>
+                <SectionAdditions clientId={client.id} sectionKey={`decision-${i}-next`} label="Record what they chose" />
+              </div>
+            ))}
+          </div>
+        </Section>
+      ) : null}
 
       {/* Supporting detail — real prep-pack panels (styled via the global compatibility layer) */}
       <div>
@@ -293,7 +351,7 @@ export default async function MonthlyTouchPage({
       ) : null}
 
       <Section eyebrow="Live meeting" title="Live call guide" subtitle="A timed, section-by-section guide generated from the prep pack.">
-        <CallGuideActions touchId={touch.id} callGuide={touch.callGuide} />
+        <CallGuideActions touchId={touch.id} clientId={client.id} callGuide={touch.callGuide} screenOverrides={touch.callGuideScreens} />
       </Section>
 
       <Section eyebrow="AI assistance" title="Evidence-backed recommendations" subtitle="What to say, why it matters, and the evidence behind it.">

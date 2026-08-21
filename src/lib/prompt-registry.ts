@@ -56,6 +56,12 @@ export const PROMPT_BINDINGS: Record<string, PromptBinding[]> = {
       source: "src/lib/server/services/retention-service.ts",
     },
   ],
+  meeting_variety_prompt: [
+    {
+      module: "Meeting variety & client-copilot (Monthly Touch preparation)",
+      source: "src/lib/server/services/meeting-variety-service.ts",
+    },
+  ],
 };
 
 export function getPromptBindings(key: string): PromptBinding[] {

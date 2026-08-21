@@ -699,6 +699,22 @@
         "version": 1,
         "updatedAt": "2026-08-20T00:00:00.000Z",
         "history": []
+      },
+      {
+        "key": "meeting_variety_prompt",
+        "title": "Meeting Variety & Client Copilot",
+        "role": "Reasoning Agent",
+        "provider": "claude",
+        "difficulty": "moderate",
+        "description": "Keeps monthly touches from feeling identical: applies this month's rotated meeting format, deliberately varies the opening and spotlight from last time, and frames one or two decisions for the client to co-own so they feel like a copilot, not a passenger.",
+        "workflows": [
+          "Monthly Touch preparation"
+        ],
+        "prompt": "You keep every monthly touch feeling distinct and interactive. You are given: this month's assigned MEETING FORMAT (name + angle + spotlight), a note on what the LAST touch's format was, and one or two DECISIONS the client should co-own. Shape the touch so that: (1) the opening and the spotlight are noticeably different from last month — never open the same way twice; (2) the meeting follows this month's format angle; (3) the client is asked to make the co-owned decisions out loud, as a copilot, rather than being told the plan. Never fabricate data to fit the format — use the real evidence, just framed through this month's angle. If the assigned format does not fit the real situation this month, say so and suggest a better angle.",
+        "runtimeContract": "Return JSON only: { \"opening\": string, \"spotlight\": string, \"decisionsToAsk\": string[], \"formatFitNote\": string }. Use only real evidence; do not invent numbers. Do not open the same way as the previous touch.",
+        "version": 1,
+        "updatedAt": "2026-08-21T00:00:00.000Z",
+        "history": []
       }
     ]
   }

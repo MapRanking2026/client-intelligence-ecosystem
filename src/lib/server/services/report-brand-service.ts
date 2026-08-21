@@ -37,6 +37,8 @@ export interface ReportBrand {
   footerText: string;
   /** Font family used throughout — must be Word-safe / offline (e.g. "Arial"). */
   font: string;
+  /** The single brand color the palette is derived from (hex, no #). Shown in the editor. */
+  primaryColor: string;
   colors: ReportBrandColors;
   /**
    * Base64 PNG data URL of the tenant's logo. Undefined = use the built-in
@@ -53,6 +55,7 @@ export const MAPRANKING_BRAND: ReportBrand = {
   reportTypeLabelDefault: "Local SEO Performance Report",
   footerText: "Confidential  |  mapranking.com",
   font: "Arial",
+  primaryColor: "1a73e8",
   colors: {
     navy: "0d1b2a",
     blueDeep: "0d47a1",

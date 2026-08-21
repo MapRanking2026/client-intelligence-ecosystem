@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Settings, Plug, Sparkles, BookOpen, Users, Flag, FileText, Shield, ArrowUpRight } from "lucide-react";
+import { Settings, Plug, Sparkles, BookOpen, Users, Flag, FileText, Shield, ArrowUpRight, Palette } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
 import { AppShell } from "@/src/components/mtos/app-shell";
@@ -32,6 +32,13 @@ const ADMIN_CARDS: AdminCard[] = [
     description: "Ground the AI in Map Ranking's playbooks, SOPs, and past monthly touches — retrieved into prep automatically.",
     href: "/settings/knowledge",
     icon: BookOpen,
+    live: true,
+  },
+  {
+    title: "Report branding",
+    description: "Your logo, brand color, and font for every generated client report — or seed it from an existing sample report. Per-tenant, so each company's reports look like their own.",
+    href: "/settings/report-brand",
+    icon: Palette,
     live: true,
   },
   { title: "Users & roles", description: "Control workspace access, ownership, and role visibility for account teams.", icon: Users },

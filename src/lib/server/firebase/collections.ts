@@ -19,6 +19,26 @@ export function clientAttachmentPath(tenantId: string, clientId: string, attachm
   return `${clientAttachmentsCollectionPath(tenantId, clientId)}/${attachmentId}`;
 }
 
+/** AM-entered "add anything we missed" notes, tagged by the section they belong to,
+ *  used to enrich generated briefs and reports for a client. */
+export function clientSectionNotesCollectionPath(tenantId: string, clientId: string) {
+  return `${clientPath(tenantId, clientId)}/sectionNotes`;
+}
+
+/** Compact history of prepared touches (format used, spotlight), so the next touch
+ *  can rotate to a different angle and no two meetings feel identical. */
+export function clientTouchHistoryCollectionPath(tenantId: string, clientId: string) {
+  return `${clientPath(tenantId, clientId)}/touchHistory`;
+}
+
+export function clientTouchHistoryPath(tenantId: string, clientId: string, touchId: string) {
+  return `${clientTouchHistoryCollectionPath(tenantId, clientId)}/${touchId}`;
+}
+
+export function clientSectionNotePath(tenantId: string, clientId: string, noteId: string) {
+  return `${clientSectionNotesCollectionPath(tenantId, clientId)}/${noteId}`;
+}
+
 export function monthlyTouchesCollectionPath(tenantId: string) {
   return `${tenantPath(tenantId)}/monthlyTouches`;
 }

@@ -43,6 +43,8 @@ import { getServerEnv } from "@/src/lib/server/env";
 import { callLlmForJson, hasAnyLlmProvider } from "@/src/lib/server/services/mtos-ai";
 import { fetchClickupClientContext } from "@/src/lib/server/services/clickup-client-context";
 import { runLeadVerification } from "@/src/lib/server/services/lead-verification-service";
+import { listPrepAdditions } from "@/src/lib/server/services/section-notes-service";
+import { resolveMeetingFormat, buildDecisionsTogether, buildVarietyNote, recordTouchHistory } from "@/src/lib/server/services/meeting-variety-service";
 import { retrieveKnowledge } from "@/src/lib/server/services/knowledge-service";
 import { getPromptText } from "@/src/lib/server/prompt-store";
 
@@ -1514,6 +1516,23 @@ export async function prepareMonthlyTouch(
   const derivedCommitments = buildCommitmentList(commitments);
   const hasClaudeOutput = claudeState.status === "generated";
 
+  // Fold in the AM's "add anything we missed" notes so the regenerated five questions
+  // reflect them: what happened → wins, what caused it → risks, opportunities,
+  // what's next → commitments, everything else → the executive brief.
+  const prepAdditions = await listPrepAdditions(context, client.id);
+  if (prepAdditions.wins.length) wins = [...wins, ...prepAdditions.wins];
+  if (prepAdditions.risks.length) risks = [...risks, ...prepAdditions.risks];
+  if (prepAdditions.brief.length) {
+    executiveBrief = `${executiveBrief}\n\nAdded by the account manager:\n${prepAdditions.brief.map((t) => `- ${t}`).join("\n")}`;
+  }
+
+  // Meeting variety / copilot: rotate the format so no two touches feel identical,
+  // note how this one differs, and give the client one or two decisions to co-own.
+  const { format: meetingFormat, previous: previousTouch } = await resolveMeetingFormat(context, client.id, touch.id);
+  const keywordTerms = (prepPack.seoPerformance.keywordScanHistory ?? []).map((entry) => entry.keyword);
+  const decisionsTogether = buildDecisionsTogether(client, meetingFormat, opportunities, keywordTerms);
+  const varietyNote = buildVarietyNote(meetingFormat, previousTouch);
+
   // Lead & call verification runs as a non-fatal gated step: it vets the leads
   // the client received and reconciles the counts, but a failure here must never
   // block prep. runLeadVerification also persists the per-client review used by
@@ -1538,19 +1557,28 @@ export async function prepareMonthlyTouch(
     agenda,
     wins: wins.length ? wins : touch.wins,
     risks: risks.length ? risks : touch.risks,
-    opportunities: derivedOpportunities.length ? derivedOpportunities : touch.opportunities,
+    opportunities: [...(derivedOpportunities.length ? derivedOpportunities : touch.opportunities), ...prepAdditions.opportunities],
     talkingPoints,
-    commitments: derivedCommitments,
+    commitments: [...derivedCommitments, ...prepAdditions.commitments],
     aiRecommendations,
     prepPack: {
       ...prepPack,
       claude: claudeState,
+      meetingFormat,
+      decisionsTogether,
+      varietyNote,
     },
     leadVerification,
     updatedAt: getNowIso(),
   });
 
   await db.doc(monthlyTouchPath(context.tenantId, touch.id)).set(updatedTouch, { merge: true });
+  await recordTouchHistory(context, client.id, {
+    touchId: touch.id,
+    at: getNowIso(),
+    formatId: meetingFormat.id,
+    spotlight: meetingFormat.spotlight,
+  });
 
   return {
     touch: updatedTouch,

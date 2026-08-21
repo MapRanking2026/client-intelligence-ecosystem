@@ -106,6 +106,32 @@ export function buildVarietyNote(format: MeetingFormat, previous?: TouchHistoryE
   return `This month's angle is “${format.name}”. Lead with: ${format.spotlight}`;
 }
 
+/** Compact variety context handed to the LLM so it shapes the touch to this month's
+ *  format and never opens the same way as last month. */
+export interface VarietyContext {
+  formatName: string;
+  formatAngle: string;
+  formatSpotlight: string;
+  previousFormatName: string | null;
+  varietyNote: string;
+  decisionQuestions: string[];
+}
+
+export function buildVarietyContext(
+  format: MeetingFormat,
+  previous: TouchHistoryEntry | undefined,
+  decisions: DecisionTogether[],
+): VarietyContext {
+  return {
+    formatName: format.name,
+    formatAngle: format.angle,
+    formatSpotlight: format.spotlight,
+    previousFormatName: previous ? MEETING_FORMATS.find((f) => f.id === previous.formatId)?.name ?? null : null,
+    varietyNote: buildVarietyNote(format, previous),
+    decisionQuestions: decisions.map((d) => d.question),
+  };
+}
+
 /** Build one or two interactive decisions the client co-owns, varied by format + data. */
 export function buildDecisionsTogether(
   client: ClientRecord,

@@ -44,7 +44,7 @@ import { callLlmForJson, hasAnyLlmProvider } from "@/src/lib/server/services/mto
 import { fetchClickupClientContext } from "@/src/lib/server/services/clickup-client-context";
 import { runLeadVerification } from "@/src/lib/server/services/lead-verification-service";
 import { listPrepAdditions } from "@/src/lib/server/services/section-notes-service";
-import { resolveMeetingFormat, buildDecisionsTogether, buildVarietyNote, recordTouchHistory } from "@/src/lib/server/services/meeting-variety-service";
+import { resolveMeetingFormat, buildDecisionsTogether, buildVarietyContext, recordTouchHistory, type VarietyContext } from "@/src/lib/server/services/meeting-variety-service";
 import { retrieveKnowledge } from "@/src/lib/server/services/knowledge-service";
 import { getPromptText } from "@/src/lib/server/prompt-store";
 
@@ -1108,12 +1108,34 @@ async function generateClaudeTouchOutput(
   prepPack: MonthlyTouchPrepPack,
   client: ClientRecord,
   touch: MonthlyTouchRecord,
+  variety?: VarietyContext,
 ) {
   if (!hasAnyLlmProvider(env)) {
     return null;
   }
 
-  const system = await getPromptText("monthly_touch_preparation_prompt");
+  const basePrompt = await getPromptText("monthly_touch_preparation_prompt");
+  // Append the editable meeting-variety instruction so the AI shapes this touch to
+  // this month's format and never opens the same way as last time. Non-fatal if unset.
+  const varietyPrompt = variety ? await getPromptText("meeting_variety_prompt").catch(() => "") : "";
+  const system = varietyPrompt ? `${basePrompt}\n\n---\n\n${varietyPrompt}` : basePrompt;
+
+  const varietyDirective = variety
+    ? [
+        "MEETING VARIETY DIRECTIVE (make this touch distinct and interactive -- follow it):",
+        `- This month's format: ${variety.formatName} -- ${variety.formatAngle}`,
+        `- Put in the spotlight: ${variety.formatSpotlight}`,
+        variety.previousFormatName
+          ? `- Last month's format was "${variety.previousFormatName}". Do NOT open the same way -- change the opening line, the angle, and which metric leads.`
+          : "- Set a distinctive opening you can deliberately vary next time.",
+        `- ${variety.varietyNote}`,
+        variety.decisionQuestions.length
+          ? `- Weave these decisions into the agenda and talking points as choices to ask the client live (they are a copilot, not a passenger): ${variety.decisionQuestions.join(" | ")}`
+          : "",
+        "Shape the executiveBrief opening, agenda order, and talkingPoints to this month's format. Never repeat last month's opening. Use only the real evidence in the bundle below.",
+        "",
+      ].filter(Boolean).join("\n")
+    : "";
 
   // RAG grounding: pull the most relevant Map Ranking knowledge for this client
   // and hand it to the model as authoritative context. Non-fatal.
@@ -1139,6 +1161,7 @@ async function generateClaudeTouchOutput(
         system,
         userText: [
           groundingBlock,
+          varietyDirective,
           "Return a JSON object with exactly these keys and types:",
           '  executiveBrief: a single string (use "\\n\\n" between paragraphs -- NOT an object)',
           "  agenda: array of 4-6 strings (each a plain string, not an object)",
@@ -1486,9 +1509,18 @@ export async function prepareMonthlyTouch(
     status: "not_configured",
   };
 
+  // Meeting variety / copilot: rotate the format so no two touches feel identical,
+  // note how this one differs, and give the client one or two decisions to co-own.
+  // Resolved before generation so the LLM can shape the touch to this month's angle.
+  const { format: meetingFormat, previous: previousTouch } = await resolveMeetingFormat(context, client.id, touch.id);
+  const keywordTerms = (prepPack.seoPerformance.keywordScanHistory ?? []).map((entry) => entry.keyword);
+  const decisionsTogether = buildDecisionsTogether(client, meetingFormat, opportunities, keywordTerms);
+  const varietyContext = buildVarietyContext(meetingFormat, previousTouch, decisionsTogether);
+  const varietyNote = varietyContext.varietyNote;
+
   if (options.includeClaude && hasAnyLlmProvider(env)) {
     try {
-      const claudeOutput = await generateClaudeTouchOutput(context, env, prepPack, client, touch);
+      const claudeOutput = await generateClaudeTouchOutput(context, env, prepPack, client, touch, varietyContext);
       if (claudeOutput) {
         executiveBrief = claudeOutput.output.executiveBrief;
         agenda = claudeOutput.output.agenda;
@@ -1525,13 +1557,6 @@ export async function prepareMonthlyTouch(
   if (prepAdditions.brief.length) {
     executiveBrief = `${executiveBrief}\n\nAdded by the account manager:\n${prepAdditions.brief.map((t) => `- ${t}`).join("\n")}`;
   }
-
-  // Meeting variety / copilot: rotate the format so no two touches feel identical,
-  // note how this one differs, and give the client one or two decisions to co-own.
-  const { format: meetingFormat, previous: previousTouch } = await resolveMeetingFormat(context, client.id, touch.id);
-  const keywordTerms = (prepPack.seoPerformance.keywordScanHistory ?? []).map((entry) => entry.keyword);
-  const decisionsTogether = buildDecisionsTogether(client, meetingFormat, opportunities, keywordTerms);
-  const varietyNote = buildVarietyNote(meetingFormat, previousTouch);
 
   // Lead & call verification runs as a non-fatal gated step: it vets the leads
   // the client received and reconciles the counts, but a failure here must never

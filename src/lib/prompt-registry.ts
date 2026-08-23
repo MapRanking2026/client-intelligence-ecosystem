@@ -62,6 +62,24 @@ export const PROMPT_BINDINGS: Record<string, PromptBinding[]> = {
       source: "src/lib/server/services/meeting-variety-service.ts",
     },
   ],
+  objection_handling_prompt: [
+    {
+      module: "Live call guide (anticipated objections & grounded responses)",
+      source: "src/lib/server/services/live-call-guide-service.ts",
+    },
+  ],
+  value_performance_translation_prompt: [
+    {
+      module: "Live call guide (plain-language value translations)",
+      source: "src/lib/server/services/live-call-guide-service.ts",
+    },
+  ],
+  michelin_communication_standard_prompt: [
+    {
+      module: "Live call guide (communication-standard tone on objections & value translations)",
+      source: "src/lib/server/services/live-call-guide-service.ts",
+    },
+  ],
 };
 
 export function getPromptBindings(key: string): PromptBinding[] {

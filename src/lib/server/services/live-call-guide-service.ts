@@ -1,13 +1,20 @@
 import { z } from "zod";
 
 import type { TenantContext } from "@/src/lib/contracts/mtos";
-import type { CallGuide, CallGuideSection, MonthlyTouchRecord, ScorecardMetric } from "@/src/lib/mtos-data";
+import type {
+  AnticipatedObjection,
+  CallGuide,
+  CallGuideSection,
+  MonthlyTouchRecord,
+  ScorecardMetric,
+  ValueTranslation,
+} from "@/src/lib/mtos-data";
 import { getMtosDataSource } from "@/src/lib/server/data/seed-mtos-data-source";
 import { monthlyTouchPath } from "@/src/lib/server/firebase/collections";
 import { getFirebaseAdminDb } from "@/src/lib/server/firebase/admin";
 import { getServerEnv } from "@/src/lib/server/env";
 import { callLlmForJson, getNowIso, hasAnyLlmProvider, stripUndefinedDeep } from "@/src/lib/server/services/mtos-ai";
-import { getPromptText } from "@/src/lib/server/prompt-store";
+import { getPromptText, getPromptRecord } from "@/src/lib/server/prompt-store";
 
 const callGuideSchema = z.object({
   sections: z
@@ -21,6 +28,29 @@ const callGuideSchema = z.object({
     )
     .min(4)
     .max(7),
+});
+
+const objectionsSchema = z.object({
+  objections: z
+    .array(
+      z.object({
+        objection: z.string().min(1),
+        response: z.string().min(1),
+        evidence: z.string().optional(),
+      }),
+    )
+    .max(8),
+});
+
+const valueTranslationsSchema = z.object({
+  translations: z
+    .array(
+      z.object({
+        metric: z.string().min(1),
+        meaning: z.string().min(1),
+      }),
+    )
+    .max(10),
 });
 
 function formatScorecardMetric(metric?: ScorecardMetric) {
@@ -233,6 +263,91 @@ async function generateClaudeSections(
   return { sections: parsed.sections, provider: result.provider, model: result.model };
 }
 
+/**
+ * Best-effort presentation aids that wire three SOP-critical, previously-orphaned
+ * Prompt Engine prompts into the live guide:
+ *   - objection_handling_prompt          -> anticipated objections + grounded responses
+ *   - value_performance_translation_prompt -> plain-language value translations
+ *   - michelin_communication_standard_prompt -> tone directive applied to both
+ *
+ * Every model call is isolated in its own try/catch, so a failure only omits that
+ * one aid -- the timed run-sheet built by generateLiveCallGuide is never affected.
+ * Uses only evidence from the prep pack; the prompts forbid inventing numbers.
+ */
+async function generatePresentationAids(
+  env: ReturnType<typeof getServerEnv>,
+  touch: MonthlyTouchRecord,
+): Promise<{ anticipatedObjections?: AnticipatedObjection[]; valueTranslations?: ValueTranslation[] }> {
+  if (!hasAnyLlmProvider(env)) {
+    return {};
+  }
+
+  const prepPack = touch.prepPack;
+  const evidence = JSON.stringify(
+    {
+      clientSummary: prepPack?.clientSummary,
+      businessScorecard: prepPack?.businessScorecard,
+      wins: touch.wins,
+      risks: touch.risks,
+      issuesAndSolutions: prepPack?.issuesAndSolutions,
+      strategicAction: prepPack?.strategicAction,
+      adsPerformance: prepPack?.adsPerformance,
+      gbpPerformance: prepPack?.seoPerformance?.gbpPerformance,
+    },
+    null,
+    2,
+  );
+
+  // The Michelin standard shapes wording everywhere. Fetch the raw body once and
+  // append it as a tone directive (getPromptRecord avoids re-nesting the global
+  // preamble that getPromptText would add).
+  let toneDirective = "";
+  try {
+    const michelin = (await getPromptRecord("michelin_communication_standard_prompt"))?.prompt?.trim();
+    if (michelin) {
+      toneDirective = `\n\nApply this communication standard to the wording of every line you return:\n${michelin}`;
+    }
+  } catch {
+    // Tone is a nicety; never block the aids on it.
+  }
+
+  const aids: { anticipatedObjections?: AnticipatedObjection[]; valueTranslations?: ValueTranslation[] } = {};
+
+  try {
+    const system = await getPromptText("objection_handling_prompt");
+    const userText = [
+      "Return a JSON object with a single key: objections.",
+      "Each item needs: objection (string), response (string), and optionally evidence (string).",
+      "Anticipate the objections THIS client is most likely to raise, grounded only in the evidence below. Do not invent metrics or sources.",
+      "",
+      evidence,
+      toneDirective,
+    ].join("\n");
+    const res = await callLlmForJson({ env, system, userText, maxTokens: 900 });
+    aids.anticipatedObjections = objectionsSchema.parse(res.data).objections;
+  } catch {
+    // Best-effort: omit objections on any failure.
+  }
+
+  try {
+    const system = await getPromptText("value_performance_translation_prompt");
+    const userText = [
+      "Return a JSON object with a single key: translations.",
+      "Each item needs: metric (string, the raw number/deliverable) and meaning (string, what it means for the client's business in plain language).",
+      "Translate only the metrics present in the evidence below. Do not invent numbers.",
+      "",
+      evidence,
+      toneDirective,
+    ].join("\n");
+    const res = await callLlmForJson({ env, system, userText, maxTokens: 900 });
+    aids.valueTranslations = valueTranslationsSchema.parse(res.data).translations;
+  } catch {
+    // Best-effort: omit translations on any failure.
+  }
+
+  return aids;
+}
+
 export async function generateLiveCallGuide(context: TenantContext, touchId: string) {
   const db = getFirebaseAdminDb();
   if (!db) {
@@ -278,6 +393,21 @@ export async function generateLiveCallGuide(context: TenantContext, touchId: str
           ? error.message
           : "Claude call guide generation failed; used the deterministic fallback instead.",
     };
+  }
+
+  // Additive, best-effort presentation aids (anticipated objections, value
+  // translations, Michelin tone). Runs for both the AI and deterministic guides;
+  // any failure simply leaves the fields unset and never blocks the run-sheet.
+  try {
+    const presentationAids = await generatePresentationAids(env, touch);
+    if (presentationAids.anticipatedObjections?.length) {
+      callGuide.anticipatedObjections = presentationAids.anticipatedObjections;
+    }
+    if (presentationAids.valueTranslations?.length) {
+      callGuide.valueTranslations = presentationAids.valueTranslations;
+    }
+  } catch {
+    // The aids are additive; the timed guide stands on its own.
   }
 
   const updatedTouch: MonthlyTouchRecord = stripUndefinedDeep({

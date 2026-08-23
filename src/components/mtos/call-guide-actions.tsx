@@ -173,6 +173,53 @@ export function CallGuideActions({ touchId, clientId, callGuide, screenOverrides
               </div>
             );
           })}
+
+          {callGuide.anticipatedObjections?.length ? (
+            <div className="rounded-2xl border border-amber-300/15 bg-amber-300/5 p-4">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-amber-200">
+                Anticipated objections
+              </p>
+              <p className="mt-1 text-xs text-slate-400">
+                Grounded, non-defensive responses -- ready before the client raises them.
+              </p>
+              <div className="mt-3 space-y-3">
+                {callGuide.anticipatedObjections.map((item, index) => (
+                  <div
+                    key={`objection-${index}`}
+                    className="rounded-xl border border-white/8 bg-black/20 px-3 py-2"
+                  >
+                    <p className="text-sm font-semibold text-amber-100">&ldquo;{item.objection}&rdquo;</p>
+                    <p className="mt-1 text-sm text-slate-200">{item.response}</p>
+                    {item.evidence ? (
+                      <p className="mt-1 text-xs text-slate-400">Evidence: {item.evidence}</p>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
+          {callGuide.valueTranslations?.length ? (
+            <div className="rounded-2xl border border-[#2dd4bf]/15 bg-[#2dd4bf]/5 p-4">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-[#2dd4bf]">
+                Say it in business terms
+              </p>
+              <p className="mt-1 text-xs text-slate-400">
+                Translate each metric into what it means for their business.
+              </p>
+              <div className="mt-3 space-y-2">
+                {callGuide.valueTranslations.map((item, index) => (
+                  <div
+                    key={`value-${index}`}
+                    className="rounded-xl border border-white/8 bg-black/20 px-3 py-2"
+                  >
+                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">{item.metric}</p>
+                    <p className="mt-1 text-sm text-slate-200">{item.meaning}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
         </div>
       ) : null}
     </div>

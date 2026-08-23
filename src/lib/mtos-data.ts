@@ -385,6 +385,24 @@ export interface CallGuideSection {
   clientPrompts: string[];
 }
 
+/** A client objection the AM should be ready for, with a grounded response. */
+export interface AnticipatedObjection {
+  /** The objection or hard question the client is likely to raise. */
+  objection: string;
+  /** A grounded, non-defensive, solution-focused response for the AM. */
+  response: string;
+  /** Optional evidence from the prep pack that backs the response. */
+  evidence?: string;
+}
+
+/** A raw metric/deliverable translated into plain-language business value. */
+export interface ValueTranslation {
+  /** The raw metric, deliverable, or win (e.g. "ARP improved 12 → 6"). */
+  metric: string;
+  /** What it means for the client's business, in plain language. */
+  meaning: string;
+}
+
 export interface CallGuide {
   status: "not_generated" | "generated";
   source?: "claude" | "deterministic";
@@ -394,6 +412,17 @@ export interface CallGuide {
   /** Which LLM provider answered (claude/openai/gemini). */
   provider?: string;
   errorMessage?: string;
+  /**
+   * Anticipated client objections with grounded responses, from
+   * `objection_handling_prompt`. Additive and best-effort: absent if the model
+   * is unavailable or the call fails, so it never blocks the timed guide.
+   */
+  anticipatedObjections?: AnticipatedObjection[];
+  /**
+   * Plain-language value translations of the month's metrics, from
+   * `value_performance_translation_prompt`. Additive and best-effort.
+   */
+  valueTranslations?: ValueTranslation[];
 }
 
 export type TicketDepartment = "SEO" | "Web Design" | "Ads" | "Account Manager" | "Other";

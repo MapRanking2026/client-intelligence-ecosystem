@@ -66,7 +66,9 @@ export async function assembleRetentionFacts(context: TenantContext, clientId: s
 
   // Market share + rank transformation (prefer the blended scorecard metrics).
   const share = scorecard?.shareOfLocalVoice;
-  const rank = scorecard?.averageKeywordRank;
+  // The "Average keyword rank" metric is stored under `top3Coverage` in BusinessScorecard
+  // (see monthly-touch-prep-service.ts scorecard builder). There is no `averageKeywordRank` field.
+  const rank = scorecard?.top3Coverage;
   const marketShareNow = n(share?.value);
   const marketShareBaseline = n(share?.previousValue);
   const rankNow = n(rank?.value);

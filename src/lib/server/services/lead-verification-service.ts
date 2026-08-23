@@ -22,6 +22,7 @@ import { getServerEnv } from "@/src/lib/server/env";
 import { fetchGhlClientLeadsAndCalls } from "@/src/lib/server/integration-sync";
 import { callLlmForJson, getNowIso, hasAnyLlmProvider, stripUndefinedDeep } from "@/src/lib/server/services/mtos-ai";
 import { getPromptText } from "@/src/lib/server/prompt-store";
+import { namesLikelyMatch } from "@/src/lib/server/name-matching";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -479,7 +480,21 @@ export async function runLeadVerification(
 
   const leadsByClient = (crmPayload?.leadsByClient || {}) as JsonRecord;
   const clientCrm = (leadsByClient[clientId] || null) as JsonRecord | null;
-  const locationId = str(clientCrm?.locationId);
+  let locationId = str(clientCrm?.locationId);
+  if (!locationId) {
+    // The agency sync only writes leadsByClient for clients it attributed, so a
+    // client that's pinned or auto-matched in Profile mappings but not yet in that
+    // map would report "no data matched" even though its GHL location is known.
+    // Resolve the location the same way the mapping panel does — pinned first,
+    // then a name auto-match against the location index — and pull directly below.
+    const pinned = (client.integrationMappings?.gohighlevel || []).map((value) => str(value)).filter(Boolean);
+    const locationIndex = Array.isArray(crmPayload?.locationIndex) ? (crmPayload!.locationIndex as JsonRecord[]) : [];
+    const autoMatched = locationIndex
+      .filter((location) => namesLikelyMatch(client.name, str(location.name)))
+      .map((location) => str(location.id))
+      .filter(Boolean);
+    locationId = pinned[0] || autoMatched[0] || "";
+  }
   const { since: windowStart, until: windowEnd } = resolveLeadWindow(options.window);
   const windowEndMs = windowEnd ? new Date(windowEnd).getTime() : null;
 
@@ -521,13 +536,13 @@ export async function runLeadVerification(
     }
   }
 
-  if (!clientCrm && !rawLeads.length) {
+  if (!locationId && !rawLeads.length) {
     warnings.push(
-      "GoHighLevel has no data matched to this client yet — pin the client's GHL location under Profile mappings, then sync.",
+      "GoHighLevel has no location matched to this client yet — pin the client's GHL location under Profile mappings, then sync.",
     );
   } else if (!rawLeads.length) {
     warnings.push(
-      "No individual lead records available yet — the latest GoHighLevel sync returned only counts. Try Refresh, or re-sync GoHighLevel.",
+      "This client's GoHighLevel location is matched, but no leads or calls were found in the selected window. Widen the date range, or re-sync GoHighLevel.",
     );
     const diagnostic = str(clientCrm?.leadsDiagnostic);
     if (diagnostic) {

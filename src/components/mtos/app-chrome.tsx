@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
@@ -46,9 +46,42 @@ interface AppChromeProps {
   children: ReactNode;
 }
 
+interface CurrentUser {
+  name: string;
+  roleLabel: string;
+}
+
+/** Initials for the avatar: first letter of the first two words, else first two letters. */
+function getInitials(name: string) {
+  const words = name.trim().split(/\s+/).filter(Boolean);
+  if (words.length >= 2) {
+    return `${words[0][0]}${words[1][0]}`.toUpperCase();
+  }
+  return (words[0] || "").slice(0, 2).toUpperCase() || "AM";
+}
+
 export function AppChrome({ title, subtitle, children }: AppChromeProps) {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
+  const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    fetch("/api/me", { headers: { accept: "application/json" } })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((payload) => {
+        if (active && payload?.data) {
+          setCurrentUser({ name: payload.data.name, roleLabel: payload.data.roleLabel });
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const userName = currentUser?.name || "Account Manager";
+  const userRole = currentUser?.roleLabel || "Account Manager";
 
   return (
     <div className="shell">
@@ -79,10 +112,10 @@ export function AppChrome({ title, subtitle, children }: AppChromeProps) {
         </nav>
         <div className="sidebar-foot">
           <div className="user-chip">
-            <div className="avatar">AM</div>
+            <div className="avatar">{getInitials(userName)}</div>
             <div className="min-w-0">
-              <div className="nm">Account Manager</div>
-              <div className="rl">Map Ranking</div>
+              <div className="nm">{userName}</div>
+              <div className="rl">{userRole}</div>
             </div>
           </div>
         </div>

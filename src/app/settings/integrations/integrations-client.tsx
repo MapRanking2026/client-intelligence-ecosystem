@@ -17,6 +17,8 @@ import {
   Stethoscope,
   TimerReset,
   Unplug,
+  UserRound,
+  Users,
   XCircle,
 } from "lucide-react";
 
@@ -525,6 +527,26 @@ export function IntegrationsClient({
                             )}
                           >
                             {status.label}
+                          </span>
+                          <span
+                            className={cn(
+                              "inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-medium",
+                              provider.isShared
+                                ? "border-sky-400/25 bg-sky-500/12 text-sky-100"
+                                : "border-violet-400/25 bg-violet-500/12 text-violet-100",
+                            )}
+                            title={
+                              provider.isShared
+                                ? "Connected once for the whole team — everyone shares this connection."
+                                : "Each user connects their own account; teammates never see your tokens."
+                            }
+                          >
+                            {provider.isShared ? (
+                              <Users className="h-3 w-3" />
+                            ) : (
+                              <UserRound className="h-3 w-3" />
+                            )}
+                            {provider.isShared ? "Shared with team" : "Personal"}
                           </span>
                         </div>
                         <p className="text-sm leading-6 text-slate-400">{provider.description}</p>

@@ -17,6 +17,8 @@ import {
   integrationConnectionPath,
   integrationSyncJobsCollectionPath,
   integrationsCollectionPath,
+  userIntegrationConnectionPath,
+  userIntegrationsCollectionPath,
 } from "@/src/lib/server/firebase/collections";
 import { getFirebaseAdminDb } from "@/src/lib/server/firebase/admin";
 import { getServerEnv } from "@/src/lib/server/env";
@@ -52,6 +54,30 @@ interface ProviderDefinition {
 }
 
 const OAUTH_STATE_AUDIENCE = "mtos-integrations-oauth";
+
+/**
+ * Providers connected ONCE for the whole tenant -- every user shares the same connection. These are
+ * Map Ranking's own data feeds (ranking + check-ins), not personal accounts. Everything else is
+ * stored per-user, so each account manager connects their own ClickUp, Google, GoHighLevel, etc.
+ * and never sees a teammate's tokens. Changing this set changes where a provider's connection lives.
+ */
+const sharedIntegrationProviders = new Set<IntegrationProviderId>([
+  "rank-tracker",
+  "geogrid",
+  "map-checkins",
+]);
+
+export function isSharedIntegrationProvider(providerId: IntegrationProviderId) {
+  return sharedIntegrationProviders.has(providerId);
+}
+
+/**
+ * "all" merges this user's personal connections with the tenant's shared feeds (what the settings
+ * page shows). "shared" restricts to tenant-level feeds (used by the cron once per tenant). "user"
+ * restricts to a single user's personal connections (used by the cron per registered user).
+ */
+type ConnectionScope = "all" | "shared" | "user";
+
 const syncEnabledProviders = new Set<IntegrationProviderId>([
   "clickup",
   "google-calendar",
@@ -738,28 +764,60 @@ function parseStoredConnection(payload: Record<string, unknown>): IntegrationCon
   };
 }
 
-async function listStoredConnections(tenantId: string) {
-  const db = getFirebaseAdminDb();
-  if (!db) {
-    return new Map<IntegrationProviderId, IntegrationConnectionRecord>();
-  }
-
-  const snapshot = await db.collection(integrationsCollectionPath(tenantId)).get();
-  return new Map<IntegrationProviderId, IntegrationConnectionRecord>(
-    snapshot.docs.map((doc) => {
-      const data = doc.data() as Record<string, unknown>;
-      return [doc.id as IntegrationProviderId, parseStoredConnection(data)];
-    }),
-  );
+/**
+ * Firestore path for a single connection: tenant-level for shared feeds, per-user otherwise. The
+ * userId comes from the caller's context, which is why the OAuth state carries the initiating user
+ * (see createOAuthState) -- so a callback stores the token under the user who started the flow.
+ */
+function connectionDocPath(context: TenantContext, providerId: IntegrationProviderId) {
+  return isSharedIntegrationProvider(providerId)
+    ? integrationConnectionPath(context.tenantId, providerId)
+    : userIntegrationConnectionPath(context.tenantId, context.userId, providerId);
 }
 
-async function getStoredConnection(tenantId: string, providerId: IntegrationProviderId) {
+async function listStoredConnections(context: TenantContext, scope: ConnectionScope = "all") {
+  const db = getFirebaseAdminDb();
+  const connections = new Map<IntegrationProviderId, IntegrationConnectionRecord>();
+  if (!db) {
+    return connections;
+  }
+
+  // Shared, tenant-level feeds. The tenant collection may still hold legacy per-user providers
+  // stored before per-user scoping existed; only surface genuinely shared providers from here so
+  // those orphans stay hidden and each user reconnects their own.
+  if (scope !== "user") {
+    const sharedSnapshot = await db.collection(integrationsCollectionPath(context.tenantId)).get();
+    for (const doc of sharedSnapshot.docs) {
+      const providerId = doc.id as IntegrationProviderId;
+      if (isSharedIntegrationProvider(providerId)) {
+        connections.set(providerId, parseStoredConnection(doc.data() as Record<string, unknown>));
+      }
+    }
+  }
+
+  // This user's personal connections.
+  if (scope !== "shared" && context.userId) {
+    const userSnapshot = await db
+      .collection(userIntegrationsCollectionPath(context.tenantId, context.userId))
+      .get();
+    for (const doc of userSnapshot.docs) {
+      const providerId = doc.id as IntegrationProviderId;
+      if (!isSharedIntegrationProvider(providerId)) {
+        connections.set(providerId, parseStoredConnection(doc.data() as Record<string, unknown>));
+      }
+    }
+  }
+
+  return connections;
+}
+
+async function getStoredConnection(context: TenantContext, providerId: IntegrationProviderId) {
   const db = getFirebaseAdminDb();
   if (!db) {
     return undefined;
   }
 
-  const snapshot = await db.doc(integrationConnectionPath(tenantId, providerId)).get();
+  const snapshot = await db.doc(connectionDocPath(context, providerId)).get();
   if (!snapshot.exists) {
     return undefined;
   }
@@ -767,7 +825,7 @@ async function getStoredConnection(tenantId: string, providerId: IntegrationProv
   return parseStoredConnection(snapshot.data() as Record<string, unknown>);
 }
 
-async function saveStoredConnection(record: IntegrationConnectionRecord) {
+async function saveStoredConnection(context: TenantContext, record: IntegrationConnectionRecord) {
   const db = getFirebaseAdminDb();
   if (!db) {
     throw new Error("Firebase Admin must be configured before integrations can be stored");
@@ -777,7 +835,7 @@ async function saveStoredConnection(record: IntegrationConnectionRecord) {
     Object.entries(record).filter(([, value]) => value !== undefined),
   ) as Record<string, unknown>;
 
-  await db.doc(integrationConnectionPath(record.tenantId, record.providerId)).set(sanitizedRecord);
+  await db.doc(connectionDocPath(context, record.providerId)).set(sanitizedRecord);
 }
 
 async function listLatestSyncJobs(tenantId: string) {
@@ -803,13 +861,13 @@ async function listLatestSyncJobs(tenantId: string) {
   return latestJobs;
 }
 
-async function deleteStoredConnection(tenantId: string, providerId: IntegrationProviderId) {
+async function deleteStoredConnection(context: TenantContext, providerId: IntegrationProviderId) {
   const db = getFirebaseAdminDb();
   if (!db) {
     throw new Error("Firebase Admin must be configured before integrations can be removed");
   }
 
-  await db.doc(integrationConnectionPath(tenantId, providerId)).delete();
+  await db.doc(connectionDocPath(context, providerId)).delete();
 }
 
 function getStatusDetail(provider: ProviderDefinition, record?: IntegrationConnectionRecord) {
@@ -911,6 +969,7 @@ function toProviderView(
     allowsOAuth: provider.authMode === "oauth",
     supportsRefresh: provider.authMode === "rotating_token" || provider.oauth?.refreshStrategy !== "none",
     supportsSync: syncEnabledProviders.has(provider.id),
+    isShared: isSharedIntegrationProvider(provider.id),
     connectedAt: record?.connectedAt,
     lastRefreshAt: record?.lastRefreshAt,
     lastSyncAt: latestSyncJob?.finishedAt || latestSyncJob?.startedAt,
@@ -1140,9 +1199,7 @@ function buildAuthorizationUrl(provider: ProviderDefinition, context: TenantCont
     authUrl.searchParams.set("redirect_uri", clientConfig.redirectUri);
     authUrl.searchParams.set("state", state);
 
-    if (provider.id !== "clickup") {
-      authUrl.searchParams.set("response_type", "code");
-    }
+    authUrl.searchParams.set("response_type", "code");
 
     if (provider.oauth!.scopes.length > 0) {
       authUrl.searchParams.set("scope", provider.oauth!.scopes.join(" "));
@@ -1214,7 +1271,7 @@ function assertRequiredFields(provider: ProviderDefinition, credentials: StoredC
  * path retries, and a genuinely dead connection surfaces as action_required).
  */
 async function proactivelyRenewTokens(context: TenantContext): Promise<void> {
-  const connections = await listStoredConnections(context.tenantId);
+  const connections = await listStoredConnections(context);
   const renewBy = Date.now() + 30 * 60 * 1000;
 
   const stale = [...connections.values()].filter((record) => {
@@ -1239,7 +1296,7 @@ async function proactivelyRenewTokens(context: TenantContext): Promise<void> {
 
 export async function listIntegrationViews(context: TenantContext) {
   await proactivelyRenewTokens(context);
-  const storedConnections = await listStoredConnections(context.tenantId);
+  const storedConnections = await listStoredConnections(context);
   const latestJobs = await listLatestSyncJobs(context.tenantId);
   return providerDefinitions.map((provider) =>
     toProviderView(provider, storedConnections.get(provider.id), latestJobs.get(provider.id)),
@@ -1291,7 +1348,7 @@ export async function connectIntegration(
     credentials,
   );
 
-  await saveStoredConnection(record);
+  await saveStoredConnection(context, record);
 
   return {
     provider: toProviderView(provider, record),
@@ -1300,12 +1357,12 @@ export async function connectIntegration(
 
 export async function disconnectIntegration(context: TenantContext, providerId: IntegrationProviderId) {
   getProviderDefinition(providerId);
-  await deleteStoredConnection(context.tenantId, providerId);
+  await deleteStoredConnection(context, providerId);
 }
 
 export async function refreshIntegration(context: TenantContext, providerId: IntegrationProviderId, origin?: string) {
   const provider = getProviderDefinition(providerId);
-  const existing = await getStoredConnection(context.tenantId, providerId);
+  const existing = await getStoredConnection(context, providerId);
   if (!existing) {
     throw new Error(`${provider.name} is not connected yet`);
   }
@@ -1379,7 +1436,7 @@ export async function refreshIntegration(context: TenantContext, providerId: Int
       refreshedCredentials,
     );
 
-    await saveStoredConnection(refreshedRecord);
+    await saveStoredConnection(context, refreshedRecord);
     return toProviderView(provider, refreshedRecord);
   }
 
@@ -1395,7 +1452,7 @@ export async function refreshIntegration(context: TenantContext, providerId: Int
           lastValidatedAt: now,
         },
       );
-      await saveStoredConnection(updatedRecord);
+      await saveStoredConnection(context, updatedRecord);
       return toProviderView(provider, updatedRecord);
     }
 
@@ -1421,7 +1478,7 @@ export async function refreshIntegration(context: TenantContext, providerId: Int
           accessToken: longLived.accessToken,
         },
       );
-      await saveStoredConnection(updatedRecord);
+      await saveStoredConnection(context, updatedRecord);
       return toProviderView(provider, updatedRecord);
     }
 
@@ -1463,7 +1520,7 @@ export async function refreshIntegration(context: TenantContext, providerId: Int
         refreshToken,
       },
     );
-    await saveStoredConnection(updatedRecord);
+    await saveStoredConnection(context, updatedRecord);
     return toProviderView(provider, updatedRecord);
   }
 
@@ -1478,7 +1535,7 @@ export async function refreshIntegration(context: TenantContext, providerId: Int
     },
     credentials,
   );
-  await saveStoredConnection(updatedRecord);
+  await saveStoredConnection(context, updatedRecord);
   return toProviderView(provider, updatedRecord);
 }
 
@@ -1519,13 +1576,17 @@ export async function completeOAuthConnection(
   const userType = getStringFromPayload(payload, ["userType", "user_type"]) || undefined;
   const isAgencyInstall = (userType || "").toLowerCase() === "company";
 
+  // The OAuth state carries the user who started the flow, so the token is stored under THEM
+  // (per-user providers) rather than shared across the tenant.
+  const oauthContext: TenantContext = {
+    tenantId: state.tenantId,
+    userId: state.userId,
+    role: "tenant_admin",
+  };
+
   const record = buildStoredRecord(
     provider,
-    {
-      tenantId: state.tenantId,
-      userId: state.userId,
-      role: "tenant_admin",
-    },
+    oauthContext,
     {
       status: "connected",
       displayLabel: isAgencyInstall
@@ -1555,10 +1616,10 @@ export async function completeOAuthConnection(
     },
   );
 
-  await saveStoredConnection(record);
+  await saveStoredConnection(oauthContext, record);
   return {
     providerId: provider.id,
-    context: { tenantId: state.tenantId, userId: state.userId, role: "tenant_admin" as const },
+    context: oauthContext,
   };
 }
 
@@ -1570,8 +1631,11 @@ export function isSyncEnabledProvider(providerId: IntegrationProviderId) {
   return syncEnabledProviders.has(providerId);
 }
 
-export async function listConnectedSyncableProviders(tenantId: string): Promise<IntegrationProviderId[]> {
-  const stored = await listStoredConnections(tenantId);
+export async function listConnectedSyncableProviders(
+  context: TenantContext,
+  scope: ConnectionScope = "all",
+): Promise<IntegrationProviderId[]> {
+  const stored = await listStoredConnections(context, scope);
   return Array.from(stored.entries())
     .filter(([providerId, record]) => record.status === "connected" && syncEnabledProviders.has(providerId))
     .map(([providerId]) => providerId);
@@ -1589,8 +1653,11 @@ interface TokenRefreshResult {
  * their credential never expires. Runs even for connections no sync touches (Analytics, Drive, Meet)
  * so their refresh tokens stay exercised and never lapse, removing any need to refresh by hand.
  */
-export async function refreshAllConnectedTokens(context: TenantContext): Promise<TokenRefreshResult[]> {
-  const stored = await listStoredConnections(context.tenantId);
+export async function refreshAllConnectedTokens(
+  context: TenantContext,
+  scope: ConnectionScope = "all",
+): Promise<TokenRefreshResult[]> {
+  const stored = await listStoredConnections(context, scope);
   const results: TokenRefreshResult[] = [];
 
   for (const [providerId, record] of stored) {
@@ -1625,7 +1692,7 @@ export async function getIntegrationConnection(
   providerId: IntegrationProviderId,
 ) {
   getProviderDefinition(providerId);
-  return getStoredConnection(context.tenantId, providerId);
+  return getStoredConnection(context, providerId);
 }
 
 export function getIntegrationCredentials(record?: IntegrationConnectionRecord) {

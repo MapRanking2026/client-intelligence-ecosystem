@@ -20,12 +20,35 @@ export interface TokenRefreshReport {
 }
 
 /**
+ * Builds a context for every registered user in a tenant, so per-user integrations (each AM's own
+ * ClickUp, Google, GoHighLevel, ...) can be refreshed and synced under the right user.
+ */
+async function listTenantUserContexts(tenantId: string): Promise<TenantContext[]> {
+  const db = getFirebaseAdminDb();
+  if (!db) {
+    return [];
+  }
+  const snapshot = await db.collection(tenantUsersCollectionPath(tenantId)).get();
+  return snapshot.docs.map((doc) => ({
+    tenantId,
+    userId: doc.id,
+    role: String((doc.data() as { role?: string }).role || "account_manager") as TenantContext["role"],
+  }));
+}
+
+/**
  * Refreshes every connected integration's token that can expire, for a tenant. Kept lightweight so
- * it can run on a frequent cron independent of the heavier data syncs.
+ * it can run on a frequent cron independent of the heavier data syncs. Shared feeds are refreshed
+ * once; each user's personal connections are refreshed under their own context.
  */
 export async function runTokenRefresh(tenantId: string): Promise<TokenRefreshReport[]> {
   const systemContext: TenantContext = { tenantId, userId: "system-cron", role: "tenant_admin" };
-  return refreshAllConnectedTokens(systemContext);
+  const reports: TokenRefreshReport[] = [];
+  reports.push(...(await refreshAllConnectedTokens(systemContext, "shared")));
+  for (const userContext of await listTenantUserContexts(tenantId)) {
+    reports.push(...(await refreshAllConnectedTokens(userContext, "user")));
+  }
+  return reports;
 }
 
 interface ClientSyncResult {
@@ -50,13 +73,14 @@ export interface DailySyncReport {
 export async function runDailyTenantSync(tenantId: string): Promise<DailySyncReport> {
   const systemContext: TenantContext = { tenantId, userId: "system-cron", role: "tenant_admin" };
 
-  // Refresh every connectable token up front -- including providers no sync touches -- so all
-  // credentials are fresh before the syncs and stay exercised.
-  const tokenRefresh = await refreshAllConnectedTokens(systemContext);
+  // Refresh every connectable token up front -- shared feeds once, plus each user's personal
+  // connections -- so all credentials are fresh before the syncs and stay exercised.
+  const tokenRefresh = await runTokenRefresh(tenantId);
 
-  const providerIds = await listConnectedSyncableProviders(tenantId);
   const providers: ProviderResult[] = [];
-  for (const providerId of providerIds) {
+
+  // Shared, tenant-level feeds (rank tracker, check-ins) sync once for the whole tenant.
+  for (const providerId of await listConnectedSyncableProviders(systemContext, "shared")) {
     try {
       const result = await syncIntegrationProvider(systemContext, providerId);
       providers.push({ providerId, status: "completed", summary: result.summary });
@@ -69,32 +93,40 @@ export async function runDailyTenantSync(tenantId: string): Promise<DailySyncRep
     }
   }
 
-  // The client roster is matched per manager, so run the client sync for each registered user.
+  // Per-user work: each registered user's personal integrations sync under their own context, then
+  // the client roster is matched per manager.
   const clientSyncs: ClientSyncResult[] = [];
-  const db = getFirebaseAdminDb();
-  if (db) {
-    const usersSnapshot = await db.collection(tenantUsersCollectionPath(tenantId)).get();
-    for (const userDoc of usersSnapshot.docs) {
-      const role = String((userDoc.data() as { role?: string }).role || "account_manager");
-      const userContext: TenantContext = {
-        tenantId,
-        userId: userDoc.id,
-        role: role as TenantContext["role"],
-      };
+  for (const userContext of await listTenantUserContexts(tenantId)) {
+    for (const providerId of await listConnectedSyncableProviders(userContext, "user")) {
       try {
-        const result = await syncClickUpClients(userContext);
-        clientSyncs.push({
-          userId: userDoc.id,
+        const result = await syncIntegrationProvider(userContext, providerId);
+        providers.push({
+          providerId,
           status: "completed",
-          detail: `${result.counts?.created ?? 0} created, ${result.counts?.updated ?? 0} updated`,
+          summary: `[${userContext.userId}] ${result.summary}`,
         });
       } catch (error) {
-        clientSyncs.push({
-          userId: userDoc.id,
+        providers.push({
+          providerId,
           status: "failed",
-          detail: error instanceof Error ? error.message : "client sync failed",
+          summary: `[${userContext.userId}] ${error instanceof Error ? error.message : "sync failed"}`,
         });
       }
+    }
+
+    try {
+      const result = await syncClickUpClients(userContext);
+      clientSyncs.push({
+        userId: userContext.userId,
+        status: "completed",
+        detail: `${result.counts?.created ?? 0} created, ${result.counts?.updated ?? 0} updated`,
+      });
+    } catch (error) {
+      clientSyncs.push({
+        userId: userContext.userId,
+        status: "failed",
+        detail: error instanceof Error ? error.message : "client sync failed",
+      });
     }
   }
 

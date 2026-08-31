@@ -63,6 +63,16 @@ export function integrationConnectionPath(tenantId: string, providerId: string) 
   return `${integrationsCollectionPath(tenantId)}/${providerId}`;
 }
 
+/** Per-user integration connections: each account manager connects their own accounts
+ *  (ClickUp, Google, GoHighLevel, ...). Shared feeds stay under the tenant-level path above. */
+export function userIntegrationsCollectionPath(tenantId: string, userId: string) {
+  return `${tenantUserPath(tenantId, userId)}/integrations`;
+}
+
+export function userIntegrationConnectionPath(tenantId: string, userId: string, providerId: string) {
+  return `${userIntegrationsCollectionPath(tenantId, userId)}/${providerId}`;
+}
+
 export function externalRecordMappingsCollectionPath(tenantId: string) {
   return `${tenantPath(tenantId)}/externalRecordMappings`;
 }

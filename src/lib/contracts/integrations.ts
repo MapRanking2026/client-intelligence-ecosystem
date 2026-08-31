@@ -89,6 +89,8 @@ export interface IntegrationProviderView {
   allowsOAuth: boolean;
   supportsRefresh: boolean;
   supportsSync: boolean;
+  /** True when this connection is shared by the whole team; false when each user connects their own. */
+  isShared: boolean;
   connectedAt?: string;
   lastRefreshAt?: string;
   lastSyncAt?: string;

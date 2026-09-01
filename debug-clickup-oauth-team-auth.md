@@ -46,3 +46,19 @@
   reconnects their own ClickUp via a clean per-user flow, which removes the "already connected /
   can't reconnect" confusion. The ClickUp-side authorize error is separate and still needs the
   dashboard check above.
+
+## Additional Evidence (2026-08-30)
+- `.env` and `.env.local` both currently point `CLICKUP_REDIRECT_URI` to
+  `https://mtos.mapranking.com/api/integrations/clickup/callback`.
+- `.env` and `.env.local` contain DIFFERENT `CLICKUP_CLIENT_ID` and `CLICKUP_CLIENT_SECRET` values.
+- In Next.js, `.env.local` overrides `.env` during local/dev execution, so the active local ClickUp
+  app identity is the `.env.local` one, not the `.env` one.
+- The screenshoted error is rendered on ClickUp's own authorize screen before MTOS receives the
+  callback, which further supports that the break is in the specific ClickUp app/account config
+  being used, not in the MTOS callback route.
+
+## Updated Conclusion
+- The remaining failure is most likely caused by the active ClickUp OAuth app configuration for the
+  `.env.local` client id (`PHJD1JR6QV709WMBPPHTJE9XUBMCJVU7`) not matching the registered redirect URL
+  or not being valid/authorized for the workspace account being used.
+- No additional in-repo code change is justified until that upstream app configuration is verified.

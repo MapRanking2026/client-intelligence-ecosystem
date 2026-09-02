@@ -60,7 +60,10 @@ async function analyzeWithClaude(
     ),
   ].join("\n");
 
-  const result = await callLlmForJson({ env, system, userText, maxTokens: 1800 });
+  // The analysis emits a recap, up to 10 commitments, up to 8 draft tickets
+  // (title + description + department each), plus a full client email subject
+  // and body -- 1800 truncated the JSON mid-array, which then fails to parse.
+  const result = await callLlmForJson({ env, system, userText, maxTokens: 8000 });
   return { analysis: analysisSchema.parse(result.data), provider: result.provider, model: result.model };
 }
 

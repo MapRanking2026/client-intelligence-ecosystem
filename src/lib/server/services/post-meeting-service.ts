@@ -34,6 +34,104 @@ const analysisSchema = z.object({
   clientEmailBody: z.string().min(1),
 });
 
+/**
+ * Flatten an LLM value that should be a short string. The model often returns a
+ * commitment as an object (e.g. { commitment, owner, dueDate }) rather than a
+ * plain string, which would fail `z.string()`. Pull the primary text out and
+ * append owner/due-date style qualifiers so no detail is lost.
+ */
+function coerceText(value: unknown, joiner = " — "): string {
+  if (typeof value === "string") return value.trim();
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (Array.isArray(value)) {
+    return value.map((entry) => coerceText(entry, joiner)).filter(Boolean).join(joiner);
+  }
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    const primaryKeys = [
+      "commitment",
+      "text",
+      "summary",
+      "description",
+      "title",
+      "task",
+      "action",
+      "item",
+      "detail",
+      "name",
+    ];
+    const parts: string[] = [];
+    for (const key of primaryKeys) {
+      const part = record[key];
+      const text = typeof part === "string" ? part.trim() : "";
+      if (text && !parts.includes(text)) parts.push(text);
+    }
+    let text = parts.join(joiner);
+    if (!text) {
+      // Nothing on the known keys -- fall back to any string values on the object.
+      text = Object.values(record)
+        .map((entry) => (typeof entry === "string" ? entry.trim() : ""))
+        .filter(Boolean)
+        .join(joiner);
+    }
+    const qualifiers: string[] = [];
+    for (const key of ["owner", "assignee", "responsible", "dueDate", "due", "deadline", "timeline"]) {
+      const part = record[key];
+      if (typeof part === "string" && part.trim()) qualifiers.push(`${key}: ${part.trim()}`);
+    }
+    if (qualifiers.length) text = text ? `${text} (${qualifiers.join(", ")})` : qualifiers.join(", ");
+    return text.trim();
+  }
+  return "";
+}
+
+/** Map whatever the model calls the department onto the fixed enum. */
+function coerceDepartment(value: unknown): z.infer<typeof departmentEnum> {
+  const text = coerceText(value).toLowerCase();
+  if (/web|site|design|\bdev\b|wordpress/.test(text)) return "Web Design";
+  if (/seo|search|ranking|gbp|listing/.test(text)) return "SEO";
+  if (/\bads?\b|ppc|paid|adwords|meta|campaign/.test(text)) return "Ads";
+  if (/account|manager|\bam\b|relationship|success/.test(text)) return "Account Manager";
+  return "Other";
+}
+
+/**
+ * Coerce the raw LLM object into the exact shape `analysisSchema` expects, so a
+ * model that returns commitments-as-objects or emits more than the max number of
+ * items degrades gracefully (flattened + trimmed) instead of throwing a Zod
+ * validation error that surfaces as a wall of red in the UI.
+ */
+function normalizePostMeetingAnalysis(raw: Record<string, unknown>) {
+  const commitments = (Array.isArray(raw.extractedCommitments) ? raw.extractedCommitments : [])
+    .map((entry) => coerceText(entry))
+    .filter(Boolean)
+    .slice(0, 10);
+
+  const rawTickets = Array.isArray(raw.draftTickets) ? raw.draftTickets : [];
+  const draftTickets = rawTickets
+    .map((entry) => {
+      const item = (entry ?? {}) as Record<string, unknown>;
+      return {
+        title: coerceText(item.title ?? item.name ?? item.headline),
+        description: coerceText(item.description ?? item.detail ?? item.summary ?? item.body ?? item.notes),
+        department: coerceDepartment(item.department ?? item.team ?? item.category ?? item.type),
+      };
+    })
+    .filter((ticket) => ticket.title && ticket.description)
+    .slice(0, 8);
+
+  const emailBody = raw.clientEmailBody ?? raw.emailBody ?? raw.email ?? raw.body;
+
+  return {
+    recapSummary: coerceText(raw.recapSummary ?? raw.recap ?? raw.summary),
+    extractedCommitments: commitments,
+    draftTickets,
+    clientEmailSubject: coerceText(raw.clientEmailSubject ?? raw.emailSubject ?? raw.subject),
+    // Preserve paragraph breaks for the email body rather than the "—" joiner.
+    clientEmailBody: coerceText(emailBody, "\n\n"),
+  };
+}
+
 async function analyzeWithClaude(
   env: ReturnType<typeof getServerEnv>,
   touch: MonthlyTouchRecord,
@@ -45,7 +143,10 @@ async function analyzeWithClaude(
   const userText = [
     "Return a JSON object with keys: recapSummary, extractedCommitments, draftTickets,",
     "clientEmailSubject, clientEmailBody.",
-    "Each draftTickets item needs: title, description, department.",
+    "recapSummary: a single string. clientEmailSubject/clientEmailBody: single strings.",
+    "extractedCommitments: an array of AT MOST 10 plain strings (each one sentence -- NOT objects).",
+    "draftTickets: an array of AT MOST 8 objects, each exactly { title, description, department },",
+    'where department is one of "SEO", "Web Design", "Ads", "Account Manager", "Other".',
     "",
     JSON.stringify(
       {
@@ -64,7 +165,10 @@ async function analyzeWithClaude(
   // (title + description + department each), plus a full client email subject
   // and body -- 1800 truncated the JSON mid-array, which then fails to parse.
   const result = await callLlmForJson({ env, system, userText, maxTokens: 8000 });
-  return { analysis: analysisSchema.parse(result.data), provider: result.provider, model: result.model };
+  // Normalize before validating so the model returning objects-as-commitments or
+  // overshooting the item caps degrades gracefully instead of failing schema validation.
+  const analysis = analysisSchema.parse(normalizePostMeetingAnalysis(result.data));
+  return { analysis, provider: result.provider, model: result.model };
 }
 
 export async function analyzePostMeetingTranscript(context: TenantContext, touchId: string, transcript: string) {

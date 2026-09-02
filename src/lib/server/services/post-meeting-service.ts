@@ -313,6 +313,19 @@ export async function analyzePostMeetingTranscript(context: TenantContext, touch
     throw new Error("Monthly touch not found");
   }
 
+  // No-duplicates rule: once this touch's follow-up has been filed to ClickUp,
+  // block re-analysis so a refresh or re-paste can't regenerate and re-create the
+  // same tickets. A fresh touch is the way to start a new set.
+  const existingPostMeeting = touch.postMeeting;
+  const alreadyFiled =
+    existingPostMeeting?.status === "approved" ||
+    (existingPostMeeting?.draftTickets || []).some((ticket) => ticket.clickupTaskId);
+  if (alreadyFiled) {
+    throw new Error(
+      "This touch's follow-up tickets have already been created in ClickUp. Re-analyzing is blocked to prevent duplicates -- start a new monthly touch if you need a fresh set.",
+    );
+  }
+
   const client = await dataSource.getClientById(touch.clientId);
   if (!client) {
     throw new Error("Monthly touch client is not visible for the current user");
@@ -426,6 +439,70 @@ export async function analyzePostMeetingTranscript(context: TenantContext, touch
   const updatedTouch: MonthlyTouchRecord = stripUndefinedDeep({
     ...touch,
     postMeeting,
+    updatedAt: getNowIso(),
+  });
+
+  await db.doc(monthlyTouchPath(context.tenantId, touch.id)).set(updatedTouch, { merge: true });
+
+  return { touch: updatedTouch };
+}
+
+/**
+ * Re-run ONLY the Client Intelligence dashboard step for a touch that already has
+ * an analysis. Used to recover from a stale/failed dashboard result (e.g. the old
+ * JSON-truncation error) without re-analyzing the transcript or touching any filed
+ * tickets. Drafts proposals only; writes nothing to ClickUp until approved.
+ */
+export async function retryDashboardUpdates(context: TenantContext, touchId: string) {
+  const db = getFirebaseAdminDb();
+  if (!db) {
+    throw new Error("Firebase Admin must be configured before the dashboard step can run");
+  }
+
+  const dataSource = getMtosDataSource(context);
+  const touch = await dataSource.getMonthlyTouchById(touchId);
+  if (!touch) {
+    throw new Error("Monthly touch not found");
+  }
+  if (!touch.postMeeting) {
+    throw new Error("Analyze the transcript before running the dashboard step.");
+  }
+
+  const client = await dataSource.getClientById(touch.clientId);
+  if (!client) {
+    throw new Error("Monthly touch client is not visible for the current user");
+  }
+
+  const env = getServerEnv();
+  if (!hasAnyLlmProvider(env)) {
+    throw new Error("No AI provider is configured, so the dashboard step can't run.");
+  }
+
+  let dashboardUpdates: DashboardUpdateReview;
+  try {
+    dashboardUpdates = await draftDashboardUpdates(env, touch, client, {
+      recapSummary: touch.postMeeting.recapSummary || "",
+      extractedCommitments: touch.postMeeting.extractedCommitments || [],
+      draftTickets: (touch.postMeeting.draftTickets || []).map((ticket) => ({
+        title: ticket.title,
+        description: ticket.description,
+        department: ticket.department,
+      })),
+    });
+  } catch (error) {
+    // Persist the fresh error so the UI reflects the latest attempt (retryable again).
+    dashboardUpdates = {
+      status: "draft_ready",
+      proposals: [],
+      analyzedAt: getNowIso(),
+      model: touch.postMeeting.model,
+      errorMessage: error instanceof Error ? error.message : "Dashboard intelligence step could not run.",
+    };
+  }
+
+  const updatedTouch: MonthlyTouchRecord = stripUndefinedDeep({
+    ...touch,
+    postMeeting: { ...touch.postMeeting, dashboardUpdates },
     updatedAt: getNowIso(),
   });
 
@@ -1029,6 +1106,14 @@ export async function applyPostMeetingDecisions(
     fallbackBusinessName: client?.name || "",
   };
 
+  // No-duplicates safety net: any ticket already filed to ClickUp (has a task id)
+  // is never created again -- we reuse its existing task instead.
+  const alreadyFiledById = new Map(
+    (touch.postMeeting.draftTickets || [])
+      .filter((ticket) => ticket.clickupTaskId)
+      .map((ticket) => [ticket.id, ticket]),
+  );
+
   // Build the final ticket set from what the AM confirmed -- their edits, additions,
   // and deletions -- rather than the AI's originals. Approved tickets are filed to
   // ClickUp using the edited content.
@@ -1054,6 +1139,17 @@ export async function applyPostMeetingDecisions(
 
       if (input.decision !== "approved") {
         return { ...ticket, status: "declined" as const };
+      }
+
+      // If this ticket was already filed, reuse its ClickUp task -- never duplicate it.
+      const prior = alreadyFiledById.get(input.id);
+      if (prior?.clickupTaskId) {
+        return {
+          ...ticket,
+          status: "approved" as const,
+          clickupTaskId: prior.clickupTaskId,
+          clickupTaskUrl: prior.clickupTaskUrl,
+        };
       }
 
       const isBillingTicket = ticket.ticketType === "billing";
@@ -1107,6 +1203,48 @@ export async function applyPostMeetingDecisions(
   const updatedTouch: MonthlyTouchRecord = stripUndefinedDeep({
     ...touch,
     postMeeting,
+    updatedAt: getNowIso(),
+  });
+
+  await db.doc(monthlyTouchPath(context.tenantId, touch.id)).set(updatedTouch, { merge: true });
+
+  return { touch: updatedTouch };
+}
+
+/**
+ * Apply approve/decline decisions on the Client Intelligence dashboard proposals
+ * on their own -- used when they were generated (or retried) after the main
+ * decisions were already confirmed. Approved proposals are written to their
+ * ClickUp dashboard list; nothing else on the touch changes.
+ */
+export async function applyDashboardOnlyDecisions(
+  context: TenantContext,
+  touchId: string,
+  dashboardDecisions: Record<string, "approved" | "declined">,
+) {
+  const db = getFirebaseAdminDb();
+  if (!db) {
+    throw new Error("Firebase Admin must be configured before decisions can be applied");
+  }
+
+  const dataSource = getMtosDataSource(context);
+  const touch = await dataSource.getMonthlyTouchById(touchId);
+  if (!touch) {
+    throw new Error("Monthly touch not found");
+  }
+  if (!touch.postMeeting?.dashboardUpdates?.proposals.length) {
+    throw new Error("There are no dashboard proposals to apply.");
+  }
+
+  const dashboardUpdates = await applyDashboardDecisions(
+    context,
+    touch.postMeeting.dashboardUpdates,
+    dashboardDecisions,
+  );
+
+  const updatedTouch: MonthlyTouchRecord = stripUndefinedDeep({
+    ...touch,
+    postMeeting: { ...touch.postMeeting, dashboardUpdates },
     updatedAt: getNowIso(),
   });
 

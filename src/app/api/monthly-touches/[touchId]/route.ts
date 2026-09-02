@@ -7,7 +7,9 @@ import { prepareMonthlyTouch } from "@/src/lib/server/services/monthly-touch-pre
 import { generateLiveCallGuide } from "@/src/lib/server/services/live-call-guide-service";
 import {
   analyzePostMeetingTranscript,
+  applyDashboardOnlyDecisions,
   applyPostMeetingDecisions,
+  retryDashboardUpdates,
 } from "@/src/lib/server/services/post-meeting-service";
 import { generateQaReview, recordVictorDecision } from "@/src/lib/server/services/qa-review-service";
 
@@ -41,6 +43,11 @@ const touchRequestSchema = z.discriminatedUnion("action", [
     ),
     email: z.object({ subject: z.string(), body: z.string(), approve: z.boolean() }),
     dashboardDecisions: z.record(z.string(), z.enum(["approved", "declined"])).optional(),
+  }),
+  z.object({ action: z.literal("retry_dashboard_updates") }),
+  z.object({
+    action: z.literal("apply_dashboard_decisions"),
+    dashboardDecisions: z.record(z.string(), z.enum(["approved", "declined"])),
   }),
   z.object({ action: z.literal("generate_qa_review") }),
   z.object({
@@ -101,6 +108,12 @@ export async function POST(
           email: payload.email,
           dashboardDecisions: payload.dashboardDecisions,
         });
+        break;
+      case "retry_dashboard_updates":
+        result = await retryDashboardUpdates(context, touchId);
+        break;
+      case "apply_dashboard_decisions":
+        result = await applyDashboardOnlyDecisions(context, touchId, payload.dashboardDecisions);
         break;
       case "generate_qa_review":
         result = await generateQaReview(context, touchId);

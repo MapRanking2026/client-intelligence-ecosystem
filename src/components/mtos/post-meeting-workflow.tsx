@@ -791,7 +791,7 @@ export function PostMeetingWorkflow({ touchId, postMeeting, qaReview }: PostMeet
                             </a>
                           ) : null}
                         </div>
-                        {!decisionsApplied ? (
+                        {proposal.status === "pending" ? (
                           <div className="flex shrink-0 gap-2">
                             <button
                               type="button"
@@ -836,11 +836,55 @@ export function PostMeetingWorkflow({ touchId, postMeeting, qaReview }: PostMeet
                   );
                 })}
                 {!dashboardProposals.length ? (
-                  <p className="text-sm text-slate-400">
-                    {postMeeting.dashboardUpdates.errorMessage
-                      ? postMeeting.dashboardUpdates.errorMessage
-                      : "No dashboard changes are needed from this touch."}
-                  </p>
+                  postMeeting.dashboardUpdates.errorMessage ? (
+                    <div className="space-y-2 rounded-2xl border border-amber-400/20 bg-amber-500/5 p-3">
+                      <p className="text-sm text-amber-200">
+                        This step didn&apos;t finish last time: {postMeeting.dashboardUpdates.errorMessage}
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => run("retry_dashboard_updates", { action: "retry_dashboard_updates" })}
+                        disabled={isPending}
+                        className="inline-flex items-center gap-2 rounded-full border border-white/12 bg-white/5 px-3 py-1.5 text-xs font-medium text-slate-200 transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {isPending && activeAction === "retry_dashboard_updates" ? (
+                          <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <Sparkles className="h-3.5 w-3.5" />
+                        )}
+                        Retry dashboard updates
+                      </button>
+                    </div>
+                  ) : (
+                    <p className="text-sm text-slate-400">No dashboard changes are needed from this touch.</p>
+                  )
+                ) : null}
+                {/* Standalone apply -- for proposals generated/retried after the main decisions were confirmed. */}
+                {decisionsApplied && dashboardProposals.some((proposal) => proposal.status === "pending") ? (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      run("apply_dashboard_decisions", {
+                        action: "apply_dashboard_decisions",
+                        dashboardDecisions,
+                      })
+                    }
+                    disabled={
+                      isPending ||
+                      !dashboardProposals
+                        .filter((proposal) => proposal.status === "pending")
+                        .every((proposal) => dashboardDecisions[proposal.id])
+                    }
+                    style={{ color: "#0d1625" }}
+                    className="mt-1 inline-flex items-center gap-2 rounded-full border border-[#d7f5ec]/20 bg-[#d7f5ec] px-4 py-2 text-sm font-semibold text-[#0d1625] transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {isPending && activeAction === "apply_dashboard_decisions" ? (
+                      <LoaderCircle className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <CheckCircle2 className="h-4 w-4" />
+                    )}
+                    Apply dashboard updates
+                  </button>
                 ) : null}
               </div>
             </div>

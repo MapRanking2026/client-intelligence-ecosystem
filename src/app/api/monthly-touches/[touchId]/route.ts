@@ -26,6 +26,16 @@ const touchRequestSchema = z.discriminatedUnion("action", [
         department: z.enum(["SEO", "Web Design", "Ads", "Account Manager", "Other"]),
         assigneeId: z.number().optional(),
         assignee: z.string().optional(),
+        businessOptionId: z.string().optional(),
+        businessName: z.string().optional(),
+        priority: z.enum(["urgent", "high", "normal", "low"]).optional(),
+        timeEstimateMinutes: z.number().optional(),
+        dueDate: z.string().optional(),
+        ticketType: z.enum(["regular", "billing"]).optional(),
+        billingChangeType: z
+          .enum(["Upsell", "Downsell", "New Sale", "Pause", "Cancel", "Payment Failed"])
+          .optional(),
+        dateRequested: z.string().optional(),
         decision: z.enum(["approved", "declined"]),
       }),
     ),

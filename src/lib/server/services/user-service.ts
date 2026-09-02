@@ -44,6 +44,31 @@ function roleLabel(role: TenantContext["role"]) {
   return "User";
 }
 
+/**
+ * The display name + email of the logged-in user, for attributing work they
+ * author (e.g. writing follow-up tickets in the first person). Falls back to a
+ * name derived from the email, then to an empty string. Never throws.
+ */
+export async function getAccountManagerIdentity(
+  context: TenantContext,
+): Promise<{ name: string; email: string }> {
+  const db = getFirebaseAdminDb();
+  if (!db) {
+    return { name: "", email: "" };
+  }
+  try {
+    const snapshot = await db.doc(tenantUserPath(context.tenantId, context.userId)).get();
+    const data = snapshot.exists
+      ? (snapshot.data() as { email?: string; displayName?: string; name?: string } | undefined)
+      : undefined;
+    const email = data?.email?.trim() || "";
+    const name = data?.displayName?.trim() || data?.name?.trim() || toFirstName(email);
+    return { name, email };
+  } catch {
+    return { name: "", email: "" };
+  }
+}
+
 export async function getUserGreeting(context: TenantContext) {
   const db = getFirebaseAdminDb();
   const roleText = roleLabel(context.role);

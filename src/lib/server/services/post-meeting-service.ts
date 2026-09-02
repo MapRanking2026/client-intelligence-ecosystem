@@ -6,9 +6,12 @@ import type {
   ClientEmailDraft,
   ClientRecord,
   DraftTicket,
+  BillingChangeType,
   MonthlyTouchRecord,
   PostMeetingReview,
   TicketDepartment,
+  TicketPriority,
+  TicketType,
 } from "@/src/lib/mtos-data";
 import { getMtosDataSource } from "@/src/lib/server/data/seed-mtos-data-source";
 import { monthlyTouchPath } from "@/src/lib/server/firebase/collections";
@@ -17,6 +20,7 @@ import { getServerEnv } from "@/src/lib/server/env";
 import { getIntegrationConnection, getIntegrationCredentials } from "@/src/lib/server/integrations";
 import { callLlmForJson, getNowIso, hasAnyLlmProvider, stripUndefinedDeep } from "@/src/lib/server/services/mtos-ai";
 import { getPromptText } from "@/src/lib/server/prompt-store";
+import { getAccountManagerIdentity } from "@/src/lib/server/services/user-service";
 import {
   applyDashboardDecisions,
   draftDashboardUpdates,
@@ -34,6 +38,16 @@ const analysisSchema = z.object({
         title: z.string().min(1),
         description: z.string().min(1),
         department: departmentEnum,
+        // Optional: the model's suggested assignee, chosen from the provided roster.
+        suggestedAssignee: z.string().optional(),
+        // Optional: suggested priority + effort so the ticket form fields start filled.
+        priority: z.enum(["urgent", "high", "normal", "low"]).optional(),
+        timeEstimateHours: z.number().optional(),
+        // Classification: "billing" for anything touching pricing/MRR, else "regular".
+        ticketType: z.enum(["regular", "billing"]).optional(),
+        billingChangeType: z
+          .enum(["Upsell", "Downsell", "New Sale", "Pause", "Cancel", "Payment Failed"])
+          .optional(),
       }),
     )
     .max(8),
@@ -102,6 +116,70 @@ function coerceDepartment(value: unknown): z.infer<typeof departmentEnum> {
   return "Other";
 }
 
+/** Coerce the model's priority wording onto the four ClickUp levels. */
+function coercePriority(value: unknown): "urgent" | "high" | "normal" | "low" | undefined {
+  const text = coerceText(value).toLowerCase();
+  if (!text) return undefined;
+  if (/urgent|critical|asap|immediate|emergency/.test(text)) return "urgent";
+  if (/high|important|soon/.test(text)) return "high";
+  if (/low|minor|whenever|someday|backlog/.test(text)) return "low";
+  if (/normal|medium|standard|routine/.test(text)) return "normal";
+  return undefined;
+}
+
+/** Coerce free text onto one of the billing-change categories. */
+function coerceBillingChangeType(value: unknown): BillingChangeType | undefined {
+  const text = coerceText(value).toLowerCase();
+  if (!text) return undefined;
+  if (/pay(ment)?\s*fail|declin|nsf|charge\s*fail/.test(text)) return "Payment Failed";
+  if (/down\s*sell|downgrade|reduce|lower/.test(text)) return "Downsell";
+  if (/up\s*sell|upgrade|add[- ]?on|additional|extra|new gbp|another gbp/.test(text)) return "Upsell";
+  if (/new\s*(sale|sell|client|account|deal)/.test(text)) return "New Sale";
+  if (/pause|hold|freeze|suspend/.test(text)) return "Pause";
+  if (/cancel|churn|terminate|offboard/.test(text)) return "Cancel";
+  return undefined;
+}
+
+/** Decide whether a ticket is a billing-change ticket, and its category. */
+function coerceTicketType(
+  typeValue: unknown,
+  billingTypeValue: unknown,
+): { ticketType?: TicketType; billingChangeType?: BillingChangeType } {
+  const typeText = coerceText(typeValue).toLowerCase();
+  const billingChangeType = coerceBillingChangeType(billingTypeValue) || coerceBillingChangeType(typeValue);
+  const looksBilling =
+    /bill|invoice|pric|discount|coupon|refund|charge|subscription|\bmrr\b|payment|upsell|downsell|cancel|pause/.test(
+      typeText,
+    ) || Boolean(billingChangeType);
+  if (looksBilling) {
+    return { ticketType: "billing", billingChangeType };
+  }
+  return { ticketType: "regular" };
+}
+
+/** Convert an ISO/date-ish string to a YYYY-MM-DD value for a date input. */
+function toDateInputValue(value?: string): string | undefined {
+  if (!value) return undefined;
+  const trimmed = value.trim();
+  if (/^\d{4}-\d{2}-\d{2}/.test(trimmed)) return trimmed.slice(0, 10);
+  const parsed = new Date(trimmed);
+  if (Number.isNaN(parsed.getTime())) return undefined;
+  return parsed.toISOString().slice(0, 10);
+}
+
+/** Coerce a time estimate (number of hours, or strings like "5h" / "90m") to hours. */
+function coerceHours(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value) && value > 0) return value;
+  const text = coerceText(value).toLowerCase().trim();
+  if (!text) return undefined;
+  const minutesMatch = text.match(/(\d+(?:\.\d+)?)\s*m(?:in)?/);
+  const hoursMatch = text.match(/(\d+(?:\.\d+)?)\s*h/);
+  if (hoursMatch) return parseFloat(hoursMatch[1]);
+  if (minutesMatch) return parseFloat(minutesMatch[1]) / 60;
+  const bare = parseFloat(text);
+  return Number.isFinite(bare) && bare > 0 ? bare : undefined;
+}
+
 /**
  * Coerce the raw LLM object into the exact shape `analysisSchema` expects, so a
  * model that returns commitments-as-objects or emits more than the max number of
@@ -122,6 +200,10 @@ function normalizePostMeetingAnalysis(raw: Record<string, unknown>) {
         title: coerceText(item.title ?? item.name ?? item.headline),
         description: coerceText(item.description ?? item.detail ?? item.summary ?? item.body ?? item.notes),
         department: coerceDepartment(item.department ?? item.team ?? item.category ?? item.type),
+        suggestedAssignee: coerceText(item.suggestedAssignee ?? item.assignee ?? item.owner) || undefined,
+        priority: coercePriority(item.priority ?? item.urgency),
+        timeEstimateHours: coerceHours(item.timeEstimateHours ?? item.timeEstimate ?? item.estimateHours ?? item.hours),
+        ...coerceTicketType(item.ticketType, item.billingChangeType ?? item.billingType),
       };
     })
     .filter((ticket) => ticket.title && ticket.description)
@@ -144,20 +226,56 @@ async function analyzeWithClaude(
   touch: MonthlyTouchRecord,
   client: ClientRecord,
   transcript: string,
+  accountManagerName: string,
+  memberNames: string[],
 ) {
   const system = await getPromptText("meeting_transcript_analysis_prompt");
+  const amName = accountManagerName.trim() || client.accountManager?.trim() || "the account manager";
+
+  const assigneeDirective = memberNames.length
+    ? [
+        "draftTickets items may ALSO include suggestedAssignee: the name of the ONE teammate from the",
+        "roster below best suited to the ticket (match the work to the department/skill in the name when",
+        "you can). Use the name EXACTLY as it appears in the roster. If you are not reasonably sure, omit",
+        "suggestedAssignee -- do not guess. Roster: " + memberNames.join(", ") + ".",
+        "",
+      ]
+    : [];
 
   const userText = [
     "Return a JSON object with keys: recapSummary, extractedCommitments, draftTickets,",
     "clientEmailSubject, clientEmailBody.",
     "recapSummary: a single string. clientEmailSubject/clientEmailBody: single strings.",
     "extractedCommitments: an array of AT MOST 10 plain strings (each one sentence -- NOT objects).",
-    "draftTickets: an array of AT MOST 8 objects, each exactly { title, description, department },",
+    "draftTickets: an array of AT MOST 8 objects, each { title, description, department },",
     'where department is one of "SEO", "Web Design", "Ads", "Account Manager", "Other".',
+    "Each ticket SHOULD also include priority (one of \"urgent\", \"high\", \"normal\", \"low\" based on how",
+    "time-sensitive the work is from the conversation) and timeEstimateHours (a realistic number of",
+    "hours of effort, e.g. 0.5, 2, 5).",
+    "TICKET TYPE: set ticketType to \"billing\" for ANYTHING that changes what the client pays -- a",
+    "discount, coupon, pricing agreement, upsell, downsell, new sale, an added or removed GBP/service,",
+    "a pause, a cancellation, or a payment/charge issue. For those, also set billingChangeType to one",
+    'of "Upsell", "Downsell", "New Sale", "Pause", "Cancel", "Payment Failed". Everything else (the',
+    'actual optimization/implementation work) is ticketType "regular". When in doubt about billing, make',
+    "a SEPARATE billing ticket for the money part in addition to any regular work ticket.",
+    ...assigneeDirective,
+    `VOICE: You ARE ${amName}, the account manager, writing these tickets yourself. Write every`,
+    "ticket title and description in the FIRST PERSON (\"I need\", \"Please\", \"Can you\") addressed",
+    "directly to the teammate or department who will do the work. Never write in the third person and",
+    `never refer to "the AM" or "${amName}" as someone else -- that is you.`,
+    `CONTEXT: Every ticket is for the client "${client.name}". Make it explicit in each ticket`,
+    `description which business the work is for (name the business "${client.name}"), so whoever picks`,
+    "it up knows the client without extra digging.",
     "",
     JSON.stringify(
       {
-        client: { name: client.name, industry: client.industry, contact: client.contact },
+        accountManager: amName,
+        client: {
+          businessName: client.name,
+          industry: client.industry,
+          contact: client.contact,
+          accountManager: client.accountManager || amName,
+        },
         touchExecutiveBrief: touch.executiveBrief,
         touchWins: touch.wins,
         touchRisks: touch.risks,
@@ -205,15 +323,67 @@ export async function analyzePostMeetingTranscript(context: TenantContext, touch
     throw new Error("No AI provider is configured (set ANTHROPIC_API_KEY, OPENAI_API_KEY, or GEMINI_API_KEY), so transcript analysis can't run.");
   }
 
-  const { analysis, model } = await analyzeWithClaude(env, touch, client, trimmedTranscript);
+  const { name: accountManagerName } = await getAccountManagerIdentity(context);
 
-  const draftTickets: DraftTicket[] = analysis.draftTickets.map((ticket) => ({
-    id: `ticket-${nanoid(8)}`,
-    title: ticket.title,
-    description: ticket.description,
-    department: ticket.department,
-    status: "pending",
-  }));
+  // Pull the real ClickUp members + business options so we can PRE-FILL each draft
+  // ticket's assignee and business (both stay editable on the review screen).
+  const [{ members }, { businesses }] = await Promise.all([
+    listAssignableMembers(context).catch(() => ({ members: [] as AssignableMember[] })),
+    listBusinessOptions(context).catch(() => ({ businesses: [] as BusinessOption[] })),
+  ]);
+
+  const { analysis, model } = await analyzeWithClaude(
+    env,
+    touch,
+    client,
+    trimmedTranscript,
+    accountManagerName,
+    members.map((member) => member.name),
+  );
+
+  // Default business = the client's own business, matched to a ClickUp option.
+  const defaultBusinessId = resolveBusinessOptionId(businesses, client.name);
+  const defaultBusiness = businesses.find((business) => business.id === defaultBusinessId);
+  const memberOptions = members.map((entry) => ({ id: String(entry.id), name: entry.name }));
+
+  // Billing tickets are routed to Carlos Camacho -- resolve him once (editable later).
+  const billingAssigneeName = process.env.CLICKUP_BILLING_ASSIGNEE || "Carlos Camacho";
+  const billingMember = matchDropdownOption(memberOptions, billingAssigneeName);
+  // Default "date it was requested" for billing tickets = the touch/meeting date.
+  const touchDateString = toDateInputValue(touch.scheduledAt) || toDateInputValue(getNowIso());
+
+  const draftTickets: DraftTicket[] = analysis.draftTickets.map((ticket) => {
+    const isBilling = ticket.ticketType === "billing";
+
+    // Match the model's suggested assignee to a real member (unambiguously) so the
+    // dropdown starts pre-selected; the AM can still change it. Billing tickets
+    // default to Carlos.
+    const suggested = ticket.suggestedAssignee?.trim();
+    const suggestedMember = suggested ? matchDropdownOption(memberOptions, suggested) : undefined;
+    const member = isBilling ? billingMember || suggestedMember : suggestedMember;
+
+    const timeEstimateMinutes =
+      typeof ticket.timeEstimateHours === "number" && ticket.timeEstimateHours > 0
+        ? Math.round(ticket.timeEstimateHours * 60)
+        : 60;
+
+    return {
+      id: `ticket-${nanoid(8)}`,
+      title: ticket.title,
+      description: ticket.description,
+      department: ticket.department,
+      assigneeId: member ? Number(member.id) : undefined,
+      assignee: member?.name,
+      businessOptionId: defaultBusiness?.id,
+      businessName: defaultBusiness?.name || client.name,
+      priority: ticket.priority || "normal",
+      timeEstimateMinutes,
+      ticketType: ticket.ticketType || "regular",
+      billingChangeType: isBilling ? ticket.billingChangeType : undefined,
+      dateRequested: isBilling ? touchDateString : undefined,
+      status: "pending",
+    };
+  });
 
   // Client Intelligence Dashboard Updater -- one additional post-processing step
   // inserted after transcript analysis. It only drafts proposed Risk Register /
@@ -354,6 +524,319 @@ export async function listAssignableMembers(context: TenantContext): Promise<Ass
   };
 }
 
+export interface BusinessOption {
+  id: string;
+  name: string;
+}
+
+export interface BusinessOptionsResult {
+  businesses: BusinessOption[];
+  /** Present when the options can't be produced (e.g. ClickUp not connected, no Business Name field). */
+  reason?: string;
+}
+
+/**
+ * The options of the ClickUp "Business Name" dropdown on the follow-up ticket
+ * list. Powers an editable Business dropdown so the AM can confirm the business a
+ * ticket is filed under (and reassign multi-GBP profiles to the parent account).
+ * Read-only; never modifies the field. Never throws.
+ */
+export async function listBusinessOptions(context: TenantContext): Promise<BusinessOptionsResult> {
+  const listId = process.env.CLICKUP_GROWTH_PILOT_LIST_ID;
+  if (!listId) {
+    return {
+      businesses: [],
+      reason: "No ClickUp list is configured for follow-up tickets yet (set CLICKUP_GROWTH_PILOT_LIST_ID).",
+    };
+  }
+
+  const connection = await getIntegrationConnection(context, "clickup");
+  if (!connection || connection.status !== "connected") {
+    return { businesses: [], reason: "ClickUp isn't connected for this workspace yet. Connect it from Settings." };
+  }
+
+  const credentials = getIntegrationCredentials(connection);
+  if (!credentials.accessToken) {
+    return { businesses: [], reason: "The stored ClickUp connection is missing an access token. Reconnect ClickUp." };
+  }
+
+  const fields = await getListCustomFields(listId, credentials.accessToken);
+  const businessField =
+    fields.find((field) => normalizeFieldName(field.name) === "business name") ||
+    fields.find((field) => normalizeFieldName(field.name).includes("business name"));
+
+  if (!businessField || businessField.type !== "drop_down") {
+    return { businesses: [], reason: "No 'Business Name' dropdown was found on the follow-up list in ClickUp." };
+  }
+
+  const businesses = businessField.options
+    .filter((option) => option.name)
+    .map((option) => ({ id: option.id, name: option.name }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  return { businesses };
+}
+
+/** Best-effort resolve a client's business name to a Business Name option id (for the default selection). */
+export function resolveBusinessOptionId(businesses: BusinessOption[], businessName: string): string | undefined {
+  return matchDropdownOption(businesses, businessName)?.id;
+}
+
+/** Business/client context attached to every follow-up ticket so it's never orphaned. */
+interface TicketContext {
+  businessName: string;
+  /** ClickUp Business Name option id chosen by the AM (may differ from the client for multi-GBP accounts). */
+  businessOptionId?: string;
+  clientContact?: string;
+  accountManager?: string;
+  touchDate?: string;
+  department?: TicketDepartment;
+  /** For billing tickets: the billing-change category, set on the ClickUp "Type" field. */
+  billingChangeType?: BillingChangeType;
+}
+
+/** ClickUp native priority ids. */
+const PRIORITY_TO_CLICKUP: Record<TicketPriority, number> = { urgent: 1, high: 2, normal: 3, low: 4 };
+
+/** Our department -> the closest ClickUp "Department" dropdown option name (blank = leave for the AM). */
+const DEPARTMENT_TO_CLICKUP: Record<TicketDepartment, string> = {
+  SEO: "SEO",
+  "Web Design": "Web Development",
+  Ads: "", // ambiguous (Google vs Meta Ads) -- leave for the AM to set in ClickUp
+  "Account Manager": "Account Management",
+  Other: "",
+};
+
+/** Add `days` to a date, skipping weekends. */
+function addBusinessDays(from: Date, days: number): Date {
+  const result = new Date(from.getTime());
+  let added = 0;
+  while (added < days) {
+    result.setDate(result.getDate() + 1);
+    const weekday = result.getDay();
+    if (weekday !== 0 && weekday !== 6) added += 1;
+  }
+  return result;
+}
+
+/** End-of-day timestamp (ms) so a due date lands on the right calendar day. */
+function endOfDayMs(date: Date): number {
+  const end = new Date(date.getTime());
+  end.setHours(23, 59, 0, 0);
+  return end.getTime();
+}
+
+/** Start-of-day timestamp (ms) for a YYYY-MM-DD value. */
+function toStartOfDayMs(dateInput: string): number | undefined {
+  const parsed = new Date(`${dateInput}T00:00:00`);
+  return Number.isNaN(parsed.getTime()) ? undefined : parsed.getTime();
+}
+
+/**
+ * The due date (ms) for a ticket: an explicit override wins, otherwise it's
+ * derived from priority (Urgent: today, High: +24h, Normal: +3 business days,
+ * Low: +5 business days), matching the ClickUp ticket form's rule.
+ */
+function resolveDueDateMs(priority: TicketPriority | undefined, override: string | undefined): number | undefined {
+  if (override) {
+    const parsed = new Date(`${override}T23:59:00`);
+    if (!Number.isNaN(parsed.getTime())) return parsed.getTime();
+  }
+  if (!priority) return undefined;
+  const now = new Date();
+  switch (priority) {
+    case "urgent":
+      return endOfDayMs(now);
+    case "high":
+      return now.getTime() + 24 * 60 * 60 * 1000;
+    case "normal":
+      return endOfDayMs(addBusinessDays(now, 3));
+    case "low":
+      return endOfDayMs(addBusinessDays(now, 5));
+  }
+}
+
+interface ClickUpField {
+  id: string;
+  name: string;
+  type: string;
+  options: Array<{ id: string; name: string }>;
+}
+
+const fieldCache = new Map<string, { at: number; fields: ClickUpField[] }>();
+const FIELD_CACHE_TTL_MS = 60_000;
+
+/** Fetch the custom-field definitions for a list (with dropdown options). Never throws. */
+async function getListCustomFields(listId: string, authHeader: string): Promise<ClickUpField[]> {
+  const cached = fieldCache.get(listId);
+  if (cached && Date.now() - cached.at < FIELD_CACHE_TTL_MS) {
+    return cached.fields;
+  }
+  try {
+    const response = await fetch(`https://api.clickup.com/api/v2/list/${listId}/field`, {
+      headers: { authorization: authHeader },
+    });
+    if (!response.ok) {
+      return cached?.fields ?? [];
+    }
+    const payload = (await response.json().catch(() => ({}))) as {
+      fields?: Array<{
+        id?: string;
+        name?: string;
+        type?: string;
+        type_config?: { options?: Array<{ id?: string; name?: string; label?: string }> };
+      }>;
+    };
+    const fields: ClickUpField[] = (payload.fields || [])
+      .filter((field): field is { id: string; name: string; type: string; type_config?: { options?: Array<{ id?: string; name?: string; label?: string }> } } =>
+        Boolean(field.id && field.name && field.type),
+      )
+      .map((field) => ({
+        id: field.id,
+        name: field.name,
+        type: field.type,
+        options: (field.type_config?.options || [])
+          .filter((option): option is { id: string; name?: string; label?: string } => Boolean(option.id))
+          .map((option) => ({ id: option.id, name: (option.name || option.label || "").trim() })),
+      }));
+    fieldCache.set(listId, { at: Date.now(), fields });
+    return fields;
+  } catch {
+    return cached?.fields ?? [];
+  }
+}
+
+/** Normalize a field/option name for loose matching (drop emoji/punctuation, lowercase). */
+function normalizeFieldName(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+type DropdownOption = { id: string; name: string };
+
+/**
+ * Resolve a free-text value to one of a dropdown's (often hundreds of) options.
+ * Tiered so it only returns a confident, UNAMBIGUOUS match -- an ambiguous or
+ * missing match returns undefined rather than picking the wrong option.
+ */
+function matchDropdownOption(options: DropdownOption[], value: string): DropdownOption | undefined {
+  const candidates = options.filter((option) => option.name);
+  const rawTarget = value.trim().toLowerCase();
+  const target = normalizeFieldName(value);
+  if (!target) return undefined;
+
+  const unique = (matches: DropdownOption[]) => (matches.length === 1 ? matches[0] : undefined);
+
+  // 1. Exact label (raw, then punctuation-insensitive).
+  const rawExact = candidates.find((option) => option.name.toLowerCase() === rawTarget);
+  if (rawExact) return rawExact;
+  const normExact = candidates.filter((option) => normalizeFieldName(option.name) === target);
+  if (normExact.length) return normExact[0];
+
+  // 2. Unique prefix match either direction ("Connolly Heating" vs "Connolly Heating and Air").
+  const prefix = unique(
+    candidates.filter((option) => {
+      const name = normalizeFieldName(option.name);
+      return name.startsWith(target) || target.startsWith(name);
+    }),
+  );
+  if (prefix) return prefix;
+
+  // 3. Unique substring match, but only for names long enough to be distinctive.
+  if (target.length >= 4) {
+    const contains = unique(
+      candidates.filter((option) => {
+        const name = normalizeFieldName(option.name);
+        return name.includes(target) || target.includes(name);
+      }),
+    );
+    if (contains) return contains;
+  }
+
+  return undefined;
+}
+
+/**
+ * Build the ClickUp `custom_fields` payload from the ticket context. Free-text
+ * fields (Client Name) are set directly; the Business Name dropdown is set to the
+ * exact option the AM chose (by id); the Account Manager dropdown is matched to an
+ * existing option. Nothing here creates options or blocks task creation.
+ */
+function buildTicketCustomFields(
+  fields: ClickUpField[],
+  context: TicketContext,
+): Array<{ id: string; value: unknown }> {
+  const out: Array<{ id: string; value: unknown }> = [];
+
+  const findField = (needle: string) =>
+    fields.find((field) => normalizeFieldName(field.name) === needle) ||
+    fields.find((field) => normalizeFieldName(field.name).includes(needle));
+
+  // Business Name (dropdown): use the exact option the AM selected. Fall back to
+  // matching the business name only when no explicit option id was chosen.
+  const businessField = findField("business name");
+  if (businessField && businessField.type === "drop_down") {
+    const optionId =
+      context.businessOptionId ||
+      matchDropdownOption(businessField.options, context.businessName)?.id;
+    if (optionId) out.push({ id: businessField.id, value: optionId });
+  }
+
+  // Client Name (free text): always carry the business name.
+  const clientField = findField("client name");
+  if (clientField && clientField.type !== "drop_down" && context.businessName.trim()) {
+    out.push({ id: clientField.id, value: context.businessName.trim() });
+  }
+
+  // Account Manager (dropdown): match the AM name to an existing option.
+  if (context.accountManager?.trim()) {
+    const amField = findField("account manager");
+    if (amField && amField.type === "drop_down") {
+      const option = matchDropdownOption(amField.options, context.accountManager);
+      if (option) out.push({ id: amField.id, value: option.id });
+    } else if (amField) {
+      out.push({ id: amField.id, value: context.accountManager.trim() });
+    }
+  }
+
+  // Department (dropdown): map our department to the closest ClickUp option.
+  const clickupDepartment = context.department ? DEPARTMENT_TO_CLICKUP[context.department] : "";
+  if (clickupDepartment) {
+    const deptField = findField("department");
+    if (deptField && deptField.type === "drop_down") {
+      const option = matchDropdownOption(deptField.options, clickupDepartment);
+      if (option) out.push({ id: deptField.id, value: option.id });
+    }
+  }
+
+  // Type (dropdown): billing-change category, e.g. Upsell / Cancel / Payment Failed.
+  if (context.billingChangeType) {
+    const typeField =
+      fields.find((field) => normalizeFieldName(field.name) === "type") ||
+      fields.find((field) => normalizeFieldName(field.name) === "type of change");
+    if (typeField && typeField.type === "drop_down") {
+      const option = matchDropdownOption(typeField.options, context.billingChangeType);
+      if (option) out.push({ id: typeField.id, value: option.id });
+    }
+  }
+
+  return out;
+}
+
+/** A short, human-readable header naming the business so the ticket is never orphaned. */
+function buildTicketContextBlock(context: TicketContext): string {
+  return [
+    `Business: ${context.businessName}`,
+    context.clientContact ? `Client contact: ${context.clientContact}` : null,
+    context.accountManager ? `Account Manager: ${context.accountManager}` : null,
+    context.touchDate ? `Monthly Touch: ${context.touchDate}` : null,
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
 /**
  * Creates a real ClickUp task when a target list is configured and the
  * tenant's ClickUp connection is active. If either prerequisite is missing,
@@ -361,13 +844,22 @@ export async function listAssignableMembers(context: TenantContext): Promise<Ass
  * the ticket was filed -- the AM still gets the full draft to create it
  * manually.
  */
-async function createClickUpTask(context: TenantContext, ticket: DraftTicket): Promise<ClickUpTaskResult> {
-  const listId = process.env.CLICKUP_GROWTH_PILOT_LIST_ID;
+async function createClickUpTask(
+  context: TenantContext,
+  ticket: DraftTicket,
+  ticketContext?: TicketContext,
+): Promise<ClickUpTaskResult> {
+  const isBilling = ticket.ticketType === "billing";
+  // Billing tickets can route to a dedicated list when one is configured; otherwise
+  // they share the follow-up list (distinguished by the Type field + assignee).
+  const listId = isBilling
+    ? process.env.CLICKUP_BILLING_CHANGE_LIST_ID || process.env.CLICKUP_GROWTH_PILOT_LIST_ID
+    : process.env.CLICKUP_GROWTH_PILOT_LIST_ID;
   if (!listId) {
     return {
       created: false,
       reason:
-        "No ClickUp list is configured for Growth Pilot follow-up tickets yet (set CLICKUP_GROWTH_PILOT_LIST_ID). Copy this ticket into ClickUp manually for now.",
+        "No ClickUp list is configured for follow-up tickets yet (set CLICKUP_GROWTH_PILOT_LIST_ID). Copy this ticket into ClickUp manually for now.",
     };
   }
 
@@ -391,6 +883,38 @@ async function createClickUpTask(context: TenantContext, ticket: DraftTicket): P
   // ClickUp assignee by id directly -- no name matching needed.
   const assigneeId = ticket.assigneeId;
 
+  // Name the business the ticket is for -- both in the description (always) and in
+  // the list's custom fields (best-effort). Custom fields are fetched but never
+  // block creation if they can't be resolved.
+  const description = ticketContext
+    ? `${buildTicketContextBlock(ticketContext)}\n\n${ticket.description}`
+    : ticket.description;
+  const customFields = ticketContext
+    ? buildTicketCustomFields(await getListCustomFields(listId, credentials.accessToken), ticketContext)
+    : [];
+
+  // Native ClickUp fields differ by ticket type:
+  //  - regular: priority + time estimate, due date derived from priority
+  //  - billing: no priority/estimate; a start date (the requested/event date) and a due date
+  const priorityId = ticket.priority ? PRIORITY_TO_CLICKUP[ticket.priority] : undefined;
+  const timeEstimateMs =
+    typeof ticket.timeEstimateMinutes === "number" && ticket.timeEstimateMinutes > 0
+      ? Math.round(ticket.timeEstimateMinutes * 60 * 1000)
+      : undefined;
+  const dueDateMs = resolveDueDateMs(ticket.priority || (isBilling ? "normal" : undefined), ticket.dueDate);
+  const startDateMs = ticket.dateRequested ? toStartOfDayMs(ticket.dateRequested) : undefined;
+
+  const nativeFields = isBilling
+    ? {
+        ...(dueDateMs ? { due_date: dueDateMs } : {}),
+        ...(startDateMs ? { start_date: startDateMs } : {}),
+      }
+    : {
+        ...(priorityId ? { priority: priorityId } : {}),
+        ...(timeEstimateMs ? { time_estimate: timeEstimateMs } : {}),
+        ...(dueDateMs ? { due_date: dueDateMs } : {}),
+      };
+
   try {
     const response = await fetch(`https://api.clickup.com/api/v2/list/${listId}/task`, {
       method: "POST",
@@ -399,9 +923,11 @@ async function createClickUpTask(context: TenantContext, ticket: DraftTicket): P
         "content-type": "application/json",
       },
       body: JSON.stringify({
-        name: `[${ticket.department}] ${ticket.title}`,
-        description: ticket.description,
+        name: ticket.title,
+        description,
         ...(typeof assigneeId === "number" ? { assignees: [assigneeId] } : {}),
+        ...nativeFields,
+        ...(customFields.length ? { custom_fields: customFields } : {}),
       }),
     });
 
@@ -441,6 +967,17 @@ export interface PostMeetingTicketInput {
   assigneeId?: number;
   /** Display name of the chosen member, kept on the record for the UI. */
   assignee?: string;
+  /** ClickUp Business Name option id chosen from the business dropdown, if any. */
+  businessOptionId?: string;
+  /** Display name of the chosen business. */
+  businessName?: string;
+  priority?: TicketPriority;
+  timeEstimateMinutes?: number;
+  /** Optional explicit due date (YYYY-MM-DD); derived from priority when absent. */
+  dueDate?: string;
+  ticketType?: TicketType;
+  billingChangeType?: BillingChangeType;
+  dateRequested?: string;
   decision: "approved" | "declined";
 }
 
@@ -480,6 +1017,18 @@ export async function applyPostMeetingDecisions(
     }
   }
 
+  // Resolve the shared client/AM context so every filed ticket names the business
+  // it's for (in the description and the ClickUp custom fields). The business itself
+  // is per-ticket (the AM may reassign a multi-GBP profile to the parent account).
+  const client = await dataSource.getClientById(touch.clientId);
+  const { name: accountManagerName } = await getAccountManagerIdentity(context);
+  const sharedContext = {
+    clientContact: client?.contact,
+    accountManager: accountManagerName || client?.accountManager || undefined,
+    touchDate: touch.scheduledAt || undefined,
+    fallbackBusinessName: client?.name || "",
+  };
+
   // Build the final ticket set from what the AM confirmed -- their edits, additions,
   // and deletions -- rather than the AI's originals. Approved tickets are filed to
   // ClickUp using the edited content.
@@ -492,6 +1041,14 @@ export async function applyPostMeetingDecisions(
         department: input.department,
         assigneeId: input.assigneeId,
         assignee: input.assignee?.trim() || undefined,
+        businessOptionId: input.businessOptionId,
+        businessName: input.businessName?.trim() || undefined,
+        priority: input.priority,
+        timeEstimateMinutes: input.timeEstimateMinutes,
+        dueDate: input.dueDate,
+        ticketType: input.ticketType || "regular",
+        billingChangeType: input.billingChangeType,
+        dateRequested: input.dateRequested,
         status: input.decision,
       };
 
@@ -499,7 +1056,19 @@ export async function applyPostMeetingDecisions(
         return { ...ticket, status: "declined" as const };
       }
 
-      const result = await createClickUpTask(context, ticket);
+      const isBillingTicket = ticket.ticketType === "billing";
+      const ticketContext: TicketContext = {
+        businessName: ticket.businessName || sharedContext.fallbackBusinessName,
+        businessOptionId: ticket.businessOptionId,
+        clientContact: sharedContext.clientContact,
+        accountManager: sharedContext.accountManager,
+        touchDate: sharedContext.touchDate,
+        // Billing tickets follow the billing form (no Department); regular tickets carry it.
+        department: isBillingTicket ? undefined : ticket.department,
+        billingChangeType: isBillingTicket ? ticket.billingChangeType : undefined,
+      };
+
+      const result = await createClickUpTask(context, ticket, ticketContext);
       return {
         ...ticket,
         status: "approved" as const,

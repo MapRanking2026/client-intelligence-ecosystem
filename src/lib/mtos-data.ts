@@ -427,6 +427,19 @@ export interface CallGuide {
 
 export type TicketDepartment = "SEO" | "Web Design" | "Ads" | "Account Manager" | "Other";
 
+export type TicketPriority = "urgent" | "high" | "normal" | "low";
+
+export type TicketType = "regular" | "billing";
+
+/** The billing-change categories (match the ClickUp "Type" field options). */
+export type BillingChangeType =
+  | "Upsell"
+  | "Downsell"
+  | "New Sale"
+  | "Pause"
+  | "Cancel"
+  | "Payment Failed";
+
 export interface DraftTicket {
   id: string;
   title: string;
@@ -436,6 +449,22 @@ export interface DraftTicket {
   assigneeId?: number;
   /** Display name of the chosen assignee, kept for the UI. */
   assignee?: string;
+  /** ClickUp "Business Name" option id this ticket is filed under (editable per multi-GBP accounts). */
+  businessOptionId?: string;
+  /** Display name of the chosen business, kept for the UI and ticket description. */
+  businessName?: string;
+  /** ClickUp native priority; drives the default due date. */
+  priority?: TicketPriority;
+  /** Estimated effort in minutes (ClickUp native time estimate). */
+  timeEstimateMinutes?: number;
+  /** Optional explicit due date (YYYY-MM-DD). When absent it's derived from priority at creation. */
+  dueDate?: string;
+  /** Regular ops ticket, or a billing-change ticket (routed to Carlos). Defaults to regular. */
+  ticketType?: TicketType;
+  /** For billing tickets: the billing-change category. */
+  billingChangeType?: BillingChangeType;
+  /** For billing tickets: the date the change was requested / the event happened (YYYY-MM-DD). */
+  dateRequested?: string;
   status: "pending" | "approved" | "declined";
   clickupTaskId?: string;
   clickupTaskUrl?: string;

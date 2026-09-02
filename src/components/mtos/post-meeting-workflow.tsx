@@ -17,8 +17,11 @@ import type {
   DraftTicket,
   MonthlyTouchRecord,
   PostMeetingReview,
+  BillingChangeType,
   QaReview,
   TicketDepartment,
+  TicketPriority,
+  TicketType,
 } from "@/src/lib/mtos-data";
 
 const DEPARTMENTS: TicketDepartment[] = ["SEO", "Web Design", "Ads", "Account Manager", "Other"];
@@ -30,13 +33,58 @@ interface EditableTicket {
   department: TicketDepartment;
   /** ClickUp member id picked from the dropdown; undefined = unassigned. */
   assigneeId?: number;
+  /** ClickUp Business Name option id picked from the dropdown; undefined = none. */
+  businessOptionId?: string;
+  priority: TicketPriority;
+  timeEstimateMinutes: number;
+  /** Optional explicit due date (YYYY-MM-DD); blank = auto from priority. */
+  dueDate?: string;
+  ticketType: TicketType;
+  billingChangeType?: BillingChangeType;
+  /** For billing tickets: the date the change was requested (YYYY-MM-DD). */
+  dateRequested?: string;
   decision?: "approved" | "declined";
 }
+
+const BILLING_TYPES: BillingChangeType[] = [
+  "Upsell",
+  "Downsell",
+  "New Sale",
+  "Pause",
+  "Cancel",
+  "Payment Failed",
+];
+
+const PRIORITIES: { value: TicketPriority; label: string }[] = [
+  { value: "urgent", label: "Urgent" },
+  { value: "high", label: "High" },
+  { value: "normal", label: "Normal" },
+  { value: "low", label: "Low" },
+];
+
+const TIME_ESTIMATES: { minutes: number; label: string }[] = [
+  { minutes: 30, label: "30m" },
+  { minutes: 60, label: "1h" },
+  { minutes: 120, label: "2h" },
+  { minutes: 180, label: "3h" },
+  { minutes: 240, label: "4h" },
+  { minutes: 360, label: "6h" },
+  { minutes: 480, label: "8h" },
+];
 
 interface ClickUpMemberOption {
   id: number;
   name: string;
 }
+
+interface ClickUpBusinessOption {
+  id: string;
+  name: string;
+}
+
+// Native <option> elements don't reliably honor Tailwind classes across browsers,
+// so force a readable dark background + light text inline (fixes blue-on-blue).
+const OPTION_STYLE = { backgroundColor: "#0d1625", color: "#e2e8f0" } as const;
 
 interface PostMeetingWorkflowProps {
   touchId: string;
@@ -91,11 +139,20 @@ export function PostMeetingWorkflow({ touchId, postMeeting, qaReview }: PostMeet
       description: ticket.description,
       department: ticket.department,
       assigneeId: ticket.assigneeId,
+      businessOptionId: ticket.businessOptionId,
+      priority: ticket.priority || "normal",
+      timeEstimateMinutes: ticket.timeEstimateMinutes ?? 60,
+      dueDate: ticket.dueDate,
+      ticketType: ticket.ticketType || "regular",
+      billingChangeType: ticket.billingChangeType,
+      dateRequested: ticket.dateRequested,
       decision: ticket.status === "pending" ? undefined : (ticket.status as "approved" | "declined"),
     })),
   );
   const [members, setMembers] = useState<ClickUpMemberOption[]>([]);
   const [membersReason, setMembersReason] = useState<string | null>(null);
+  const [businesses, setBusinesses] = useState<ClickUpBusinessOption[]>([]);
+  const [businessesReason, setBusinessesReason] = useState<string | null>(null);
   const [emailSubject, setEmailSubject] = useState(postMeeting?.clientEmail?.subject || "");
   const [emailBody, setEmailBody] = useState(postMeeting?.clientEmail?.body || "");
   const [approveEmail, setApproveEmail] = useState(postMeeting?.clientEmail?.status === "approved");
@@ -120,14 +177,24 @@ export function PostMeetingWorkflow({ touchId, postMeeting, qaReview }: PostMeet
       try {
         const response = await fetch("/api/integrations/clickup/members");
         const payload = (await response.json()) as {
-          data?: { members?: ClickUpMemberOption[]; reason?: string };
+          data?: {
+            members?: ClickUpMemberOption[];
+            membersReason?: string;
+            businesses?: ClickUpBusinessOption[];
+            businessesReason?: string;
+          };
           error?: string;
         };
         if (cancelled) return;
         setMembers(payload.data?.members || []);
-        setMembersReason(payload.data?.reason || payload.error || null);
+        setMembersReason(payload.data?.membersReason || payload.error || null);
+        setBusinesses(payload.data?.businesses || []);
+        setBusinessesReason(payload.data?.businessesReason || payload.error || null);
       } catch {
-        if (!cancelled) setMembersReason("Couldn't load ClickUp members.");
+        if (!cancelled) {
+          setMembersReason("Couldn't load ClickUp members.");
+          setBusinessesReason("Couldn't load ClickUp businesses.");
+        }
       }
     })();
     return () => {
@@ -141,11 +208,25 @@ export function PostMeetingWorkflow({ touchId, postMeeting, qaReview }: PostMeet
   function removeTicket(id: string) {
     setTickets((prev) => prev.filter((ticket) => ticket.id !== id));
   }
+  // The client's business, inferred from the existing drafts, so a newly added
+  // ticket starts under the same business by default (still editable).
+  const defaultBusinessOptionId = tickets.find((ticket) => ticket.businessOptionId)?.businessOptionId;
   function addTicket() {
     const id = globalThis.crypto?.randomUUID?.() || `new-${Date.now()}-${tickets.length}`;
     setTickets((prev) => [
       ...prev,
-      { id, title: "", description: "", department: "Other", assigneeId: undefined, decision: "approved" },
+      {
+        id,
+        title: "",
+        description: "",
+        department: "Other",
+        assigneeId: undefined,
+        businessOptionId: defaultBusinessOptionId,
+        priority: "normal",
+        timeEstimateMinutes: 60,
+        ticketType: "regular",
+        decision: "approved",
+      },
     ]);
   }
 
@@ -154,9 +235,13 @@ export function PostMeetingWorkflow({ touchId, postMeeting, qaReview }: PostMeet
   const allTicketsDecided = tickets.every(
     (ticket) => ticket.decision === "approved" || ticket.decision === "declined",
   );
-  const approvedTicketsValid = tickets.every(
-    (ticket) => ticket.decision !== "approved" || (ticket.title.trim() && ticket.description.trim()),
-  );
+  const approvedTicketsValid = tickets.every((ticket) => {
+    if (ticket.decision !== "approved") return true;
+    if (!ticket.title.trim() || !ticket.description.trim()) return false;
+    // Billing tickets need a change type before they can be filed.
+    if (ticket.ticketType === "billing" && !ticket.billingChangeType) return false;
+    return true;
+  });
   const emailValid = !approveEmail || Boolean(emailSubject.trim() && emailBody.trim());
   const confirmDisabled = isPending || !allTicketsDecided || !approvedTicketsValid || !emailValid;
 
@@ -247,9 +332,10 @@ export function PostMeetingWorkflow({ touchId, postMeeting, qaReview }: PostMeet
             </div>
             {!decisionsApplied ? (
               <p className="mt-1 text-xs text-slate-500">
-                Edit any ticket&apos;s content, department, or suggested assignee. Add or remove tickets as
-                needed, then approve the ones to file. Approved tickets are created in ClickUp when you
-                confirm; declined ones are kept as a record only.
+                Business and assignee are pre-filled and editable — change the business for accounts that
+                bill multiple profiles under one parent. Edit any ticket&apos;s content or department, add or
+                remove tickets, then approve the ones to file. Approved tickets are created in ClickUp when
+                you confirm; declined ones are kept as a record only.
               </p>
             ) : null}
 
@@ -259,19 +345,46 @@ export function PostMeetingWorkflow({ touchId, postMeeting, qaReview }: PostMeet
                 {tickets.map((ticket) => (
                   <div key={ticket.id} className="space-y-3 rounded-2xl border border-white/8 bg-white/4 p-4">
                     <div className="flex flex-wrap items-center justify-between gap-2">
-                      <select
-                        value={ticket.department}
-                        onChange={(event) =>
-                          updateTicket(ticket.id, { department: event.target.value as TicketDepartment })
-                        }
-                        className={`rounded-full border px-3 py-1.5 text-xs font-medium outline-none ${departmentTone(ticket.department)}`}
-                      >
-                        {DEPARTMENTS.map((department) => (
-                          <option key={department} value={department} className="bg-[#0d1625] text-slate-100">
-                            {department}
+                      <div className="flex flex-wrap items-center gap-2">
+                        <select
+                          value={ticket.ticketType}
+                          onChange={(event) =>
+                            updateTicket(ticket.id, { ticketType: event.target.value as TicketType })
+                          }
+                          style={{ color: "#e2e8f0" }}
+                          className={`rounded-full border px-3 py-1.5 text-xs font-semibold outline-none ${
+                            ticket.ticketType === "billing"
+                              ? "border-fuchsia-400/30 bg-fuchsia-500/15 text-fuchsia-100"
+                              : "border-white/10 bg-white/5 text-slate-200"
+                          }`}
+                        >
+                          <option value="regular" style={OPTION_STYLE}>
+                            Regular ticket
                           </option>
-                        ))}
-                      </select>
+                          <option value="billing" style={OPTION_STYLE}>
+                            Billing change
+                          </option>
+                        </select>
+                        {ticket.ticketType === "regular" ? (
+                          <select
+                            value={ticket.department}
+                            onChange={(event) =>
+                              updateTicket(ticket.id, { department: event.target.value as TicketDepartment })
+                            }
+                            className={`rounded-full border px-3 py-1.5 text-xs font-medium outline-none ${departmentTone(ticket.department)}`}
+                          >
+                            {DEPARTMENTS.map((department) => (
+                              <option key={department} value={department} style={OPTION_STYLE}>
+                                {department}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          <span className="rounded-full border border-fuchsia-400/20 bg-fuchsia-500/10 px-2 py-1 text-[11px] text-fuchsia-100">
+                            Routed to Carlos
+                          </span>
+                        )}
+                      </div>
                       <div className="flex shrink-0 items-center gap-2">
                         <button
                           type="button"
@@ -318,32 +431,187 @@ export function PostMeetingWorkflow({ touchId, postMeeting, qaReview }: PostMeet
                       placeholder="What needs to happen, with any context the team needs..."
                       className="w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-slate-200 outline-none placeholder:text-slate-500"
                     />
-                    <div>
-                      <select
-                        value={ticket.assigneeId != null ? String(ticket.assigneeId) : ""}
-                        onChange={(event) =>
-                          updateTicket(ticket.id, {
-                            assigneeId: event.target.value ? Number(event.target.value) : undefined,
-                          })
-                        }
-                        disabled={!members.length}
-                        className="w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-slate-200 outline-none disabled:opacity-60"
-                      >
-                        <option value="" className="bg-[#0d1625] text-slate-100">
-                          Unassigned
-                        </option>
-                        {members.map((member) => (
-                          <option key={member.id} value={member.id} className="bg-[#0d1625] text-slate-100">
-                            {member.name}
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <div>
+                        <label className="text-[11px] uppercase tracking-[0.2em] text-slate-400">Assignee</label>
+                        <select
+                          value={ticket.assigneeId != null ? String(ticket.assigneeId) : ""}
+                          onChange={(event) =>
+                            updateTicket(ticket.id, {
+                              assigneeId: event.target.value ? Number(event.target.value) : undefined,
+                            })
+                          }
+                          disabled={!members.length}
+                          style={{ color: "#e2e8f0" }}
+                          className="mt-1 w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-slate-200 outline-none disabled:opacity-60"
+                        >
+                          <option value="" style={OPTION_STYLE}>
+                            Unassigned
                           </option>
-                        ))}
-                      </select>
-                      {!members.length ? (
-                        <p className="mt-1 text-xs text-slate-500">
-                          {membersReason || "No assignable ClickUp members found — leave unassigned for now."}
-                        </p>
-                      ) : null}
+                          {members.map((member) => (
+                            <option key={member.id} value={member.id} style={OPTION_STYLE}>
+                              {member.name}
+                            </option>
+                          ))}
+                        </select>
+                        {!members.length ? (
+                          <p className="mt-1 text-xs text-slate-500">
+                            {membersReason || "No assignable ClickUp members found — leave unassigned."}
+                          </p>
+                        ) : null}
+                      </div>
+                      <div>
+                        <label className="text-[11px] uppercase tracking-[0.2em] text-slate-400">Business</label>
+                        <select
+                          value={ticket.businessOptionId || ""}
+                          onChange={(event) =>
+                            updateTicket(ticket.id, { businessOptionId: event.target.value || undefined })
+                          }
+                          disabled={!businesses.length}
+                          style={{ color: "#e2e8f0" }}
+                          className="mt-1 w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-slate-200 outline-none disabled:opacity-60"
+                        >
+                          <option value="" style={OPTION_STYLE}>
+                            No business selected
+                          </option>
+                          {businesses.map((business) => (
+                            <option key={business.id} value={business.id} style={OPTION_STYLE}>
+                              {business.name}
+                            </option>
+                          ))}
+                        </select>
+                        {!businesses.length ? (
+                          <p className="mt-1 text-xs text-slate-500">
+                            {businessesReason || "No ClickUp businesses found."}
+                          </p>
+                        ) : businesses.length && !ticket.businessOptionId ? (
+                          <p className="mt-1 rounded-lg border border-amber-400/30 bg-amber-500/10 px-2 py-1.5 text-xs text-amber-200">
+                            ⚠ Couldn&apos;t match this to a business — please select the correct one. (Some
+                            profiles bill under a parent account, e.g. Gables Plumbing → Sparkle Plumbing.)
+                          </p>
+                        ) : null}
+                      </div>
                     </div>
+
+                    {ticket.ticketType === "billing" ? (
+                      /* Billing change fields -- match the ClickUp billing-change form */
+                      <div className="grid gap-3 sm:grid-cols-3">
+                        <div>
+                          <label className="text-[11px] uppercase tracking-[0.2em] text-slate-400">
+                            Change type
+                          </label>
+                          <select
+                            value={ticket.billingChangeType || ""}
+                            onChange={(event) =>
+                              updateTicket(ticket.id, {
+                                billingChangeType: (event.target.value || undefined) as BillingChangeType | undefined,
+                              })
+                            }
+                            style={{ color: "#e2e8f0" }}
+                            className="mt-1 w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-slate-200 outline-none"
+                          >
+                            <option value="" style={OPTION_STYLE}>
+                              Select type…
+                            </option>
+                            {BILLING_TYPES.map((type) => (
+                              <option key={type} value={type} style={OPTION_STYLE}>
+                                {type}
+                              </option>
+                            ))}
+                          </select>
+                          {ticket.decision === "approved" && !ticket.billingChangeType ? (
+                            <p className="mt-1 text-xs text-amber-200">Pick a change type to file this ticket.</p>
+                          ) : null}
+                        </div>
+                        <div>
+                          <label className="text-[11px] uppercase tracking-[0.2em] text-slate-400">
+                            Date requested
+                          </label>
+                          <input
+                            type="date"
+                            value={ticket.dateRequested || ""}
+                            onChange={(event) =>
+                              updateTicket(ticket.id, { dateRequested: event.target.value || undefined })
+                            }
+                            style={{ color: "#e2e8f0", colorScheme: "dark" }}
+                            className="mt-1 w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-slate-200 outline-none"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[11px] uppercase tracking-[0.2em] text-slate-400">Due date</label>
+                          <input
+                            type="date"
+                            value={ticket.dueDate || ""}
+                            onChange={(event) =>
+                              updateTicket(ticket.id, { dueDate: event.target.value || undefined })
+                            }
+                            style={{ color: "#e2e8f0", colorScheme: "dark" }}
+                            className="mt-1 w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-slate-200 outline-none"
+                          />
+                        </div>
+                      </div>
+                    ) : (
+                    /* Priority / Time estimate / Due date -- required by the ClickUp ticket form */
+                    <div className="grid gap-3 sm:grid-cols-3">
+                      <div>
+                        <label className="text-[11px] uppercase tracking-[0.2em] text-slate-400">Priority</label>
+                        <select
+                          value={ticket.priority}
+                          onChange={(event) =>
+                            updateTicket(ticket.id, { priority: event.target.value as TicketPriority })
+                          }
+                          style={{ color: "#e2e8f0" }}
+                          className="mt-1 w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-slate-200 outline-none"
+                        >
+                          {PRIORITIES.map((option) => (
+                            <option key={option.value} value={option.value} style={OPTION_STYLE}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="text-[11px] uppercase tracking-[0.2em] text-slate-400">Time estimate</label>
+                        <select
+                          value={String(ticket.timeEstimateMinutes)}
+                          onChange={(event) =>
+                            updateTicket(ticket.id, { timeEstimateMinutes: Number(event.target.value) })
+                          }
+                          style={{ color: "#e2e8f0" }}
+                          className="mt-1 w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-slate-200 outline-none"
+                        >
+                          {(TIME_ESTIMATES.some((option) => option.minutes === ticket.timeEstimateMinutes)
+                            ? TIME_ESTIMATES
+                            : [
+                                {
+                                  minutes: ticket.timeEstimateMinutes,
+                                  label:
+                                    ticket.timeEstimateMinutes % 60 === 0
+                                      ? `${ticket.timeEstimateMinutes / 60}h`
+                                      : `${ticket.timeEstimateMinutes}m`,
+                                },
+                                ...TIME_ESTIMATES,
+                              ]
+                          ).map((option) => (
+                            <option key={option.minutes} value={option.minutes} style={OPTION_STYLE}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="text-[11px] uppercase tracking-[0.2em] text-slate-400">Due date</label>
+                        <input
+                          type="date"
+                          value={ticket.dueDate || ""}
+                          onChange={(event) => updateTicket(ticket.id, { dueDate: event.target.value || undefined })}
+                          style={{ color: "#e2e8f0", colorScheme: "dark" }}
+                          className="mt-1 w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-slate-200 outline-none"
+                        />
+                        <p className="mt-1 text-[11px] text-slate-500">Blank = auto from priority.</p>
+                      </div>
+                    </div>
+                    )}
                   </div>
                 ))}
                 <button
@@ -362,13 +630,31 @@ export function PostMeetingWorkflow({ touchId, postMeeting, qaReview }: PostMeet
                   <div key={ticket.id} className="rounded-2xl border border-white/8 bg-white/4 p-4">
                     <div className="flex flex-wrap items-start justify-between gap-3">
                       <div>
-                        <span className={`inline-flex rounded-full border px-2 py-1 text-[11px] font-medium ${departmentTone(ticket.department)}`}>
-                          {ticket.department}
+                        <span
+                          className={`inline-flex rounded-full border px-2 py-1 text-[11px] font-medium ${
+                            ticket.ticketType === "billing"
+                              ? "border-fuchsia-400/30 bg-fuchsia-500/15 text-fuchsia-100"
+                              : departmentTone(ticket.department)
+                          }`}
+                        >
+                          {ticket.ticketType === "billing"
+                            ? `Billing${ticket.billingChangeType ? ` · ${ticket.billingChangeType}` : ""}`
+                            : ticket.department}
                         </span>
                         <p className="mt-2 text-sm font-semibold text-white">{ticket.title}</p>
                         <p className="mt-1 text-sm text-slate-300">{ticket.description}</p>
+                        {ticket.businessName ? (
+                          <p className="mt-1 text-xs text-slate-400">Business: {ticket.businessName}</p>
+                        ) : null}
                         {ticket.assignee ? (
                           <p className="mt-1 text-xs text-slate-400">Assignee: {ticket.assignee}</p>
+                        ) : null}
+                        {ticket.priority || ticket.timeEstimateMinutes ? (
+                          <p className="mt-1 text-xs text-slate-400">
+                            {ticket.priority ? `Priority: ${ticket.priority}` : ""}
+                            {ticket.priority && ticket.timeEstimateMinutes ? " · " : ""}
+                            {ticket.timeEstimateMinutes ? `Estimate: ${ticket.timeEstimateMinutes / 60}h` : ""}
+                          </p>
                         ) : null}
                         {ticket.executionNote ? (
                           <p className="mt-2 text-xs text-amber-200">{ticket.executionNote}</p>
@@ -573,6 +859,14 @@ export function PostMeetingWorkflow({ touchId, postMeeting, qaReview }: PostMeet
                     department: ticket.department,
                     assigneeId: ticket.assigneeId,
                     assignee: members.find((member) => member.id === ticket.assigneeId)?.name,
+                    businessOptionId: ticket.businessOptionId,
+                    businessName: businesses.find((business) => business.id === ticket.businessOptionId)?.name,
+                    priority: ticket.priority,
+                    timeEstimateMinutes: ticket.timeEstimateMinutes,
+                    dueDate: ticket.dueDate || undefined,
+                    ticketType: ticket.ticketType,
+                    billingChangeType: ticket.ticketType === "billing" ? ticket.billingChangeType : undefined,
+                    dateRequested: ticket.ticketType === "billing" ? ticket.dateRequested || undefined : undefined,
                     decision: ticket.decision === "approved" ? "approved" : "declined",
                   })),
                   email: { subject: emailSubject.trim(), body: emailBody, approve: approveEmail },

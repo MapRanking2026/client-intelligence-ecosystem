@@ -2,7 +2,14 @@ import { nanoid } from "nanoid";
 import { z } from "zod";
 
 import type { TenantContext } from "@/src/lib/contracts/mtos";
-import type { ClientRecord, DraftTicket, MonthlyTouchRecord, PostMeetingReview } from "@/src/lib/mtos-data";
+import type {
+  ClientEmailDraft,
+  ClientRecord,
+  DraftTicket,
+  MonthlyTouchRecord,
+  PostMeetingReview,
+  TicketDepartment,
+} from "@/src/lib/mtos-data";
 import { getMtosDataSource } from "@/src/lib/server/data/seed-mtos-data-source";
 import { monthlyTouchPath } from "@/src/lib/server/firebase/collections";
 import { getFirebaseAdminDb } from "@/src/lib/server/firebase/admin";
@@ -264,6 +271,89 @@ interface ClickUpTaskResult {
   reason?: string;
 }
 
+interface ClickUpMember {
+  id: number;
+  username?: string;
+  email?: string;
+}
+
+// The members of a list rarely change within a single approval batch, so cache
+// the directory briefly to avoid re-fetching it for every approved ticket
+// (createClickUpTask runs in parallel across tickets).
+const memberCache = new Map<string, { at: number; members: ClickUpMember[] }>();
+const MEMBER_CACHE_TTL_MS = 60_000;
+
+/** Fetch the members who can be assigned tasks in a given list. Never throws. */
+async function getListMembers(listId: string, authHeader: string): Promise<ClickUpMember[]> {
+  const cached = memberCache.get(listId);
+  if (cached && Date.now() - cached.at < MEMBER_CACHE_TTL_MS) {
+    return cached.members;
+  }
+  try {
+    const response = await fetch(`https://api.clickup.com/api/v2/list/${listId}/member`, {
+      headers: { authorization: authHeader },
+    });
+    if (!response.ok) {
+      return cached?.members ?? [];
+    }
+    const payload = (await response.json().catch(() => ({}))) as {
+      members?: Array<{ id?: number; username?: string; email?: string }>;
+    };
+    const members: ClickUpMember[] = (payload.members || [])
+      .filter((member): member is { id: number; username?: string; email?: string } => typeof member.id === "number")
+      .map((member) => ({ id: member.id, username: member.username, email: member.email }));
+    memberCache.set(listId, { at: Date.now(), members });
+    return members;
+  } catch {
+    return cached?.members ?? [];
+  }
+}
+
+export interface AssignableMember {
+  id: number;
+  name: string;
+}
+
+export interface AssignableMembersResult {
+  members: AssignableMember[];
+  /** Present when the list can't be produced (e.g. ClickUp not connected). */
+  reason?: string;
+}
+
+/**
+ * The real ClickUp members who can be assigned follow-up tickets -- i.e. the
+ * members of the Growth Pilot list tasks are created in. Powers the assignee
+ * dropdown on the follow-up screen so the AM picks a real person instead of
+ * typing a name. Never throws; returns a reason when it can't resolve members.
+ */
+export async function listAssignableMembers(context: TenantContext): Promise<AssignableMembersResult> {
+  const listId = process.env.CLICKUP_GROWTH_PILOT_LIST_ID;
+  if (!listId) {
+    return {
+      members: [],
+      reason: "No ClickUp list is configured for follow-up tickets yet (set CLICKUP_GROWTH_PILOT_LIST_ID).",
+    };
+  }
+
+  const connection = await getIntegrationConnection(context, "clickup");
+  if (!connection || connection.status !== "connected") {
+    return { members: [], reason: "ClickUp isn't connected for this workspace yet. Connect it from Settings." };
+  }
+
+  const credentials = getIntegrationCredentials(connection);
+  if (!credentials.accessToken) {
+    return { members: [], reason: "The stored ClickUp connection is missing an access token. Reconnect ClickUp." };
+  }
+
+  const members = await getListMembers(listId, credentials.accessToken);
+  return {
+    members: members.map((member) => ({
+      id: member.id,
+      name: member.username || member.email || `Member ${member.id}`,
+    })),
+  };
+}
+
 /**
  * Creates a real ClickUp task when a target list is configured and the
  * tenant's ClickUp connection is active. If either prerequisite is missing,
@@ -297,6 +387,10 @@ async function createClickUpTask(context: TenantContext, ticket: DraftTicket): P
     };
   }
 
+  // The AM picked the assignee from a dropdown of real members, so we set the
+  // ClickUp assignee by id directly -- no name matching needed.
+  const assigneeId = ticket.assigneeId;
+
   try {
     const response = await fetch(`https://api.clickup.com/api/v2/list/${listId}/task`, {
       method: "POST",
@@ -307,6 +401,7 @@ async function createClickUpTask(context: TenantContext, ticket: DraftTicket): P
       body: JSON.stringify({
         name: `[${ticket.department}] ${ticket.title}`,
         description: ticket.description,
+        ...(typeof assigneeId === "number" ? { assignees: [assigneeId] } : {}),
       }),
     });
 
@@ -332,9 +427,28 @@ async function createClickUpTask(context: TenantContext, ticket: DraftTicket): P
   }
 }
 
+/**
+ * One ticket as the AM finalized it on the follow-up screen. Carries the (possibly
+ * edited) content plus the approve/decline decision, so the AM can edit, add, and
+ * delete tickets before confirming -- not just approve the AI's originals.
+ */
+export interface PostMeetingTicketInput {
+  id: string;
+  title: string;
+  description: string;
+  department: TicketDepartment;
+  /** ClickUp member id chosen from the assignee dropdown, if any. */
+  assigneeId?: number;
+  /** Display name of the chosen member, kept on the record for the UI. */
+  assignee?: string;
+  decision: "approved" | "declined";
+}
+
 export interface PostMeetingDecisions {
-  ticketDecisions: Record<string, "approved" | "declined">;
-  approveEmail: boolean;
+  /** The full final ticket set (additions included, deletions omitted). */
+  tickets: PostMeetingTicketInput[];
+  /** The (possibly edited) client email plus whether to approve it. */
+  email: { subject: string; body: string; approve: boolean };
   /** Decisions on Client Intelligence dashboard proposals, keyed by proposal id. */
   dashboardDecisions?: Record<string, "approved" | "declined">;
 }
@@ -359,17 +473,30 @@ export async function applyPostMeetingDecisions(
     throw new Error("Generate the post-meeting analysis before applying decisions");
   }
 
-  const existingTickets = touch.postMeeting.draftTickets || [];
+  // Guard: an approved ticket must actually have content (the AM may have cleared a field).
+  for (const input of decisions.tickets) {
+    if (input.decision === "approved" && (!input.title.trim() || !input.description.trim())) {
+      throw new Error("Approved tickets need both a title and a description.");
+    }
+  }
+
+  // Build the final ticket set from what the AM confirmed -- their edits, additions,
+  // and deletions -- rather than the AI's originals. Approved tickets are filed to
+  // ClickUp using the edited content.
   const updatedTickets: DraftTicket[] = await Promise.all(
-    existingTickets.map(async (ticket) => {
-      const decision = decisions.ticketDecisions[ticket.id];
+    decisions.tickets.map(async (input) => {
+      const ticket: DraftTicket = {
+        id: input.id,
+        title: input.title.trim(),
+        description: input.description.trim(),
+        department: input.department,
+        assigneeId: input.assigneeId,
+        assignee: input.assignee?.trim() || undefined,
+        status: input.decision,
+      };
 
-      if (decision === "declined") {
+      if (input.decision !== "approved") {
         return { ...ticket, status: "declined" as const };
-      }
-
-      if (decision !== "approved") {
-        return ticket;
       }
 
       const result = await createClickUpTask(context, ticket);
@@ -383,12 +510,11 @@ export async function applyPostMeetingDecisions(
     }),
   );
 
-  const clientEmail = touch.postMeeting.clientEmail
-    ? {
-        ...touch.postMeeting.clientEmail,
-        status: decisions.approveEmail ? ("approved" as const) : ("pending" as const),
-      }
-    : undefined;
+  const clientEmail: ClientEmailDraft = {
+    subject: decisions.email.subject.trim(),
+    body: decisions.email.body,
+    status: decisions.email.approve ? "approved" : "pending",
+  };
 
   // Apply approved dashboard proposals (writes to the two configured ClickUp
   // dashboard lists). Left untouched when there are no proposals or decisions.

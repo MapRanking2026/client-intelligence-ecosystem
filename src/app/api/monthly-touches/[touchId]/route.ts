@@ -18,8 +18,18 @@ const touchRequestSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("analyze_transcript"), transcript: z.string().min(1) }),
   z.object({
     action: z.literal("apply_post_meeting_decisions"),
-    ticketDecisions: z.record(z.string(), z.enum(["approved", "declined"])),
-    approveEmail: z.boolean(),
+    tickets: z.array(
+      z.object({
+        id: z.string().min(1),
+        title: z.string(),
+        description: z.string(),
+        department: z.enum(["SEO", "Web Design", "Ads", "Account Manager", "Other"]),
+        assigneeId: z.number().optional(),
+        assignee: z.string().optional(),
+        decision: z.enum(["approved", "declined"]),
+      }),
+    ),
+    email: z.object({ subject: z.string(), body: z.string(), approve: z.boolean() }),
     dashboardDecisions: z.record(z.string(), z.enum(["approved", "declined"])).optional(),
   }),
   z.object({ action: z.literal("generate_qa_review") }),
@@ -77,8 +87,8 @@ export async function POST(
         break;
       case "apply_post_meeting_decisions":
         result = await applyPostMeetingDecisions(context, touchId, {
-          ticketDecisions: payload.ticketDecisions,
-          approveEmail: payload.approveEmail,
+          tickets: payload.tickets,
+          email: payload.email,
           dashboardDecisions: payload.dashboardDecisions,
         });
         break;

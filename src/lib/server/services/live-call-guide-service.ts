@@ -258,7 +258,9 @@ async function generateClaudeSections(
     ),
   ].join("\n");
 
-  const result = await callLlmForJson({ env, system, userText, maxTokens: 1200 });
+  // A full timed run-sheet (sections x talking points x client prompts) is large;
+  // 1200 truncated the JSON mid-array, which then fails to parse. Give it headroom.
+  const result = await callLlmForJson({ env, system, userText, maxTokens: 6000 });
   const parsed = callGuideSchema.parse(result.data);
   return { sections: parsed.sections, provider: result.provider, model: result.model };
 }
@@ -323,7 +325,7 @@ async function generatePresentationAids(
       evidence,
       toneDirective,
     ].join("\n");
-    const res = await callLlmForJson({ env, system, userText, maxTokens: 900 });
+    const res = await callLlmForJson({ env, system, userText, maxTokens: 2000 });
     aids.anticipatedObjections = objectionsSchema.parse(res.data).objections;
   } catch {
     // Best-effort: omit objections on any failure.
@@ -339,7 +341,7 @@ async function generatePresentationAids(
       evidence,
       toneDirective,
     ].join("\n");
-    const res = await callLlmForJson({ env, system, userText, maxTokens: 900 });
+    const res = await callLlmForJson({ env, system, userText, maxTokens: 2000 });
     aids.valueTranslations = valueTranslationsSchema.parse(res.data).translations;
   } catch {
     // Best-effort: omit translations on any failure.

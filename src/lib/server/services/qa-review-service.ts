@@ -58,7 +58,9 @@ async function evaluateWithClaude(
     ),
   ].join("\n");
 
-  return qaSchema.parse(await callClaudeForJson({ env, system, userText, maxTokens: 1400 }));
+  // A 7-category scorecard (score + notes each) plus summary ran past 1400 tokens
+  // and truncated the JSON mid-array. Give it headroom so the parse doesn't fail.
+  return qaSchema.parse(await callClaudeForJson({ env, system, userText, maxTokens: 4000 }));
 }
 
 export async function generateQaReview(context: TenantContext, touchId: string) {

@@ -432,6 +432,10 @@ export interface DraftTicket {
   title: string;
   description: string;
   department: TicketDepartment;
+  /** ClickUp member id chosen for this ticket, used to set the real task assignee. */
+  assigneeId?: number;
+  /** Display name of the chosen assignee, kept for the UI. */
+  assignee?: string;
   status: "pending" | "approved" | "declined";
   clickupTaskId?: string;
   clickupTaskUrl?: string;

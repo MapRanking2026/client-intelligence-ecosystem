@@ -1,14 +1,42 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
-import { CheckCircle2, Gauge, LoaderCircle, Mail, ShieldCheck, Sparkles, Ticket } from "lucide-react";
+import { useEffect, useState, useTransition } from "react";
+import {
+  CheckCircle2,
+  Gauge,
+  LoaderCircle,
+  Mail,
+  Plus,
+  ShieldCheck,
+  Sparkles,
+  Ticket,
+  Trash2,
+} from "lucide-react";
 
 import type {
   DraftTicket,
   MonthlyTouchRecord,
   PostMeetingReview,
   QaReview,
+  TicketDepartment,
 } from "@/src/lib/mtos-data";
+
+const DEPARTMENTS: TicketDepartment[] = ["SEO", "Web Design", "Ads", "Account Manager", "Other"];
+
+interface EditableTicket {
+  id: string;
+  title: string;
+  description: string;
+  department: TicketDepartment;
+  /** ClickUp member id picked from the dropdown; undefined = unassigned. */
+  assigneeId?: number;
+  decision?: "approved" | "declined";
+}
+
+interface ClickUpMemberOption {
+  id: number;
+  name: string;
+}
 
 interface PostMeetingWorkflowProps {
   touchId: string;
@@ -56,13 +84,20 @@ export function PostMeetingWorkflow({ touchId, postMeeting, qaReview }: PostMeet
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
   const [activeAction, setActiveAction] = useState<string | null>(null);
-  const [ticketDecisions, setTicketDecisions] = useState<Record<string, "approved" | "declined">>(() =>
-    Object.fromEntries(
-      (postMeeting?.draftTickets || [])
-        .filter((ticket) => ticket.status !== "pending")
-        .map((ticket) => [ticket.id, ticket.status as "approved" | "declined"]),
-    ),
+  const [tickets, setTickets] = useState<EditableTicket[]>(() =>
+    (postMeeting?.draftTickets || []).map((ticket) => ({
+      id: ticket.id,
+      title: ticket.title,
+      description: ticket.description,
+      department: ticket.department,
+      assigneeId: ticket.assigneeId,
+      decision: ticket.status === "pending" ? undefined : (ticket.status as "approved" | "declined"),
+    })),
   );
+  const [members, setMembers] = useState<ClickUpMemberOption[]>([]);
+  const [membersReason, setMembersReason] = useState<string | null>(null);
+  const [emailSubject, setEmailSubject] = useState(postMeeting?.clientEmail?.subject || "");
+  const [emailBody, setEmailBody] = useState(postMeeting?.clientEmail?.body || "");
   const [approveEmail, setApproveEmail] = useState(postMeeting?.clientEmail?.status === "approved");
   const [dashboardDecisions, setDashboardDecisions] = useState<Record<string, "approved" | "declined">>(() =>
     Object.fromEntries(
@@ -75,10 +110,55 @@ export function PostMeetingWorkflow({ touchId, postMeeting, qaReview }: PostMeet
 
   const dashboardProposals = postMeeting?.dashboardUpdates?.proposals || [];
 
-  const pendingTickets = useMemo(
-    () => (postMeeting?.draftTickets || []).filter((ticket) => ticket.status === "pending"),
-    [postMeeting?.draftTickets],
+  // Load the real ClickUp members for the assignee dropdown. Only needed while the
+  // AM is still editing (before decisions are applied).
+  const analysisEditable = postMeeting?.status === "draft_ready";
+  useEffect(() => {
+    if (!analysisEditable) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const response = await fetch("/api/integrations/clickup/members");
+        const payload = (await response.json()) as {
+          data?: { members?: ClickUpMemberOption[]; reason?: string };
+          error?: string;
+        };
+        if (cancelled) return;
+        setMembers(payload.data?.members || []);
+        setMembersReason(payload.data?.reason || payload.error || null);
+      } catch {
+        if (!cancelled) setMembersReason("Couldn't load ClickUp members.");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [analysisEditable]);
+
+  function updateTicket(id: string, patch: Partial<EditableTicket>) {
+    setTickets((prev) => prev.map((ticket) => (ticket.id === id ? { ...ticket, ...patch } : ticket)));
+  }
+  function removeTicket(id: string) {
+    setTickets((prev) => prev.filter((ticket) => ticket.id !== id));
+  }
+  function addTicket() {
+    const id = globalThis.crypto?.randomUUID?.() || `new-${Date.now()}-${tickets.length}`;
+    setTickets((prev) => [
+      ...prev,
+      { id, title: "", description: "", department: "Other", assigneeId: undefined, decision: "approved" },
+    ]);
+  }
+
+  // Confirm is gated: every ticket must be decided, approved tickets need content,
+  // and an approved email needs a subject + body.
+  const allTicketsDecided = tickets.every(
+    (ticket) => ticket.decision === "approved" || ticket.decision === "declined",
   );
+  const approvedTicketsValid = tickets.every(
+    (ticket) => ticket.decision !== "approved" || (ticket.title.trim() && ticket.description.trim()),
+  );
+  const emailValid = !approveEmail || Boolean(emailSubject.trim() && emailBody.trim());
+  const confirmDisabled = isPending || !allTicketsDecided || !approvedTicketsValid || !emailValid;
 
   function run(action: string, body: Record<string, unknown>) {
     startTransition(async () => {
@@ -157,18 +237,128 @@ export function PostMeetingWorkflow({ touchId, postMeeting, qaReview }: PostMeet
             ) : null}
           </div>
 
-          {/* Step 2: draft tickets + email, AM approval gate */}
+          {/* Step 2: draft tickets + email, AM edits + approval gate */}
           <div className="rounded-[24px] border border-white/8 bg-black/20 p-5">
             <div className="flex items-center gap-2">
               <Ticket className="h-4 w-4 text-[#d7f5ec]" />
               <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">
-                Step 2 -- Draft tickets (approval required)
+                Step 2 -- Draft tickets (edit &amp; approve)
               </p>
             </div>
-            <div className="mt-3 space-y-3">
-              {(postMeeting.draftTickets || []).map((ticket) => {
-                const decision = ticketDecisions[ticket.id] || (ticket.status !== "pending" ? ticket.status : undefined);
-                return (
+            {!decisionsApplied ? (
+              <p className="mt-1 text-xs text-slate-500">
+                Edit any ticket&apos;s content, department, or suggested assignee. Add or remove tickets as
+                needed, then approve the ones to file. Approved tickets are created in ClickUp when you
+                confirm; declined ones are kept as a record only.
+              </p>
+            ) : null}
+
+            {/* Editable list before decisions are applied */}
+            {!decisionsApplied ? (
+              <div className="mt-3 space-y-3">
+                {tickets.map((ticket) => (
+                  <div key={ticket.id} className="space-y-3 rounded-2xl border border-white/8 bg-white/4 p-4">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <select
+                        value={ticket.department}
+                        onChange={(event) =>
+                          updateTicket(ticket.id, { department: event.target.value as TicketDepartment })
+                        }
+                        className={`rounded-full border px-3 py-1.5 text-xs font-medium outline-none ${departmentTone(ticket.department)}`}
+                      >
+                        {DEPARTMENTS.map((department) => (
+                          <option key={department} value={department} className="bg-[#0d1625] text-slate-100">
+                            {department}
+                          </option>
+                        ))}
+                      </select>
+                      <div className="flex shrink-0 items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => updateTicket(ticket.id, { decision: "approved" })}
+                          className={`rounded-full border px-3 py-1.5 text-xs font-medium transition ${
+                            ticket.decision === "approved"
+                              ? "border-emerald-400/30 bg-emerald-500/20 text-emerald-100"
+                              : "border-white/10 bg-white/5 text-slate-300 hover:bg-white/10"
+                          }`}
+                        >
+                          Approve
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => updateTicket(ticket.id, { decision: "declined" })}
+                          className={`rounded-full border px-3 py-1.5 text-xs font-medium transition ${
+                            ticket.decision === "declined"
+                              ? "border-rose-400/30 bg-rose-500/20 text-rose-100"
+                              : "border-white/10 bg-white/5 text-slate-300 hover:bg-white/10"
+                          }`}
+                        >
+                          Decline
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => removeTicket(ticket.id)}
+                          aria-label="Delete ticket"
+                          className="rounded-full border border-white/10 bg-white/5 p-1.5 text-slate-400 transition hover:border-rose-400/30 hover:bg-rose-500/20 hover:text-rose-100"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                    <input
+                      value={ticket.title}
+                      onChange={(event) => updateTicket(ticket.id, { title: event.target.value })}
+                      placeholder="Ticket title"
+                      className="w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm font-semibold text-white outline-none placeholder:text-slate-500"
+                    />
+                    <textarea
+                      value={ticket.description}
+                      onChange={(event) => updateTicket(ticket.id, { description: event.target.value })}
+                      rows={3}
+                      placeholder="What needs to happen, with any context the team needs..."
+                      className="w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-slate-200 outline-none placeholder:text-slate-500"
+                    />
+                    <div>
+                      <select
+                        value={ticket.assigneeId != null ? String(ticket.assigneeId) : ""}
+                        onChange={(event) =>
+                          updateTicket(ticket.id, {
+                            assigneeId: event.target.value ? Number(event.target.value) : undefined,
+                          })
+                        }
+                        disabled={!members.length}
+                        className="w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-slate-200 outline-none disabled:opacity-60"
+                      >
+                        <option value="" className="bg-[#0d1625] text-slate-100">
+                          Unassigned
+                        </option>
+                        {members.map((member) => (
+                          <option key={member.id} value={member.id} className="bg-[#0d1625] text-slate-100">
+                            {member.name}
+                          </option>
+                        ))}
+                      </select>
+                      {!members.length ? (
+                        <p className="mt-1 text-xs text-slate-500">
+                          {membersReason || "No assignable ClickUp members found — leave unassigned for now."}
+                        </p>
+                      ) : null}
+                    </div>
+                  </div>
+                ))}
+                <button
+                  type="button"
+                  onClick={addTicket}
+                  className="inline-flex items-center gap-1.5 rounded-full border border-white/12 bg-white/5 px-3 py-1.5 text-xs font-medium text-slate-200 transition hover:bg-white/10"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  Add ticket
+                </button>
+              </div>
+            ) : (
+              /* Read-only summary once decisions are applied */
+              <div className="mt-3 space-y-3">
+                {(postMeeting.draftTickets || []).map((ticket) => (
                   <div key={ticket.id} className="rounded-2xl border border-white/8 bg-white/4 p-4">
                     <div className="flex flex-wrap items-start justify-between gap-3">
                       <div>
@@ -177,6 +367,9 @@ export function PostMeetingWorkflow({ touchId, postMeeting, qaReview }: PostMeet
                         </span>
                         <p className="mt-2 text-sm font-semibold text-white">{ticket.title}</p>
                         <p className="mt-1 text-sm text-slate-300">{ticket.description}</p>
+                        {ticket.assignee ? (
+                          <p className="mt-1 text-xs text-slate-400">Assignee: {ticket.assignee}</p>
+                        ) : null}
                         {ticket.executionNote ? (
                           <p className="mt-2 text-xs text-amber-200">{ticket.executionNote}</p>
                         ) : null}
@@ -191,54 +384,23 @@ export function PostMeetingWorkflow({ touchId, postMeeting, qaReview }: PostMeet
                           </a>
                         ) : null}
                       </div>
-                      {!decisionsApplied ? (
-                        <div className="flex shrink-0 gap-2">
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setTicketDecisions((prev) => ({ ...prev, [ticket.id]: "approved" }))
-                            }
-                            className={`rounded-full border px-3 py-1.5 text-xs font-medium transition ${
-                              decision === "approved"
-                                ? "border-emerald-400/30 bg-emerald-500/20 text-emerald-100"
-                                : "border-white/10 bg-white/5 text-slate-300 hover:bg-white/10"
-                            }`}
-                          >
-                            Approve
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setTicketDecisions((prev) => ({ ...prev, [ticket.id]: "declined" }))
-                            }
-                            className={`rounded-full border px-3 py-1.5 text-xs font-medium transition ${
-                              decision === "declined"
-                                ? "border-rose-400/30 bg-rose-500/20 text-rose-100"
-                                : "border-white/10 bg-white/5 text-slate-300 hover:bg-white/10"
-                            }`}
-                          >
-                            Decline
-                          </button>
-                        </div>
-                      ) : (
-                        <span
-                          className={`shrink-0 rounded-full border px-3 py-1.5 text-xs font-medium ${
-                            ticket.status === "approved"
-                              ? "border-emerald-400/30 bg-emerald-500/20 text-emerald-100"
-                              : "border-rose-400/30 bg-rose-500/20 text-rose-100"
-                          }`}
-                        >
-                          {ticket.status === "approved" ? "Approved" : "Declined"}
-                        </span>
-                      )}
+                      <span
+                        className={`shrink-0 rounded-full border px-3 py-1.5 text-xs font-medium ${
+                          ticket.status === "approved"
+                            ? "border-emerald-400/30 bg-emerald-500/20 text-emerald-100"
+                            : "border-rose-400/30 bg-rose-500/20 text-rose-100"
+                        }`}
+                      >
+                        {ticket.status === "approved" ? "Approved" : "Declined"}
+                      </span>
                     </div>
                   </div>
-                );
-              })}
-              {!(postMeeting.draftTickets || []).length ? (
-                <p className="text-sm text-slate-400">No follow-up tickets were extracted from this transcript.</p>
-              ) : null}
-            </div>
+                ))}
+                {!(postMeeting.draftTickets || []).length ? (
+                  <p className="text-sm text-slate-400">No follow-up tickets were filed from this transcript.</p>
+                ) : null}
+              </div>
+            )}
           </div>
 
           <div className="rounded-[24px] border border-white/8 bg-black/20 p-5">
@@ -248,27 +410,49 @@ export function PostMeetingWorkflow({ touchId, postMeeting, qaReview }: PostMeet
                 Client follow-up email
               </p>
             </div>
-            {postMeeting.clientEmail ? (
+            {!decisionsApplied ? (
+              <div className="mt-3 space-y-3 rounded-2xl border border-white/8 bg-white/4 p-4">
+                <div>
+                  <label className="text-[11px] uppercase tracking-[0.2em] text-slate-400">Subject</label>
+                  <input
+                    value={emailSubject}
+                    onChange={(event) => setEmailSubject(event.target.value)}
+                    placeholder="Email subject"
+                    className="mt-1 w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm font-semibold text-white outline-none placeholder:text-slate-500"
+                  />
+                </div>
+                <div>
+                  <label className="text-[11px] uppercase tracking-[0.2em] text-slate-400">Body</label>
+                  <textarea
+                    value={emailBody}
+                    onChange={(event) => setEmailBody(event.target.value)}
+                    rows={10}
+                    placeholder="Write or refine the follow-up email to the client..."
+                    className="mt-1 w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm leading-6 text-slate-200 outline-none placeholder:text-slate-500"
+                  />
+                </div>
+                <label className="flex items-center gap-2 text-sm text-slate-200">
+                  <input
+                    type="checkbox"
+                    checked={approveEmail}
+                    onChange={(event) => setApproveEmail(event.target.checked)}
+                    className="h-4 w-4 rounded border-white/20 bg-black/30"
+                  />
+                  Approve this draft to send to the client
+                </label>
+                {approveEmail && !emailValid ? (
+                  <p className="text-xs text-amber-200">Add a subject and body before approving the email.</p>
+                ) : null}
+              </div>
+            ) : postMeeting.clientEmail ? (
               <div className="mt-3 rounded-2xl border border-white/8 bg-white/4 p-4">
                 <p className="text-sm font-semibold text-white">{postMeeting.clientEmail.subject}</p>
                 <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-300">{postMeeting.clientEmail.body}</p>
-                {!decisionsApplied ? (
-                  <label className="mt-3 flex items-center gap-2 text-sm text-slate-200">
-                    <input
-                      type="checkbox"
-                      checked={approveEmail}
-                      onChange={(event) => setApproveEmail(event.target.checked)}
-                      className="h-4 w-4 rounded border-white/20 bg-black/30"
-                    />
-                    Approve this draft to send to the client
-                  </label>
-                ) : (
-                  <p className="mt-3 text-xs text-slate-400">
-                    {postMeeting.clientEmail.status === "approved"
-                      ? "Approved -- copy this into an email to the client (sending isn't wired to a connected mailbox yet)."
-                      : "Not approved."}
-                  </p>
-                )}
+                <p className="mt-3 text-xs text-slate-400">
+                  {postMeeting.clientEmail.status === "approved"
+                    ? "Approved -- copy this into an email to the client (sending isn't wired to a connected mailbox yet)."
+                    : "Not approved."}
+                </p>
               </div>
             ) : null}
           </div>
@@ -382,12 +566,20 @@ export function PostMeetingWorkflow({ touchId, postMeeting, qaReview }: PostMeet
               onClick={() =>
                 run("apply_post_meeting_decisions", {
                   action: "apply_post_meeting_decisions",
-                  ticketDecisions,
-                  approveEmail,
+                  tickets: tickets.map((ticket) => ({
+                    id: ticket.id,
+                    title: ticket.title.trim(),
+                    description: ticket.description.trim(),
+                    department: ticket.department,
+                    assigneeId: ticket.assigneeId,
+                    assignee: members.find((member) => member.id === ticket.assigneeId)?.name,
+                    decision: ticket.decision === "approved" ? "approved" : "declined",
+                  })),
+                  email: { subject: emailSubject.trim(), body: emailBody, approve: approveEmail },
                   dashboardDecisions,
                 })
               }
-              disabled={isPending || (pendingTickets.length > 0 && Object.keys(ticketDecisions).length < (postMeeting.draftTickets || []).length)}
+              disabled={confirmDisabled}
               style={{ color: "#0d1625" }}
               className="inline-flex items-center gap-2 rounded-full border border-[#d7f5ec]/20 bg-[#d7f5ec] px-4 py-2 text-sm font-semibold text-[#0d1625] transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-60"
             >

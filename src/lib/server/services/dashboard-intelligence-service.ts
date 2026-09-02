@@ -38,6 +38,83 @@ const dashboardResponseSchema = z.object({
   proposals: z.array(proposalSchema),
 });
 
+/** Flatten an LLM value that should be a string, folding in objects the model sometimes returns. */
+function coerceToText(value: unknown, joiner = " — "): string {
+  if (typeof value === "string") return value.trim();
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (Array.isArray(value)) {
+    return value.map((entry) => coerceToText(entry, joiner)).filter(Boolean).join(joiner);
+  }
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    const parts: string[] = [];
+    for (const key of ["summary", "detail", "text", "label", "source", "description", "title", "name", "reason"]) {
+      const part = record[key];
+      const text = typeof part === "string" ? part.trim() : "";
+      if (text && !parts.includes(text)) parts.push(text);
+    }
+    if (parts.length) return parts.join(joiner);
+    return Object.values(record)
+      .map((entry) => (typeof entry === "string" ? entry.trim() : ""))
+      .filter(Boolean)
+      .join(joiner);
+  }
+  return "";
+}
+
+function coerceStringArray(value: unknown): string[] {
+  if (Array.isArray(value)) return value.map((entry) => coerceToText(entry)).filter(Boolean);
+  const text = coerceToText(value);
+  return text ? [text] : [];
+}
+
+function coerceDashboardKind(value: unknown): "risk_register" | "stakeholder_map" | null {
+  const text = coerceToText(value).toLowerCase();
+  if (text.includes("risk")) return "risk_register";
+  if (text.includes("stakeholder")) return "stakeholder_map";
+  return null;
+}
+
+function coerceAction(value: unknown): "create" | "update" | "no_change" {
+  const text = coerceToText(value).toLowerCase();
+  if (/create|add|new/.test(text)) return "create";
+  if (/update|edit|modify|revise/.test(text)) return "update";
+  return "no_change";
+}
+
+/**
+ * Coerce the raw LLM object into the exact shape `dashboardResponseSchema`
+ * expects, so a model that returns evidence-as-objects, an off-list action, or a
+ * single proposal instead of an array degrades gracefully instead of throwing a
+ * Zod error (which surfaces as the JSON error in the UI).
+ */
+function normalizeDashboardPayload(raw: Record<string, unknown>) {
+  const rawProposals = Array.isArray(raw.proposals)
+    ? raw.proposals
+    : raw.proposals
+      ? [raw.proposals]
+      : [];
+
+  const proposals = rawProposals
+    .map((entry) => {
+      const item = (entry ?? {}) as Record<string, unknown>;
+      const dashboard = coerceDashboardKind(item.dashboard ?? item.dashboardKind ?? item.type ?? item.name);
+      if (!dashboard) return null;
+      return {
+        dashboard,
+        action: coerceAction(item.action ?? item.change ?? item.operation),
+        client_name: coerceToText(item.client_name ?? item.clientName ?? item.client) || undefined,
+        summary: coerceToText(item.summary ?? item.title) || undefined,
+        detail: coerceToText(item.detail ?? item.description ?? item.body, "\n\n") || undefined,
+        reason: coerceToText(item.reason ?? item.rationale ?? item.why) || undefined,
+        evidence: coerceStringArray(item.evidence ?? item.sources ?? item.support),
+      };
+    })
+    .filter((proposal): proposal is NonNullable<typeof proposal> => proposal !== null);
+
+  return { proposals };
+}
+
 const DASHBOARD_LABEL: Record<DashboardKind, string> = {
   risk_register: "Risk Register",
   stakeholder_map: "Stakeholder Map",
@@ -100,8 +177,12 @@ export async function draftDashboardUpdates(
     ),
   ].join("\n");
 
-  const llmResult = await callLlmForJson({ env, system, userText, maxTokens: 1200 });
-  const parsed = dashboardResponseSchema.parse(llmResult.data);
+  // Two proposals, each with summary/detail/reason/evidence, ran past 1200 tokens
+  // and truncated the JSON mid-array. Give it real headroom, and normalize the
+  // shape before validating so an object-shaped evidence or off-list action can't
+  // fail the whole step.
+  const llmResult = await callLlmForJson({ env, system, userText, maxTokens: 4000 });
+  const parsed = dashboardResponseSchema.parse(normalizeDashboardPayload(llmResult.data));
 
   // Keep only actionable proposals; a "no_change" from the model is a valid,
   // expected answer that simply produces nothing to approve.

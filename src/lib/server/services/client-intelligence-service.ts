@@ -12,6 +12,8 @@ import type {
   RiskTier,
   StakeholderMapEntry,
   YesNo,
+  YesNoKindOf,
+  YesNoMaybe,
 } from "@/src/lib/mtos-data";
 import { getServerEnv } from "@/src/lib/server/env";
 import { getMtosDataSource } from "@/src/lib/server/data/seed-mtos-data-source";
@@ -49,15 +51,6 @@ function yesNo(value: unknown): YesNo | undefined {
   return undefined;
 }
 
-function riskTier(value: unknown): RiskTier | undefined {
-  const text = str(value).toLowerCase();
-  if (/critical|severe/.test(text)) return "Critical";
-  if (/high/.test(text)) return "High";
-  if (/med/.test(text)) return "Medium";
-  if (/low|minor/.test(text)) return "Low";
-  return undefined;
-}
-
 function caseStatus(value: unknown): CaseStatus | undefined {
   const text = str(value).toLowerCase();
   if (/cancel/.test(text)) return "Requested Cancellation";
@@ -92,6 +85,55 @@ function literacy(value: unknown): MarketingLiteracy | undefined {
   if (/med|inter/.test(text)) return "Medium";
   if (/low|begin|novice|none|basic/.test(text)) return "Low";
   return undefined;
+}
+
+function yesNoMaybe(value: unknown): YesNoMaybe | undefined {
+  const text = str(value).toLowerCase();
+  if (!text) return undefined;
+  if (/maybe|possibly|partly|somewhat|unsure/.test(text)) return "maybe";
+  if (/^y|yes|true/.test(text)) return "Yes";
+  if (/^n|no|false/.test(text)) return "No";
+  return undefined;
+}
+
+function yesNoKindOf(value: unknown): YesNoKindOf | undefined {
+  const text = str(value).toLowerCase();
+  if (!text) return undefined;
+  if (/kind of|kinda|sort of|somewhat|partly/.test(text)) return "kind of";
+  if (/^y|yes|true/.test(text)) return "Yes";
+  if (/^n|no|false/.test(text)) return "No";
+  return undefined;
+}
+
+/**
+ * Risk Score is a simple COUNT of the six warning signs marked "Yes" (0-6), per
+ * the Client Retention Risk Tracker rubric. Only "Yes" counts as a flag;
+ * "maybe"/"kind of" are informational and do not add to the score.
+ */
+function computeRiskScore(entry: {
+  money?: string;
+  responsiveness?: string;
+  lifeChange?: string;
+  technical?: string;
+  otherAgency?: string;
+  performance?: string;
+}): number {
+  return [entry.money, entry.responsiveness, entry.lifeChange, entry.technical, entry.otherAgency, entry.performance]
+    .filter((value) => value === "Yes").length;
+}
+
+/** Risk Tier from the flag count, per the rubric: 0 Healthy, 1 Low, 2-3 Medium, 4-5 High, 6 Critical. */
+function riskScoreToTier(score: number): RiskTier {
+  if (score >= 6) return "Critical";
+  if (score >= 4) return "High";
+  if (score >= 2) return "Medium";
+  if (score === 1) return "Low";
+  return "Healthy";
+}
+
+/** Default case status from tier, per the rubric (Low/Medium: Watching; High/Critical: Working). */
+function defaultCaseStatusForTier(tier: RiskTier): "Watching" | "Working" {
+  return tier === "High" || tier === "Critical" ? "Working" : "Watching";
 }
 
 /** Convert an ISO/date string to YYYY-MM-DD. */
@@ -155,18 +197,19 @@ export async function generateClientIntelligence(
   const userText = [
     "Return a JSON object with exactly these keys:",
     "  report: string -- a tight narrative (2-4 short paragraphs) on where this client stands after the touch.",
-    '  riskDetected: boolean -- true if there is ANY retention risk (even low).',
-    '  riskTier: one of "Low","High","Medium","Critical" (or null when no risk).',
-    '  caseStatus: one of "Watching","Working","Requested Cancellation","Resolved-Healthy".',
+    "  factors: the six retention warning signs -- money, responsiveness, lifeChange, technical,",
+    '           otherAgency, performance. Mark each "Yes" ONLY if this touch shows it as a real warning',
+    "           sign for this client, otherwise \"No\". (The risk score is simply how many are Yes, so be",
+    '           accurate.) money/responsiveness/technical/performance are "Yes"/"No"; lifeChange is',
+    '           "Yes"/"No"/"maybe"; otherAgency is "Yes"/"No"/"kind of".',
+    '  caseStatus: one of "Watching","Working","Requested Cancellation","Resolved-Healthy" (or null).',
     '  primaryCategory: one of "Communication","Expectations","Gen. Business","Product","Onboarding".',
-    "  factors: an object with money, responsiveness, lifeChange, technical, otherAgency, performance,",
-    '           each "Yes" or "No" -- was THAT a cause of the risk?',
     "  nextAction: string -- the single next action to defuse the risk.",
     "  latestComments: string -- one short line of notable context (optional).",
     "  stakeholder: an object with role, communicationPreference (Phone/Email/Face-to-Face/Text/Chat),",
     "           marketingLiteracy (Low/Medium/High), personality, whatTheyCareAbout, knownHistory,",
     "           and services (array of service names they have).",
-    "If riskDetected is false, still return report; the other risk fields can be null/empty.",
+    "Always return report and stakeholder. When no warning signs apply, mark all six factors \"No\".",
     "",
     JSON.stringify(
       {
@@ -196,10 +239,22 @@ export async function generateClientIntelligence(
   const report = str(data.report) || str(data.summary) || "No report was generated.";
   const factors = (data.factors ?? {}) as Record<string, unknown>;
   const stakeholder = (data.stakeholder ?? {}) as Record<string, unknown>;
-  const tier = riskTier(data.riskTier);
-  const riskDetected = Boolean(data.riskDetected) || Boolean(tier);
   const clientType = defaultClientType(amName);
   const servicesRaw = Array.isArray(stakeholder.services) ? stakeholder.services : [];
+
+  // Normalize the six warning signs, then the Risk Score is the COUNT of "Yes"
+  // (per the Client Retention Risk Tracker rubric), and the Tier follows the count.
+  const flags = {
+    money: yesNo(factors.money) || "No",
+    responsiveness: yesNo(factors.responsiveness) || "No",
+    lifeChange: yesNoMaybe(factors.lifeChange) || "No",
+    technical: yesNo(factors.technical) || "No",
+    otherAgency: yesNoKindOf(factors.otherAgency) || "No",
+    performance: yesNo(factors.performance) || "No",
+  };
+  const score = computeRiskScore(flags);
+  const tier = riskScoreToTier(score);
+  const riskDetected = score >= 1;
 
   // Stakeholder Map is ALWAYS produced -- every client must be listed & kept current.
   const stakeholderMap: StakeholderMapEntry = {
@@ -215,8 +270,9 @@ export async function generateClientIntelligence(
     knownHistory: str(stakeholder.knownHistory) || undefined,
   };
 
-  // Is the client's Stakeholder Map row already populated? (an update vs a first fill)
-  const { linked, stakeholderUpToDate } = await inspectClientTask(context, client);
+  // Read the client's current row: is the stakeholder data already filled, and is
+  // the client CURRENTLY flagged at risk (so we can clear it when the risk is gone)?
+  const { linked, stakeholderUpToDate, currentlyFlagged } = await inspectClientTask(context, client);
 
   const review: ClientIntelligenceReview = {
     status: "draft_ready",
@@ -230,25 +286,39 @@ export async function generateClientIntelligence(
     model,
   };
 
-  // Risk Register is produced ONLY when at risk.
   if (riskDetected) {
-    review.riskTier = tier || "Low";
+    // New / ongoing risk -> flag the client and fill the Risk Register.
+    review.riskTier = tier;
     review.riskRegister = {
       accountManager: amName || undefined,
       clientType,
-      caseStatus: caseStatus(data.caseStatus) || "Watching",
+      caseStatus: caseStatus(data.caseStatus) || defaultCaseStatusForTier(tier),
       dateFlagged: todayDate(),
-      money: yesNo(factors.money) || "No",
-      responsiveness: yesNo(factors.responsiveness) || "No",
-      lifeChange: yesNo(factors.lifeChange) || "No",
-      technical: yesNo(factors.technical) || "No",
-      otherAgency: yesNo(factors.otherAgency) || "No",
-      performance: yesNo(factors.performance) || "No",
-      riskTier: tier || "Low",
+      ...flags,
+      riskScore: score,
+      riskTier: tier,
       primaryCategory: primaryCategory(data.primaryCategory),
       nextAction: str(data.nextAction) || client.nextBestAction || "",
       nextActionOwner: amName || undefined,
       dueDate: plusDaysDate(7),
+      lastMonthlyTouch: touchDate,
+      latestComments: str(data.latestComments) || undefined,
+    };
+    review.riskRegisterStatus = "pending";
+  } else if (currentlyFlagged) {
+    // Previously flagged, but this touch shows no risk (0 flags) -> propose clearing it.
+    review.riskResolved = true;
+    review.riskTier = "Healthy";
+    review.riskRegister = {
+      accountManager: amName || undefined,
+      clientType,
+      caseStatus: "Resolved-Healthy",
+      dateFlagged: todayDate(),
+      ...flags,
+      riskScore: 0,
+      riskTier: "Healthy",
+      nextAction: str(data.nextAction) || "Risk resolved -- returning the account to healthy.",
+      nextActionOwner: amName || undefined,
       lastMonthlyTouch: touchDate,
       latestComments: str(data.latestComments) || undefined,
     };
@@ -268,16 +338,18 @@ const STAKEHOLDER_FIELD_NAMES = [
   "known history context",
 ];
 
-/** Read the client's linked task to decide if the Stakeholder Map row is already populated. */
+/** Read the client's linked task: is the stakeholder data filled, and is it currently flagged at risk? */
 async function inspectClientTask(
   context: TenantContext,
   client: ClientRecord,
-): Promise<{ linked: boolean; stakeholderUpToDate: boolean }> {
+): Promise<{ linked: boolean; stakeholderUpToDate: boolean; currentlyFlagged: boolean }> {
   const taskId = client.clickupTaskId;
   const listId = process.env.CLICKUP_HEALTH_TRACKER_LIST_ID;
-  if (!taskId || !listId) return { linked: Boolean(taskId), stakeholderUpToDate: false };
+  if (!taskId || !listId) {
+    return { linked: Boolean(taskId), stakeholderUpToDate: false, currentlyFlagged: false };
+  }
   const auth = await getClickUpAuth(context);
-  if (!("token" in auth)) return { linked: true, stakeholderUpToDate: false };
+  if (!("token" in auth)) return { linked: true, stakeholderUpToDate: false, currentlyFlagged: false };
   try {
     const [fields, values] = await Promise.all([
       getListCustomFields(listId, auth.token),
@@ -289,10 +361,18 @@ async function inspectClientTask(
       const value = values.get(field.id);
       return value !== undefined && value !== null && value !== "" && !(Array.isArray(value) && value.length === 0);
     });
-    // Consider "up to date" when most stakeholder fields already carry a value.
-    return { linked: true, stakeholderUpToDate: populated.length >= 4 };
+    // Is the "Health" dropdown currently set to a Risk option?
+    let currentlyFlagged = false;
+    const healthField = findField(fields, ["health"]);
+    if (healthField) {
+      const rawValue = values.get(healthField.id);
+      const optionId = typeof rawValue === "string" ? rawValue : (rawValue as { id?: string })?.id;
+      const option = healthField.options.find((opt) => opt.id === optionId);
+      currentlyFlagged = /risk/i.test(option?.name || "");
+    }
+    return { linked: true, stakeholderUpToDate: populated.length >= 4, currentlyFlagged };
   } catch {
-    return { linked: true, stakeholderUpToDate: false };
+    return { linked: true, stakeholderUpToDate: false, currentlyFlagged: false };
   }
 }
 
@@ -335,7 +415,14 @@ async function writeRiskRegister(
 ): Promise<{ ok: boolean; reason?: string }> {
   const fields = await getListCustomFields(listId, token);
   const ownerId = await resolveMemberId(listId, token, entry.nextActionOwner || entry.accountManager);
+  // Risk Score = count of "Yes" flags; Tier follows the count (rubric is authoritative,
+  // recomputed here in case the AM edited a flag). Resolved cases go back to Healthy/Good.
+  const resolved = entry.caseStatus === "Resolved-Healthy";
+  const score = resolved ? 0 : computeRiskScore(entry);
+  const tier = riskScoreToTier(score);
+  const health = resolved || score === 0 ? "Good" : "Risk";
   const writes = new CustomFieldBuilder(fields)
+    .dropdown(["health"], health)
     .dropdown(["account manager"], entry.accountManager)
     .dropdown(["client type"], entry.clientType)
     .dropdown(["case status"], entry.caseStatus)
@@ -346,7 +433,8 @@ async function writeRiskRegister(
     .dropdown(["technical challenge", "technical"], entry.technical)
     .dropdown(["other agency advisor", "other agency"], entry.otherAgency)
     .dropdown(["performance"], entry.performance)
-    .dropdown(["risk tier", "risk score"], entry.riskTier)
+    .dropdown(["risk score"], String(score))
+    .dropdown(["risk tier"], tier)
     .dropdown(["primary category per churn analysis", "primary category"], entry.primaryCategory)
     .text(["next action"], entry.nextAction)
     .users(["next action owner"], ownerId)
@@ -366,6 +454,7 @@ async function writeStakeholderMap(
   entry: StakeholderMapEntry,
 ): Promise<{ ok: boolean; reason?: string }> {
   const fields = await getListCustomFields(listId, token);
+  const today = new Date().toISOString().slice(0, 10);
   const writes = new CustomFieldBuilder(fields)
     .text(["client name"], entry.clientName)
     .dropdown(["account manager"], entry.assignee)
@@ -377,6 +466,8 @@ async function writeStakeholderMap(
     .text(["personality styles", "personality"], entry.personality)
     .text(["what they care about"], entry.whatTheyCareAbout)
     .text(["known history context", "known history"], entry.knownHistory)
+    // "Date updated" -- ClickUp auto-stamps native update, but set Date Reviewed too if present.
+    .date(["date updated", "date reviewed"], today)
     .build();
   return applyFieldWritesToTask(taskId, writes, token);
 }

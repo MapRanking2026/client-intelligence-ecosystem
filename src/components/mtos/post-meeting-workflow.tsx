@@ -92,7 +92,8 @@ const OPTION_STYLE = { backgroundColor: "#0d1625", color: "#e2e8f0" } as const;
 const CLIENT_TYPES = ["Direct", "White Label"] as const;
 const CASE_STATUSES = ["Watching", "Working", "Requested Cancellation", "Resolved-Healthy"] as const;
 const YES_NO = ["Yes", "No"] as const;
-const RISK_TIERS = ["Low", "Medium", "High", "Critical"] as const;
+const YES_NO_MAYBE = ["Yes", "No", "maybe"] as const;
+const YES_NO_KINDOF = ["Yes", "No", "kind of"] as const;
 const RISK_CATEGORIES = ["Communication", "Expectations", "Gen. Business", "Product", "Onboarding"] as const;
 const COMM_PREFS = ["Phone", "Email", "Face-to-Face", "Text/Chat"] as const;
 const LITERACIES = ["Low", "Medium", "High"] as const;
@@ -281,6 +282,17 @@ export function PostMeetingWorkflow({ touchId, postMeeting, qaReview }: PostMeet
   function updateStake(patch: Partial<StakeholderMapEntry>) {
     setStakeEntry((prev) => ({ ...prev, ...patch }));
   }
+  // Risk Score = count of the six flags marked "Yes"; Tier follows the count (rubric).
+  const riskFlagCount = [
+    riskEntry.money,
+    riskEntry.responsiveness,
+    riskEntry.lifeChange,
+    riskEntry.technical,
+    riskEntry.otherAgency,
+    riskEntry.performance,
+  ].filter((value) => value === "Yes").length;
+  const derivedRiskTier =
+    riskFlagCount >= 6 ? "Critical" : riskFlagCount >= 4 ? "High" : riskFlagCount >= 2 ? "Medium" : riskFlagCount === 1 ? "Low" : "Healthy";
 
   // Load the real ClickUp members for the assignee dropdown. Only needed while the
   // AM is still editing (before decisions are applied).
@@ -965,7 +977,9 @@ export function PostMeetingWorkflow({ touchId, postMeeting, qaReview }: PostMeet
                 <div className="mt-4 space-y-3 rounded-2xl border border-rose-400/20 bg-rose-500/5 p-4">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <p className="text-sm font-semibold text-rose-100">
-                      Risk Register{clientIntelligence.riskTier ? ` · ${clientIntelligence.riskTier} risk` : ""}
+                      {clientIntelligence.riskResolved
+                        ? "Risk Register · resolved — confirm to clear"
+                        : `Risk Register${clientIntelligence.riskTier ? ` · ${clientIntelligence.riskTier} risk` : ""}`}
                     </p>
                     {clientIntelligence.riskRegisterStatus === "approved" ? (
                       <span className="rounded-full border border-emerald-400/30 bg-emerald-500/20 px-3 py-1 text-xs text-emerald-100">
@@ -994,7 +1008,12 @@ export function PostMeetingWorkflow({ touchId, postMeeting, qaReview }: PostMeet
                     <FieldInput label="Account Manager" value={riskEntry.accountManager || ""} onChange={(v) => updateRisk({ accountManager: v })} />
                     <FieldSelect label="Client Type" value={riskEntry.clientType || ""} onChange={(v) => updateRisk({ clientType: (v || undefined) as RiskRegisterEntry["clientType"] })} options={CLIENT_TYPES} placeholder="Select…" />
                     <FieldSelect label="Case Status" value={riskEntry.caseStatus || ""} onChange={(v) => updateRisk({ caseStatus: (v || undefined) as RiskRegisterEntry["caseStatus"] })} options={CASE_STATUSES} placeholder="Select…" />
-                    <FieldSelect label="Risk Tier" value={riskEntry.riskTier || ""} onChange={(v) => updateRisk({ riskTier: (v || undefined) as RiskRegisterEntry["riskTier"] })} options={RISK_TIERS} placeholder="Select…" />
+                    <div>
+                      <label className="text-[11px] uppercase tracking-[0.2em] text-slate-400">Risk Score / Tier (auto)</label>
+                      <div className="mt-1 w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm text-slate-200">
+                        {riskFlagCount}/6 flags · <span className="font-semibold">{derivedRiskTier}</span>
+                      </div>
+                    </div>
                     <FieldSelect label="Primary Category" value={riskEntry.primaryCategory || ""} onChange={(v) => updateRisk({ primaryCategory: (v || undefined) as RiskRegisterEntry["primaryCategory"] })} options={RISK_CATEGORIES} placeholder="Select…" />
                     <FieldInput label="Date Flagged" type="date" value={riskEntry.dateFlagged || ""} onChange={(v) => updateRisk({ dateFlagged: v || undefined })} />
                     <FieldInput label="Next Action Owner" value={riskEntry.nextActionOwner || ""} onChange={(v) => updateRisk({ nextActionOwner: v })} />
@@ -1004,9 +1023,9 @@ export function PostMeetingWorkflow({ touchId, postMeeting, qaReview }: PostMeet
                   <div className="grid gap-3 sm:grid-cols-3">
                     <FieldSelect label="Money / Cash Flow" value={riskEntry.money || ""} onChange={(v) => updateRisk({ money: (v || undefined) as RiskRegisterEntry["money"] })} options={YES_NO} />
                     <FieldSelect label="Responsiveness" value={riskEntry.responsiveness || ""} onChange={(v) => updateRisk({ responsiveness: (v || undefined) as RiskRegisterEntry["responsiveness"] })} options={YES_NO} />
-                    <FieldSelect label="Life Change" value={riskEntry.lifeChange || ""} onChange={(v) => updateRisk({ lifeChange: (v || undefined) as RiskRegisterEntry["lifeChange"] })} options={YES_NO} />
+                    <FieldSelect label="Life Change" value={riskEntry.lifeChange || ""} onChange={(v) => updateRisk({ lifeChange: (v || undefined) as RiskRegisterEntry["lifeChange"] })} options={YES_NO_MAYBE} />
                     <FieldSelect label="Technical" value={riskEntry.technical || ""} onChange={(v) => updateRisk({ technical: (v || undefined) as RiskRegisterEntry["technical"] })} options={YES_NO} />
-                    <FieldSelect label="Other Agency" value={riskEntry.otherAgency || ""} onChange={(v) => updateRisk({ otherAgency: (v || undefined) as RiskRegisterEntry["otherAgency"] })} options={YES_NO} />
+                    <FieldSelect label="Other Agency" value={riskEntry.otherAgency || ""} onChange={(v) => updateRisk({ otherAgency: (v || undefined) as RiskRegisterEntry["otherAgency"] })} options={YES_NO_KINDOF} />
                     <FieldSelect label="Performance" value={riskEntry.performance || ""} onChange={(v) => updateRisk({ performance: (v || undefined) as RiskRegisterEntry["performance"] })} options={YES_NO} />
                   </div>
                   <FieldTextarea label="Next Action" value={riskEntry.nextAction || ""} onChange={(v) => updateRisk({ nextAction: v })} rows={2} placeholder="The plan to defuse this risk…" />
@@ -1037,7 +1056,7 @@ export function PostMeetingWorkflow({ touchId, postMeeting, qaReview }: PostMeet
                       action: "apply_client_intelligence",
                       riskRegister:
                         riskDecision && clientIntelligence.riskRegisterStatus !== "approved"
-                          ? { ...riskEntry, decision: riskDecision }
+                          ? { ...riskEntry, riskScore: riskFlagCount, riskTier: derivedRiskTier, decision: riskDecision }
                           : undefined,
                       stakeholderMap:
                         stakeDecision && clientIntelligence.stakeholderMapStatus !== "approved"

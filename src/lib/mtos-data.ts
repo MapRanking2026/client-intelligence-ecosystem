@@ -518,7 +518,9 @@ export interface DashboardUpdateReview {
 // ---------------------------------------------------------------------------
 
 export type YesNo = "Yes" | "No";
-export type RiskTier = "Low" | "Medium" | "High" | "Critical";
+export type YesNoMaybe = "Yes" | "No" | "maybe";
+export type YesNoKindOf = "Yes" | "No" | "kind of";
+export type RiskTier = "Healthy" | "Low" | "Medium" | "High" | "Critical";
 export type ClientType = "Direct" | "White Label";
 export type CaseStatus = "Watching" | "Working" | "Requested Cancellation" | "Resolved-Healthy";
 export type RiskPrimaryCategory =
@@ -538,10 +540,12 @@ export interface RiskRegisterEntry {
   dateFlagged?: string; // YYYY-MM-DD
   money?: YesNo;
   responsiveness?: YesNo;
-  lifeChange?: YesNo;
+  lifeChange?: YesNoMaybe;
   technical?: YesNo;
-  otherAgency?: YesNo;
+  otherAgency?: YesNoKindOf;
   performance?: YesNo;
+  /** ClickUp Risk Score dropdown (1-6). Drives Risk Tier. */
+  riskScore?: number;
   riskTier?: RiskTier;
   primaryCategory?: RiskPrimaryCategory;
   nextAction?: string;
@@ -571,6 +575,8 @@ export interface ClientIntelligenceReview {
   report: string;
   /** Whether a retention risk was detected from the touch (gates the Risk Register only). */
   riskDetected: boolean;
+  /** True when this Risk Register entry CLEARS a previously-flagged client (resolution). */
+  riskResolved?: boolean;
   riskTier?: RiskTier;
   /** Risk Register entry -- present only when at risk. Stakeholder Map is always present. */
   riskRegister?: RiskRegisterEntry;

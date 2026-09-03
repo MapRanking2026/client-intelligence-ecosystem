@@ -7,11 +7,48 @@ import { prepareMonthlyTouch } from "@/src/lib/server/services/monthly-touch-pre
 import { generateLiveCallGuide } from "@/src/lib/server/services/live-call-guide-service";
 import {
   analyzePostMeetingTranscript,
-  applyDashboardOnlyDecisions,
   applyPostMeetingDecisions,
-  retryDashboardUpdates,
 } from "@/src/lib/server/services/post-meeting-service";
+import {
+  applyClientIntelligenceDecisions,
+  retryClientIntelligence,
+} from "@/src/lib/server/services/client-intelligence-service";
 import { generateQaReview, recordVictorDecision } from "@/src/lib/server/services/qa-review-service";
+
+const yesNoSchema = z.enum(["Yes", "No"]);
+const riskRegisterSchema = z.object({
+  accountManager: z.string().optional(),
+  clientType: z.enum(["Direct", "White Label"]).optional(),
+  caseStatus: z.enum(["Watching", "Working", "Requested Cancellation", "Resolved-Healthy"]).optional(),
+  dateFlagged: z.string().optional(),
+  money: yesNoSchema.optional(),
+  responsiveness: yesNoSchema.optional(),
+  lifeChange: yesNoSchema.optional(),
+  technical: yesNoSchema.optional(),
+  otherAgency: yesNoSchema.optional(),
+  performance: yesNoSchema.optional(),
+  riskTier: z.enum(["Low", "Medium", "High", "Critical"]).optional(),
+  primaryCategory: z.enum(["Communication", "Expectations", "Gen. Business", "Product", "Onboarding"]).optional(),
+  nextAction: z.string().optional(),
+  nextActionOwner: z.string().optional(),
+  dueDate: z.string().optional(),
+  lastMonthlyTouch: z.string().optional(),
+  latestComments: z.string().optional(),
+  decision: z.enum(["approved", "declined"]),
+});
+const stakeholderMapSchema = z.object({
+  clientName: z.string().optional(),
+  assignee: z.string().optional(),
+  clientType: z.enum(["Direct", "White Label"]).optional(),
+  services: z.array(z.string()).optional(),
+  role: z.string().optional(),
+  communicationPreference: z.enum(["Phone", "Email", "Face-to-Face", "Text/Chat"]).optional(),
+  marketingLiteracy: z.enum(["Low", "Medium", "High"]).optional(),
+  personality: z.string().optional(),
+  whatTheyCareAbout: z.string().optional(),
+  knownHistory: z.string().optional(),
+  decision: z.enum(["approved", "declined"]),
+});
 
 const touchRequestSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("prepare") }),
@@ -42,12 +79,12 @@ const touchRequestSchema = z.discriminatedUnion("action", [
       }),
     ),
     email: z.object({ subject: z.string(), body: z.string(), approve: z.boolean() }),
-    dashboardDecisions: z.record(z.string(), z.enum(["approved", "declined"])).optional(),
   }),
-  z.object({ action: z.literal("retry_dashboard_updates") }),
+  z.object({ action: z.literal("retry_client_intelligence") }),
   z.object({
-    action: z.literal("apply_dashboard_decisions"),
-    dashboardDecisions: z.record(z.string(), z.enum(["approved", "declined"])),
+    action: z.literal("apply_client_intelligence"),
+    riskRegister: riskRegisterSchema.optional(),
+    stakeholderMap: stakeholderMapSchema.optional(),
   }),
   z.object({ action: z.literal("generate_qa_review") }),
   z.object({
@@ -106,14 +143,16 @@ export async function POST(
         result = await applyPostMeetingDecisions(context, touchId, {
           tickets: payload.tickets,
           email: payload.email,
-          dashboardDecisions: payload.dashboardDecisions,
         });
         break;
-      case "retry_dashboard_updates":
-        result = await retryDashboardUpdates(context, touchId);
+      case "retry_client_intelligence":
+        result = await retryClientIntelligence(context, touchId);
         break;
-      case "apply_dashboard_decisions":
-        result = await applyDashboardOnlyDecisions(context, touchId, payload.dashboardDecisions);
+      case "apply_client_intelligence":
+        result = await applyClientIntelligenceDecisions(context, touchId, {
+          riskRegister: payload.riskRegister,
+          stakeholderMap: payload.stakeholderMap,
+        });
         break;
       case "generate_qa_review":
         result = await generateQaReview(context, touchId);

@@ -21,11 +21,8 @@ import { getIntegrationConnection, getIntegrationCredentials } from "@/src/lib/s
 import { callLlmForJson, getNowIso, hasAnyLlmProvider, stripUndefinedDeep } from "@/src/lib/server/services/mtos-ai";
 import { getPromptText } from "@/src/lib/server/prompt-store";
 import { getAccountManagerIdentity } from "@/src/lib/server/services/user-service";
-import {
-  applyDashboardDecisions,
-  draftDashboardUpdates,
-} from "@/src/lib/server/services/dashboard-intelligence-service";
-import type { DashboardUpdateReview } from "@/src/lib/mtos-data";
+import { generateClientIntelligence } from "@/src/lib/server/services/client-intelligence-service";
+import type { ClientIntelligenceReview } from "@/src/lib/mtos-data";
 
 const departmentEnum = z.enum(["SEO", "Web Design", "Ads", "Account Manager", "Other"]);
 
@@ -398,25 +395,32 @@ export async function analyzePostMeetingTranscript(context: TenantContext, touch
     };
   });
 
-  // Client Intelligence Dashboard Updater -- one additional post-processing step
-  // inserted after transcript analysis. It only drafts proposed Risk Register /
-  // Stakeholder Map updates; it writes nothing here. It is deliberately
-  // non-fatal: if it fails, transcript analysis still succeeds unchanged.
-  let dashboardUpdates: DashboardUpdateReview | undefined;
+  // Client Intelligence -- generates the per-client report (always saved, never
+  // posted) and, ONLY when a risk is detected, a pre-filled Risk Register +
+  // Stakeholder Map entry. Non-fatal: a failure never blocks transcript analysis.
+  let clientIntelligence: ClientIntelligenceReview;
   try {
-    dashboardUpdates = await draftDashboardUpdates(env, touch, client, {
-      recapSummary: analysis.recapSummary,
-      extractedCommitments: analysis.extractedCommitments,
-      draftTickets: analysis.draftTickets,
-    });
+    clientIntelligence = await generateClientIntelligence(
+      context,
+      env,
+      touch,
+      client,
+      {
+        recapSummary: analysis.recapSummary,
+        extractedCommitments: analysis.extractedCommitments,
+        draftTickets: analysis.draftTickets,
+      },
+      accountManagerName,
+    );
   } catch (error) {
-    dashboardUpdates = {
+    clientIntelligence = {
       status: "draft_ready",
-      proposals: [],
+      report: "",
+      riskDetected: false,
       analyzedAt: getNowIso(),
       model,
       errorMessage:
-        error instanceof Error ? error.message : "Dashboard intelligence step could not run.",
+        error instanceof Error ? error.message : "Client Intelligence step could not run.",
     };
   }
 
@@ -431,7 +435,7 @@ export async function analyzePostMeetingTranscript(context: TenantContext, touch
       body: analysis.clientEmailBody,
       status: "pending",
     },
-    dashboardUpdates,
+    clientIntelligence,
     analyzedAt: getNowIso(),
     model,
   };
@@ -439,70 +443,6 @@ export async function analyzePostMeetingTranscript(context: TenantContext, touch
   const updatedTouch: MonthlyTouchRecord = stripUndefinedDeep({
     ...touch,
     postMeeting,
-    updatedAt: getNowIso(),
-  });
-
-  await db.doc(monthlyTouchPath(context.tenantId, touch.id)).set(updatedTouch, { merge: true });
-
-  return { touch: updatedTouch };
-}
-
-/**
- * Re-run ONLY the Client Intelligence dashboard step for a touch that already has
- * an analysis. Used to recover from a stale/failed dashboard result (e.g. the old
- * JSON-truncation error) without re-analyzing the transcript or touching any filed
- * tickets. Drafts proposals only; writes nothing to ClickUp until approved.
- */
-export async function retryDashboardUpdates(context: TenantContext, touchId: string) {
-  const db = getFirebaseAdminDb();
-  if (!db) {
-    throw new Error("Firebase Admin must be configured before the dashboard step can run");
-  }
-
-  const dataSource = getMtosDataSource(context);
-  const touch = await dataSource.getMonthlyTouchById(touchId);
-  if (!touch) {
-    throw new Error("Monthly touch not found");
-  }
-  if (!touch.postMeeting) {
-    throw new Error("Analyze the transcript before running the dashboard step.");
-  }
-
-  const client = await dataSource.getClientById(touch.clientId);
-  if (!client) {
-    throw new Error("Monthly touch client is not visible for the current user");
-  }
-
-  const env = getServerEnv();
-  if (!hasAnyLlmProvider(env)) {
-    throw new Error("No AI provider is configured, so the dashboard step can't run.");
-  }
-
-  let dashboardUpdates: DashboardUpdateReview;
-  try {
-    dashboardUpdates = await draftDashboardUpdates(env, touch, client, {
-      recapSummary: touch.postMeeting.recapSummary || "",
-      extractedCommitments: touch.postMeeting.extractedCommitments || [],
-      draftTickets: (touch.postMeeting.draftTickets || []).map((ticket) => ({
-        title: ticket.title,
-        description: ticket.description,
-        department: ticket.department,
-      })),
-    });
-  } catch (error) {
-    // Persist the fresh error so the UI reflects the latest attempt (retryable again).
-    dashboardUpdates = {
-      status: "draft_ready",
-      proposals: [],
-      analyzedAt: getNowIso(),
-      model: touch.postMeeting.model,
-      errorMessage: error instanceof Error ? error.message : "Dashboard intelligence step could not run.",
-    };
-  }
-
-  const updatedTouch: MonthlyTouchRecord = stripUndefinedDeep({
-    ...touch,
-    postMeeting: { ...touch.postMeeting, dashboardUpdates },
     updatedAt: getNowIso(),
   });
 
@@ -1063,8 +1003,6 @@ export interface PostMeetingDecisions {
   tickets: PostMeetingTicketInput[];
   /** The (possibly edited) client email plus whether to approve it. */
   email: { subject: string; body: string; approve: boolean };
-  /** Decisions on Client Intelligence dashboard proposals, keyed by proposal id. */
-  dashboardDecisions?: Record<string, "approved" | "declined">;
 }
 
 export async function applyPostMeetingDecisions(
@@ -1181,70 +1119,16 @@ export async function applyPostMeetingDecisions(
     status: decisions.email.approve ? "approved" : "pending",
   };
 
-  // Apply approved dashboard proposals (writes to the two configured ClickUp
-  // dashboard lists). Left untouched when there are no proposals or decisions.
-  let dashboardUpdates = touch.postMeeting.dashboardUpdates;
-  if (dashboardUpdates?.proposals.length && decisions.dashboardDecisions) {
-    dashboardUpdates = await applyDashboardDecisions(
-      context,
-      dashboardUpdates,
-      decisions.dashboardDecisions,
-    );
-  }
-
   const postMeeting: PostMeetingReview = {
     ...touch.postMeeting,
     status: "approved",
     draftTickets: updatedTickets,
     clientEmail,
-    dashboardUpdates,
   };
 
   const updatedTouch: MonthlyTouchRecord = stripUndefinedDeep({
     ...touch,
     postMeeting,
-    updatedAt: getNowIso(),
-  });
-
-  await db.doc(monthlyTouchPath(context.tenantId, touch.id)).set(updatedTouch, { merge: true });
-
-  return { touch: updatedTouch };
-}
-
-/**
- * Apply approve/decline decisions on the Client Intelligence dashboard proposals
- * on their own -- used when they were generated (or retried) after the main
- * decisions were already confirmed. Approved proposals are written to their
- * ClickUp dashboard list; nothing else on the touch changes.
- */
-export async function applyDashboardOnlyDecisions(
-  context: TenantContext,
-  touchId: string,
-  dashboardDecisions: Record<string, "approved" | "declined">,
-) {
-  const db = getFirebaseAdminDb();
-  if (!db) {
-    throw new Error("Firebase Admin must be configured before decisions can be applied");
-  }
-
-  const dataSource = getMtosDataSource(context);
-  const touch = await dataSource.getMonthlyTouchById(touchId);
-  if (!touch) {
-    throw new Error("Monthly touch not found");
-  }
-  if (!touch.postMeeting?.dashboardUpdates?.proposals.length) {
-    throw new Error("There are no dashboard proposals to apply.");
-  }
-
-  const dashboardUpdates = await applyDashboardDecisions(
-    context,
-    touch.postMeeting.dashboardUpdates,
-    dashboardDecisions,
-  );
-
-  const updatedTouch: MonthlyTouchRecord = stripUndefinedDeep({
-    ...touch,
-    postMeeting: { ...touch.postMeeting, dashboardUpdates },
     updatedAt: getNowIso(),
   });
 

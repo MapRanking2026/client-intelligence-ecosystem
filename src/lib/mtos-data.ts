@@ -510,6 +510,87 @@ export interface DashboardUpdateReview {
   errorMessage?: string;
 }
 
+// ---------------------------------------------------------------------------
+// Client Intelligence -- the per-client record generated after a monthly touch.
+// The narrative report is always saved (per client, never posted). When a risk is
+// detected, MTOS also pre-fills a Risk Register + Stakeholder Map entry that the
+// AM approves before it is written to ClickUp.
+// ---------------------------------------------------------------------------
+
+export type YesNo = "Yes" | "No";
+export type RiskTier = "Low" | "Medium" | "High" | "Critical";
+export type ClientType = "Direct" | "White Label";
+export type CaseStatus = "Watching" | "Working" | "Requested Cancellation" | "Resolved-Healthy";
+export type RiskPrimaryCategory =
+  | "Communication"
+  | "Expectations"
+  | "Gen. Business"
+  | "Product"
+  | "Onboarding";
+export type CommunicationPreference = "Phone" | "Email" | "Face-to-Face" | "Text/Chat";
+export type MarketingLiteracy = "Low" | "Medium" | "High";
+
+/** The Risk Register row for an at-risk client (mirrors the ClickUp Risk Register form). */
+export interface RiskRegisterEntry {
+  accountManager?: string;
+  clientType?: ClientType;
+  caseStatus?: CaseStatus;
+  dateFlagged?: string; // YYYY-MM-DD
+  money?: YesNo;
+  responsiveness?: YesNo;
+  lifeChange?: YesNo;
+  technical?: YesNo;
+  otherAgency?: YesNo;
+  performance?: YesNo;
+  riskTier?: RiskTier;
+  primaryCategory?: RiskPrimaryCategory;
+  nextAction?: string;
+  nextActionOwner?: string;
+  dueDate?: string; // YYYY-MM-DD
+  lastMonthlyTouch?: string; // YYYY-MM-DD
+  latestComments?: string;
+}
+
+/** The Stakeholder Map row for an at-risk client (mirrors the ClickUp Stakeholder Map form). */
+export interface StakeholderMapEntry {
+  clientName?: string;
+  assignee?: string;
+  clientType?: ClientType;
+  services?: string[];
+  role?: string;
+  communicationPreference?: CommunicationPreference;
+  marketingLiteracy?: MarketingLiteracy;
+  personality?: string;
+  whatTheyCareAbout?: string;
+  knownHistory?: string;
+}
+
+export interface ClientIntelligenceReview {
+  status: "draft_ready" | "applied";
+  /** Narrative report -- always saved with the client, never posted to ClickUp. */
+  report: string;
+  /** Whether a retention risk was detected from the touch (gates the Risk Register only). */
+  riskDetected: boolean;
+  riskTier?: RiskTier;
+  /** Risk Register entry -- present only when at risk. Stakeholder Map is always present. */
+  riskRegister?: RiskRegisterEntry;
+  stakeholderMap?: StakeholderMapEntry;
+  /** True when the client's Stakeholder Map row is already populated (an update, not a first fill). */
+  stakeholderUpToDate?: boolean;
+  /** The client's linked ClickUp task (Health Tracker) that entries update; absent = not synced. */
+  clientTaskLinked?: boolean;
+  /** Per-entry approval state + resulting ClickUp task, set when applied. */
+  riskRegisterStatus?: "pending" | "approved" | "declined";
+  stakeholderMapStatus?: "pending" | "approved" | "declined";
+  riskRegisterTaskUrl?: string;
+  stakeholderMapTaskUrl?: string;
+  /** Non-fatal note (e.g. a list isn't configured) surfaced after applying. */
+  executionNote?: string;
+  analyzedAt?: string;
+  model?: string;
+  errorMessage?: string;
+}
+
 export interface PostMeetingReview {
   status: "not_started" | "draft_ready" | "approved";
   transcript?: string;
@@ -517,8 +598,10 @@ export interface PostMeetingReview {
   extractedCommitments?: string[];
   draftTickets?: DraftTicket[];
   clientEmail?: ClientEmailDraft;
-  /** Proposed Client Intelligence dashboard updates (optional, additive). */
+  /** @deprecated superseded by clientIntelligence; kept for older records. */
   dashboardUpdates?: DashboardUpdateReview;
+  /** Client Intelligence report + (if at risk) Risk Register / Stakeholder Map entries. */
+  clientIntelligence?: ClientIntelligenceReview;
   analyzedAt?: string;
   model?: string;
   errorMessage?: string;

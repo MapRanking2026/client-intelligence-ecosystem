@@ -5,6 +5,7 @@ import {
   SeoIntelligenceRequestV1,
 } from "@cie/contracts";
 import { SeoProjectV1 } from "@/src/lib/domain/project";
+import { KeywordV1, normalizePhrase } from "@/src/lib/domain/keyword";
 import { getServerEnv } from "@/src/lib/server/env";
 
 /**
@@ -28,6 +29,7 @@ interface SeedStore {
   requests: SeoIntelligenceRequestV1[];
   packages: SeoIntelligencePackageV1[];
   leadCalls: LeadCallRecordV1[];
+  keywords: KeywordV1[];
 }
 
 function buildSeed(): SeedStore {
@@ -228,7 +230,34 @@ function buildSeed(): SeedStore {
     }),
   ];
 
-  return { memberships, projects, requests, packages, leadCalls };
+  const keywordSeeds: Array<[string, KeywordV1["status"], string]> = [
+    ["emergency plumber austin", "tracking", "Emergency"],
+    ["water heater repair austin", "tracking", "Repair"],
+    ["drain cleaning round rock", "approved", "Repair"],
+    ["plumber near me", "optimizing", "Core"],
+    ["tankless water heater install", "proposed", "Install"],
+  ];
+  const keywords: KeywordV1[] = keywordSeeds.map(([phrase, status, group], i) =>
+    KeywordV1.parse({
+      schemaVersion: 1,
+      id: `kw-acme-${i + 1}`,
+      tenantId: TENANT,
+      projectId: "proj-acme",
+      clientId: "client-acme",
+      phrase,
+      normalizedPhrase: normalizePhrase(phrase),
+      status,
+      intent: "local",
+      group,
+      priority: i < 2 ? "high" : "normal",
+      locationIds: ["austin-tx"],
+      tags: [],
+      createdAt: iso(12),
+      updatedAt: iso(20),
+    }),
+  );
+
+  return { memberships, projects, requests, packages, leadCalls, keywords };
 }
 
 /** Singleton so writes within a server process persist across requests. */

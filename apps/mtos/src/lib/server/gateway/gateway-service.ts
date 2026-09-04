@@ -1,6 +1,10 @@
-import { ProviderHealthV1, type GatewayResource } from "@cie/contracts";
+import { MapCheckinActivityV1, ProviderHealthV1, type GatewayResource } from "@cie/contracts";
 import type { TenantContext } from "@/src/lib/contracts/mtos";
 import { listIntegrationViews } from "@/src/lib/server/integrations";
+import {
+  fetchCheckinBusinesses,
+  openDashboardSession,
+} from "@/src/lib/server/services/mapranking-dashboard";
 
 /**
  * MTOS-side gateway service. Exposes SECRET-FREE, read-only views of MTOS's
@@ -52,6 +56,33 @@ export async function dispatchGatewayResource(
       dataGaps: [],
     };
   }
+
+  if (resource === "map-checkins.activity") {
+    // Reuse the EXISTING tenant-wide Map Check-Ins connection and normalized
+    // data. No connection → an honest data gap, never fabricated activity.
+    const session = await openDashboardSession(context);
+    if (!session) {
+      return {
+        freshness: "unknown",
+        dataGaps: [
+          {
+            schemaVersion: 1,
+            area: "map-checkins",
+            reason: "No Map Check-Ins connection is available for this tenant.",
+            severity: "warning",
+          },
+        ],
+      };
+    }
+    const businesses = await fetchCheckinBusinesses(session);
+    const data = MapCheckinActivityV1.parse({
+      businesses,
+      businessCount: businesses.length,
+      totalPosts: businesses.reduce((sum, b) => sum + b.totalPosts, 0),
+    });
+    return { data, freshness: "live", dataGaps: [] };
+  }
+
   return {
     freshness: "unknown",
     dataGaps: [

@@ -86,6 +86,25 @@ export const GatewayRequestV1 = z.object({
 });
 export type GatewayRequestV1 = z.infer<typeof GatewayRequestV1>;
 
+/** Normalized Map Check-In business activity (secret-free) relayed via gateway. */
+export const MapCheckinBusinessV1 = z.object({
+  businessName: z.string(),
+  totalPosts: z.number().int().nonnegative(),
+  scheduledPosts: z.number().int().nonnegative(),
+  connectedPlatforms: z.array(z.string()),
+  lastPostAt: zIsoTimestamp.nullable(),
+  lastPostPlatform: z.string().nullable(),
+  nextScheduledPostAt: zIsoTimestamp.nullable(),
+});
+export type MapCheckinBusinessV1 = z.infer<typeof MapCheckinBusinessV1>;
+
+export const MapCheckinActivityV1 = z.object({
+  businesses: z.array(MapCheckinBusinessV1),
+  businessCount: z.number().int().nonnegative(),
+  totalPosts: z.number().int().nonnegative(),
+});
+export type MapCheckinActivityV1 = z.infer<typeof MapCheckinActivityV1>;
+
 export const GatewayResponseV1 = z.object({
   schemaVersion: z.literal(1),
   ok: z.boolean(),

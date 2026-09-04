@@ -75,9 +75,9 @@ Files are repo-relative. "verified" = exercised by a build and/or the
 |---|---|---|
 | Nav destinations + auth + states | implemented | `app/keywords`, `app/rankings` |
 | Scan orchestration / snapshots / retries | not_started | — |
-| Keyword CRUD/import/group/map/approve/sync | not_started | — |
-| Rankings / coverage / market share / grids | not_started | — |
-| Rank Tracker sync | blocked_external | Rank Tracker via gateway |
+| Keyword CRUD / import / group / approve / bulk / dedup | verified | `lib/domain/keyword.ts`, `repositories/keyword-repo.ts`, `keywords-service.ts`, `api/seo/keywords/{route,import,bulk}`, `components/keywords-manager.tsx`, `app/keywords/page.tsx` |
+| Rankings (keyword-linked view, tracked set) | in_progress | `app/rankings/page.tsx` (positions/grid = gateway data-gap) |
+| Rank Tracker sync + live positions | blocked_external | Rank Tracker adapter via gateway |
 | GeoGrid grid data | blocked_external | no completed GeoGrid sync branch in audited source |
 | Competitor management | not_started | — |
 
@@ -86,7 +86,7 @@ Files are repo-relative. "verified" = exercised by a build and/or the
 |---|---|---|
 | Nav destinations + auth + states | implemented | `app/gbp`, `app/audits` |
 | GBP performance/profile changes/reviews | blocked_external | GBP via gateway (only live conn test today) |
-| Map Check-Ins activity/coverage | blocked_external | shared tenant-wide connection via gateway |
+| **Map Check-Ins activity/coverage** | implemented | LIVE via gateway: MTOS `map-checkins.activity` → `openDashboardSession`/`fetchCheckinBusinesses`; SEOOS `getMapCheckinActivity` + `app/gbp` table (real when configured, honest gap otherwise) |
 | Search Console / GA4 | blocked_external | SC/GA4 via gateway |
 | Website technical audit adapter | blocked_external | Screaming Frog / crawl API (feasibility/licensing) |
 

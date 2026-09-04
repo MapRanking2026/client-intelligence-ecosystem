@@ -1,9 +1,11 @@
 import {
   GatewayRequestV1,
   GatewayResponseV1,
+  MapCheckinActivityV1,
   ProviderHealthV1,
   type DataGapV1,
   type GatewayResource,
+  type MapCheckinActivityV1 as MapCheckinActivity,
 } from "@cie/contracts";
 import { z } from "zod";
 import { signGatewayRequest } from "@cie/core";
@@ -121,5 +123,37 @@ export async function getIntegrationHealth(
     ok: providers.success,
     providers: providers.success ? providers.data : [],
     error: providers.success ? undefined : "invalid_gateway_payload",
+  };
+}
+
+export interface MapCheckinResult {
+  configured: boolean;
+  ok: boolean;
+  activity: MapCheckinActivity | null;
+  dataGaps: DataGapV1[];
+  error?: string;
+}
+
+/** Map Check-In activity from the shared tenant-wide MTOS connection. */
+export async function getMapCheckinActivity(
+  tenantId: string,
+): Promise<MapCheckinResult> {
+  const result = await callGateway("map-checkins.activity", tenantId);
+  if (!result.ok) {
+    return {
+      configured: result.configured,
+      ok: false,
+      activity: null,
+      dataGaps: result.dataGaps,
+      error: result.error,
+    };
+  }
+  const parsed = MapCheckinActivityV1.safeParse(result.data);
+  return {
+    configured: true,
+    ok: parsed.success,
+    activity: parsed.success ? parsed.data : null,
+    dataGaps: result.dataGaps,
+    error: parsed.success ? undefined : "invalid_gateway_payload",
   };
 }

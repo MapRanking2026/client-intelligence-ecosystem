@@ -10,10 +10,14 @@
   "scripts": {
     "dev": "npm run dev -w apps/mtos",
     "dev:mtos": "npm run dev -w apps/mtos",
+    "dev:seoos": "npm run dev -w apps/seoos",
     "build": "npm run build -w apps/mtos",
     "build:mtos": "npm run build -w apps/mtos",
+    "build:seoos": "npm run build -w apps/seoos",
+    "build:all": "npm run build -w apps/mtos && npm run build -w apps/seoos",
     "check": "npm run check -w apps/mtos",
     "check:mtos": "npm run check -w apps/mtos",
+    "check:seoos": "npm run check -w apps/seoos",
     "lint": "npm run lint -w apps/mtos"
   },
   "engines": {

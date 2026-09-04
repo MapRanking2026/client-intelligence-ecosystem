@@ -961,9 +961,11 @@ export function PostMeetingWorkflow({ touchId, postMeeting, qaReview }: PostMeet
                     <FieldSelect label="Marketing Literacy" value={stakeEntry.marketingLiteracy || ""} onChange={(v) => updateStake({ marketingLiteracy: (v || undefined) as StakeholderMapEntry["marketingLiteracy"] })} options={LITERACIES} placeholder="Select…" />
                   </div>
                   <FieldInput label="Services (comma-separated)" value={(stakeEntry.services || []).join(", ")} onChange={(v) => updateStake({ services: v.split(",").map((s) => s.trim()).filter(Boolean) })} placeholder="Map Pack Dominator, GBP +, …" />
-                  <FieldTextarea label="Personality" value={stakeEntry.personality || ""} onChange={(v) => updateStake({ personality: v })} rows={2} />
-                  <FieldTextarea label="What They Care About" value={stakeEntry.whatTheyCareAbout || ""} onChange={(v) => updateStake({ whatTheyCareAbout: v })} rows={2} />
-                  <FieldTextarea label="Known History" value={stakeEntry.knownHistory || ""} onChange={(v) => updateStake({ knownHistory: v })} rows={2} />
+                  <div className="grid gap-3 sm:grid-cols-3">
+                    <FieldInput label="Personality" value={stakeEntry.personality || ""} onChange={(v) => updateStake({ personality: v })} placeholder="One word, e.g. Analytical" />
+                    <FieldInput label="What They Care About" value={stakeEntry.whatTheyCareAbout || ""} onChange={(v) => updateStake({ whatTheyCareAbout: v })} placeholder="One word, e.g. Leads" />
+                    <FieldInput label="Known History" value={stakeEntry.knownHistory || ""} onChange={(v) => updateStake({ knownHistory: v })} placeholder="One word, e.g. Longtime" />
+                  </div>
                   {clientIntelligence.stakeholderMapTaskUrl ? (
                     <a href={clientIntelligence.stakeholderMapTaskUrl} target="_blank" rel="noreferrer" className="inline-block text-xs text-[#d7f5ec] underline">
                       View in ClickUp
@@ -1028,8 +1030,8 @@ export function PostMeetingWorkflow({ touchId, postMeeting, qaReview }: PostMeet
                     <FieldSelect label="Other Agency" value={riskEntry.otherAgency || ""} onChange={(v) => updateRisk({ otherAgency: (v || undefined) as RiskRegisterEntry["otherAgency"] })} options={YES_NO_KINDOF} />
                     <FieldSelect label="Performance" value={riskEntry.performance || ""} onChange={(v) => updateRisk({ performance: (v || undefined) as RiskRegisterEntry["performance"] })} options={YES_NO} />
                   </div>
-                  <FieldTextarea label="Next Action" value={riskEntry.nextAction || ""} onChange={(v) => updateRisk({ nextAction: v })} rows={2} placeholder="The plan to defuse this risk…" />
-                  <FieldTextarea label="Latest Comments" value={riskEntry.latestComments || ""} onChange={(v) => updateRisk({ latestComments: v })} rows={2} placeholder="Quick note (optional)…" />
+                  <FieldInput label="Next Action" value={riskEntry.nextAction || ""} onChange={(v) => updateRisk({ nextAction: v })} placeholder="2-4 words, e.g. Schedule check-in" />
+                  <FieldTextarea label="Latest Comments (notes)" value={riskEntry.latestComments || ""} onChange={(v) => updateRisk({ latestComments: v })} rows={2} placeholder="One short sentence (optional)…" />
                   {clientIntelligence.riskRegisterTaskUrl ? (
                     <a href={clientIntelligence.riskRegisterTaskUrl} target="_blank" rel="noreferrer" className="inline-block text-xs text-[#d7f5ec] underline">
                       View in ClickUp

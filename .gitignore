@@ -1,41 +1,45 @@
-# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+# Monorepo root ignores (per-app .gitignore files still apply within each app)
+node_modules/
+**/node_modules/
+.next/
+**/.next/
+out/
+dist/
+build/
+.turbo/
+.vercel/
+coverage/
 
-# dependencies
-/node_modules
-/.pnp
-.pnp.*
-.yarn/*
-!.yarn/patches
-!.yarn/plugins
-!.yarn/releases
-!.yarn/versions
-
-# testing
-/coverage
-
-# next.js
-/.next/
-/out/
-
-# production
-/build
-
-# misc
-.DS_Store
-*.pem
-
-# debug
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-.pnpm-debug.log*
-
-# env files (can opt-in for committing if needed)
+# Local env & secrets — never commit
 .env
-.env.local
-# vercel
-.vercel
+.env.*
+!.env.example
 
-# typescript
-*.tsbuildinfo
-next-env.d.ts
+# Backups & large local artifacts (kept locally, not in git)
+backups/
+*.tar.gz
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+
+# Local tooling scratch
+.trae/
+.claude/
+
+# Local reference material & working docs (kept local, not tracked)
+/MTOS Final Master Prompt.md
+/MTOS_Prompt_Engine_Library_v1.md
+/Monthly_Touch_SOP*.docx
+/Monthly_Touch_SOP*.txt
+/Read-WordDocument.ps1
+/growth-tracker-template.xlsx
+/analysis/
+/master-prompt-by-sections/
+/monthly_touch_project/
+
+# Root-level scratch debug notes
+/debug-*.md
+
+# Stray app-level scratch
+/apps/clickupsync.md

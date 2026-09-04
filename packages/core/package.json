@@ -1,0 +1,25 @@
+{
+  "name": "@cie/core",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Client Intelligence Ecosystem — shared runtime: ports, idempotency/correlation, and the canonical Lead & Call sorting. No secrets, no I/O implementations.",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "check": "tsc --noEmit",
+    "test": "tsx src/__checks__/run.ts"
+  },
+  "dependencies": {
+    "@cie/contracts": "*",
+    "zod": "^4.1.5"
+  },
+  "devDependencies": {
+    "tsx": "^4.20.5",
+    "typescript": "^5"
+  }
+}

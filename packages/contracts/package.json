@@ -1,0 +1,22 @@
+{
+  "name": "@cie/contracts",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Client Intelligence Ecosystem — versioned cross-app contracts (Zod). Shared by MTOS and SEOOS.",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "zod": "^4.1.5"
+  },
+  "devDependencies": {
+    "typescript": "^5"
+  }
+}

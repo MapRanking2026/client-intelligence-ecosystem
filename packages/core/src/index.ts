@@ -7,4 +7,6 @@
  */
 export * from "./lead-call-sort";
 export * from "./idempotency";
+export * from "./permissions";
+export * from "./capabilities";
 export * from "./ports";

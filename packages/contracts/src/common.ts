@@ -50,6 +50,8 @@ export const ReportingPeriodV1 = z
   .object({
     start: zIsoTimestamp,
     end: zIsoTimestamp,
+    /** IANA timezone the window is expressed in (e.g. "America/New_York"). */
+    timezone: z.string().min(1).optional(),
   })
   .refine((p) => Date.parse(p.start) <= Date.parse(p.end), {
     message: "Reporting period start must not be after end",

@@ -1,72 +1,90 @@
 import Link from "next/link";
 
 import { isSeoosRequestsEnabled } from "@/src/lib/flags";
-import { DEMO_TENANT } from "@/src/lib/server/context";
-import { listRequests } from "@/src/lib/server/seo-engine";
+import { resolveSeoAuthz } from "@/src/lib/auth/context";
+import { AppShell } from "@/src/components/app-shell";
+import { EmptyState, Panel, StatusPill, UnauthorizedPage } from "@/src/components/states";
 import { RequestForm } from "@/src/components/request-form";
+import { listRequests } from "@/src/lib/server/seo-engine";
 
-// In-memory store lives per server process; always render fresh.
 export const dynamic = "force-dynamic";
 
-export default function RequestsPage() {
+const INBOX_ORDER = [
+  "needs_input",
+  "submitted",
+  "queued",
+  "processing",
+  "qa_review",
+  "ready",
+  "delivered",
+  "failed",
+  "cancelled",
+  "draft",
+];
+
+export default async function RequestInboxPage() {
+  const authz = await resolveSeoAuthz();
+  if (!authz) return <UnauthorizedPage />;
   if (!isSeoosRequestsEnabled()) {
     return (
-      <main className="wrap">
-        <h1>Requests</h1>
-        <div className="panel">
-          <span className="badge">SEOOS requests disabled</span>
+      <AppShell authz={authz} title="Request Inbox" breadcrumbs={[{ label: "SEOOS" }, { label: "Requests" }]}>
+        <div className="state state--blocked">
+          <span className="badge badge--warn">Requests disabled</span>
         </div>
-      </main>
+      </AppShell>
     );
   }
 
-  const requests = listRequests(DEMO_TENANT);
+  const requests = await listRequests(authz.tenantId);
+  const sorted = [...requests].sort(
+    (a, b) => INBOX_ORDER.indexOf(a.status) - INBOX_ORDER.indexOf(b.status),
+  );
 
   return (
-    <main className="wrap">
-      <p>
-        <Link href="/">← SEOOS</Link>
-      </p>
-      <h1>SEO Intelligence Requests</h1>
-      <p className="muted">
-        Tenant <code>{DEMO_TENANT}</code> · auth is stubbed for this slice.
-      </p>
-
+    <AppShell
+      authz={authz}
+      title="Request Inbox"
+      subtitle="SEO Intelligence requests from MTOS and SEOOS"
+      breadcrumbs={[{ label: "SEOOS" }, { label: "Requests" }]}
+    >
       <RequestForm />
 
-      <div className="panel">
-        <h2 style={{ marginTop: 0 }}>Recent requests</h2>
+      <Panel title={`Requests (${requests.length})`}>
         {requests.length === 0 ? (
-          <p className="muted">No requests yet. Submit one above.</p>
+          <EmptyState title="No requests yet" message="Submit one above, or wait for an MTOS request." />
         ) : (
-          <table style={{ width: "100%", borderCollapse: "collapse" }}>
-            <thead>
-              <tr style={{ textAlign: "left", color: "var(--muted)" }}>
-                <th>Client</th>
-                <th>Capability</th>
-                <th>Status</th>
-                <th>Created</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {requests.map((r) => (
-                <tr key={r.id} style={{ borderTop: "1px solid var(--border)" }}>
-                  <td>{r.clientId}</td>
-                  <td>{r.capability}</td>
-                  <td>
-                    <span className="badge">{r.status}</span>
-                  </td>
-                  <td className="muted">{r.createdAt}</td>
-                  <td>
-                    <Link href={`/requests/${r.id}`}>view</Link>
-                  </td>
+          <div className="table-scroll">
+            <table className="data">
+              <thead>
+                <tr>
+                  <th>Client</th>
+                  <th>Capability</th>
+                  <th>Audience</th>
+                  <th>Source</th>
+                  <th>Priority</th>
+                  <th>Status</th>
+                  <th>Created</th>
+                  <th />
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {sorted.map((r) => (
+                  <tr key={r.id}>
+                    <td>{r.clientId}</td>
+                    <td>{r.capability}</td>
+                    <td className="muted">{r.intendedAudience}</td>
+                    <td className="muted">{r.requestedByApp}</td>
+                    <td>{r.priority}</td>
+                    <td><StatusPill status={r.status} /></td>
+                    <td className="muted">{r.createdAt.slice(0, 10)}</td>
+                    <td><Link href={`/requests/${r.id}`}>view</Link></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
-      </div>
-    </main>
+      </Panel>
+    </AppShell>
   );
 }

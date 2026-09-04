@@ -5,28 +5,37 @@ import type { LeadCallRecordV1, SortDirection } from "@cie/contracts";
  * identically. Apply this server-side BEFORE pagination/cursor.
  *
  * Rules (docs/architecture/mtos-seoos-boundaries.md §2):
- * - Sort by normalized `occurredAt` (newest_first default / oldest_first).
- * - Records with a missing/invalid `occurredAt` always sort AFTER valid ones,
+ * - Sort by a normalized event time (newest_first default / oldest_first).
+ * - Records with a missing/invalid time always sort AFTER valid ones,
  *   regardless of direction, and surface as a "Date unavailable" state.
  * - Stable secondary sort by canonical record id (ascending) for determinism.
+ *
+ * The comparator reads only `{ id, occurredAt }`, so any app record type can be
+ * ordered by projecting to that key — MTOS `VerifiedLead`, the canonical
+ * `LeadCallRecordV1`, or anything else.
  */
 
-/** Milliseconds since epoch, or `null` when the time is missing/invalid. */
-export function normalizeOccurredAt(record: {
+/** The minimal projection the canonical ordering needs. */
+export interface OccurredAtKey {
+  id: string;
+  /** ISO-8601 event time, or null when missing/unknown. */
   occurredAt: string | null;
-}): number | null {
-  if (record.occurredAt == null) return null;
-  const ms = Date.parse(record.occurredAt);
+}
+
+/** Milliseconds since epoch, or `null` when the time is missing/invalid. */
+export function normalizeOccurredAt(occurredAt: string | null): number | null {
+  if (occurredAt == null) return null;
+  const ms = Date.parse(occurredAt);
   return Number.isNaN(ms) ? null : ms;
 }
 
-export function compareLeadCallRecords(
-  a: LeadCallRecordV1,
-  b: LeadCallRecordV1,
+export function compareByOccurredAt(
+  a: OccurredAtKey,
+  b: OccurredAtKey,
   direction: SortDirection,
 ): number {
-  const at = normalizeOccurredAt(a);
-  const bt = normalizeOccurredAt(b);
+  const at = normalizeOccurredAt(a.occurredAt);
+  const bt = normalizeOccurredAt(b.occurredAt);
 
   // Missing/invalid timestamps always sink to the bottom, both directions.
   if (at == null && bt == null) return tieBreak(a, b);
@@ -46,12 +55,27 @@ function tieBreak(a: { id: string }, b: { id: string }): number {
   return 0;
 }
 
-/** Returns a new, sorted array; does not mutate the input. */
+/**
+ * Order any list by the canonical rule via a key projection. Returns a new
+ * array; does not mutate the input.
+ */
+export function orderByOccurredAt<T>(
+  items: readonly T[],
+  direction: SortDirection,
+  selectKey: (item: T) => OccurredAtKey,
+): T[] {
+  return [...items].sort((a, b) =>
+    compareByOccurredAt(selectKey(a), selectKey(b), direction),
+  );
+}
+
+/** Canonical ordering for `LeadCallRecordV1` values (identity projection). */
 export function sortLeadCallRecords(
   records: readonly LeadCallRecordV1[],
   direction: SortDirection,
 ): LeadCallRecordV1[] {
-  return [...records].sort((a, b) =>
-    compareLeadCallRecords(a, b, direction),
-  );
+  return orderByOccurredAt(records, direction, (r) => ({
+    id: r.id,
+    occurredAt: r.occurredAt,
+  }));
 }

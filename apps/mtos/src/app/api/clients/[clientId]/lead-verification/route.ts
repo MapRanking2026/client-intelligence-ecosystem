@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
+import { SortDirection } from "@cie/contracts";
+import { orderByOccurredAt } from "@cie/core";
+
 import { resolveTenantContext } from "@/src/lib/auth/resolve-tenant-context";
 import {
   addManualLeads,
@@ -74,8 +77,24 @@ export async function GET(
 ) {
   const context = await resolveTenantContext(request);
   const { clientId } = await params;
+  const sort = SortDirection.catch("newest_first").parse(
+    new URL(request.url).searchParams.get("sort"),
+  );
   const review = await getStoredLeadVerification(context, clientId);
-  return NextResponse.json({ context, data: review });
+  // Canonical Lead & Call ordering (shared with SEOOS): applied server-side,
+  // before the client paginates. VerifiedLead's normalized time is receivedAt;
+  // missing/invalid times sort last as "Date unavailable".
+  const data =
+    review == null
+      ? review
+      : {
+          ...review,
+          leads: orderByOccurredAt(review.leads, sort, (lead) => ({
+            id: lead.id,
+            occurredAt: lead.receivedAt ?? null,
+          })),
+        };
+  return NextResponse.json({ context, data, sort });
 }
 
 export async function POST(

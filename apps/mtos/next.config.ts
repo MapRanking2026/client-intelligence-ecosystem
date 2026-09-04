@@ -1,6 +1,8 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // Workspace packages ship TypeScript source; Next must transpile them.
+  transpilePackages: ["@cie/contracts", "@cie/core"],
   async headers() {
     return [
       {

@@ -12,6 +12,7 @@ import {
 } from "@/src/components/states";
 import { getProjectRepo } from "@/src/lib/server/repositories/project-repo";
 import { listRequests } from "@/src/lib/server/seo-engine";
+import { getIntegrationHealth } from "@/src/lib/server/gateway/client";
 
 export const dynamic = "force-dynamic";
 
@@ -31,6 +32,7 @@ export default async function DashboardPage() {
 
   const projects = await getProjectRepo().list(authz.tenantId);
   const requests = await listRequests(authz.tenantId);
+  const health = await getIntegrationHealth(authz.tenantId);
 
   const active = projects.filter((p) => p.stage === "active").length;
   const onboarding = projects.filter((p) =>
@@ -90,25 +92,27 @@ export default async function DashboardPage() {
         )}
       </Panel>
 
-      <Panel title="Data health">
-        <p className="muted" style={{ marginTop: 0 }}>
-          Live provider sync is consumed from the shared MTOS integration gateway.
-          Until that gateway is wired, SEOOS runs on the shared canonical stores it
-          can already read; unavailable providers are shown honestly rather than
-          with fabricated numbers.
-        </p>
-        <div className="grid-cards">
-          {["rank-tracker", "geogrid", "google-business-profile", "map-checkins", "clickup", "gohighlevel", "google-search-console"].map(
-            (p) => (
-              <div key={p} className="stat-card">
-                <div className="stat-label">{p}</div>
+      <Panel title="Data health" actions={<Link href="/integrations">Details →</Link>}>
+        {!health.configured ? (
+          <p className="muted" style={{ marginTop: 0 }}>
+            Integration gateway not configured. Provider health appears here once
+            MTOS_GATEWAY_URL + CIE_SERVICE_SECRET are set — SEOOS then reads the
+            shared MTOS connections with no duplicate credentials.
+          </p>
+        ) : !health.ok ? (
+          <p className="muted" style={{ marginTop: 0 }}>Gateway error: {health.error ?? "unknown"}.</p>
+        ) : (
+          <div className="grid-cards">
+            {health.providers.slice(0, 8).map((p) => (
+              <div key={p.id} className="stat-card">
+                <div className="stat-label">{p.name}</div>
                 <div style={{ marginTop: 6 }}>
-                  <span className="badge badge--warn">via gateway</span>
+                  <StatusPill status={p.status} />
                 </div>
               </div>
-            ),
-          )}
-        </div>
+            ))}
+          </div>
+        )}
       </Panel>
     </AppShell>
   );

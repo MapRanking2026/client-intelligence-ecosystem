@@ -10,8 +10,10 @@ import {
   getCapability,
   hasPermission,
   makeSeoRequestIdempotencyKey,
+  signGatewayRequest,
   sortDirectionFromAlias,
   sortLeadCallRecords,
+  verifyGatewayRequest,
 } from "../index";
 
 function rec(id: string, occurredAt: string | null): LeadCallRecordV1 {
@@ -116,5 +118,30 @@ assert.equal(getCapability("keyword-ranking-summary")?.requiresNewScan, false, "
 // --- Sort alias mapping ----------------------------------------------------
 assert.equal(sortDirectionFromAlias("desc"), "newest_first");
 assert.equal(sortDirectionFromAlias("asc"), "oldest_first");
+
+// --- S2S gateway signing ---------------------------------------------------
+{
+  const secret = "gw-secret";
+  const body = '{"resource":"integration-health","tenantId":"t1"}';
+  const h = await signGatewayRequest(secret, {
+    tenantId: "t1",
+    body,
+    timestamp: 1_000_000,
+    nonce: "nonce-1",
+  });
+  const base = {
+    timestamp: h["x-cie-timestamp"],
+    nonce: h["x-cie-nonce"],
+    tenantHeader: h["x-cie-tenant"],
+    signature: h["x-cie-signature"],
+    body,
+    expectedTenantId: "t1",
+  };
+  assert.equal((await verifyGatewayRequest(secret, { ...base, nowMs: 1_000_500 })).ok, true, "valid signature verifies");
+  assert.equal((await verifyGatewayRequest(secret, { ...base, body: `${body} `, nowMs: 1_000_500 })).ok, false, "tampered body rejected");
+  assert.equal((await verifyGatewayRequest("other-secret", { ...base, nowMs: 1_000_500 })).ok, false, "wrong secret rejected");
+  assert.equal((await verifyGatewayRequest(secret, { ...base, expectedTenantId: "t2", nowMs: 1_000_500 })).ok, false, "tenant mismatch rejected");
+  assert.equal((await verifyGatewayRequest(secret, { ...base, nowMs: 1_000_000 + 10 * 60 * 1000 })).ok, false, "stale timestamp rejected");
+}
 
 console.log("OK — @cie/core checks passed");

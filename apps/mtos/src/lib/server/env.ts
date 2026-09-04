@@ -35,6 +35,9 @@ export function getServerEnv() {
     // provider ids ("claude", "openai", "gemini"). Unknown ids are ignored.
     llmProviderOrder: process.env.LLM_PROVIDER_ORDER || "claude,openai,gemini",
     gohighlevelAgencyApiKey: (process.env.GOHIGHLEVEL_AGENCY_API_KEY || "").replace(/^Bearer\s+/i, "").trim(),
+    // Shared secret for the Client Intelligence Ecosystem integration gateway
+    // (signed service-to-service requests from SEOOS). Empty disables the gateway.
+    serviceToServiceSecret: process.env.CIE_SERVICE_SECRET || "",
   };
 }
 

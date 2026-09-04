@@ -11,3 +11,4 @@ export * from "./capabilities";
 export * from "./seo-request";
 export * from "./seo-package";
 export * from "./events";
+export * from "./gateway";

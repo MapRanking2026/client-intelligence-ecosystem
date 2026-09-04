@@ -53,7 +53,9 @@ Files are repo-relative. "verified" = exercised by a build and/or the
 | Lead/call list-query + sort + verification contracts | verified | `packages/contracts/src/lead-call.ts` |
 | Idempotency / correlation helpers | verified | `packages/core/src/idempotency.ts` |
 | Legacy `SeoPerformancePack` compatibility adapter | not_started | — |
-| Integration gateway (Map Check-Ins/ClickUp/GHL reuse) | blocked_external | needs shared server package / signed S2S gateway to MTOS token store |
+| **Integration gateway — signed S2S boundary** | verified | `packages/contracts/src/gateway.ts`, `packages/core/src/s2s.ts` (HMAC sign/verify + replay, tested), MTOS `apps/mtos/src/app/api/gateway/data/route.ts` + `lib/server/gateway/gateway-service.ts`, SEOOS `apps/seoos/src/lib/server/gateway/client.ts` |
+| Gateway: integration-health resource (real MTOS connection state) | implemented | MTOS `getIntegrationHealth` → `listIntegrationViews` (secret-free); SEOOS Integrations page + Dashboard consume it |
+| Gateway: per-provider data reads (Map Check-Ins/GHL/Rank Tracker/GBP/SC) | blocked_external | resource dispatch + data-gap in place; needs each MTOS normalized adapter exposed + `CIE_SERVICE_SECRET`/`MTOS_GATEWAY_URL` set |
 | OAuth centralization / callback reuse | not_started | design in boundaries doc §OAuth |
 
 ## Phase 3 — Portfolio, projects, setup
@@ -123,7 +125,7 @@ Files are repo-relative. "verified" = exercised by a build and/or the
 | Item | Status | Evidence |
 |---|---|---|
 | Reports/packages history/preview/export | in_progress | `app/reports` (Request Inbox is the live loop) |
-| Integrations & Data Health screen | implemented | `app/integrations` (shell + honest health) |
+| Integrations & Data Health screen | verified | `app/integrations` wired to the gateway (real health when configured; honest data-gap otherwise) |
 | Knowledge / Team / Settings screens | implemented | `app/knowledge`, `app/team` (shells) |
 | Shadow-mode comparison | not_started | `SEOOS_SHADOW_MODE` flag wired in env |
 | Full test suite (unit/contract/integration/authz/e2e) | in_progress | `@cie/core` checks cover sort/idempotency/permissions/catalog |
@@ -143,9 +145,12 @@ Files are repo-relative. "verified" = exercised by a build and/or the
 | Negative cross-tenant/unauthorized tests | in_progress | permission checks verified; e2e negative tests not_started |
 
 ## Known external blockers (summary)
-- **Integration gateway** to MTOS's encrypted token store (Map Check-Ins,
-  ClickUp, GoHighLevel, Rank Tracker, GBP, Search Console) — everything marked
-  `blocked_external` depends on this shared server package / signed S2S gateway.
+- **Integration gateway boundary is now built** (signed S2S + `integration-health`
+  wired to real MTOS connection state). What remains external: set
+  `CIE_SERVICE_SECRET` (same value on both apps) + `MTOS_GATEWAY_URL` for the
+  SEOOS project, and expose each provider's normalized MTOS adapter through
+  `dispatchGatewayResource` (Map Check-Ins, ClickUp, GoHighLevel, Rank Tracker,
+  GBP, Search Console).
 - **Firebase Admin credentials** for SEOOS to share the live Firestore (seed
   mode works today without them).
 - **GeoGrid** has no completed sync branch even in MTOS.

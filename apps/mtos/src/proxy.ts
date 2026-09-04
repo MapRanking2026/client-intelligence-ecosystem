@@ -28,6 +28,8 @@ export async function proxy(request: NextRequest) {
     path.startsWith("/api/integrations/clickup/callback") ||
     // Cron endpoints authenticate with CRON_SECRET, not a session cookie.
     path.startsWith("/api/cron/") ||
+    // Integration gateway authenticates with a signed S2S HMAC, not a cookie.
+    path.startsWith("/api/gateway/") ||
     path.startsWith("/_next") ||
     path.startsWith("/favicon");
 

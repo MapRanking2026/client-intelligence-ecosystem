@@ -46,8 +46,9 @@ export const SEO_INTEGRATION_CATALOG: IntegrationProviderDef[] = [
       { key: "apiToken", label: "API Token", secret: true, required: true, placeholder: "pk_..." },
       { key: "teamId", label: "Team ID (optional)", secret: false, required: false, placeholder: "workspace/team id" },
       { key: "listId", label: "Client roster list ID (Health Tracker)", secret: false, required: false, placeholder: "e.g. 901234567" },
+      { key: "dashboardListId", label: "SEO Dashboard list ID (for Pods)", secret: false, required: false, placeholder: "e.g. 901112026952" },
     ],
-    dataKinds: ["clients", "tasks", "docs"],
+    dataKinds: ["clients", "pods", "tasks", "docs"],
   },
   {
     id: "rank-tracker",

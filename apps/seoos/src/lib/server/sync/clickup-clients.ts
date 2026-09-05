@@ -199,6 +199,68 @@ async function fetchTasksFromTeam(token: string, teamId: string): Promise<ClickU
   return tasks;
 }
 
+function podFieldNames() {
+  const configured = process.env.CLICKUP_POD_FIELD || "Pod";
+  return Array.from(new Set([configured, "Pod", "SEO Pod", "Team Pod"]));
+}
+
+export interface PodMapResult {
+  ok: boolean;
+  error?: string;
+  /** normalized client identity (name/business/client) -> pod display name. */
+  podByClient: Record<string, string>;
+  /** distinct pod display names seen. */
+  podNames: string[];
+}
+
+/**
+ * READ-ONLY: read the SEO Dashboard list and build a client -> pod map from the
+ * "⭐ Pod" field. Keyed by several normalized identity strings (task name,
+ * Business Name, Client Name) so it can be joined to the Health Tracker roster.
+ * Makes no changes to ClickUp.
+ */
+export async function fetchClickUpPodMap(input: {
+  token: string;
+  dashboardListId?: string;
+}): Promise<PodMapResult> {
+  const listId = input.dashboardListId?.trim() || process.env.CLICKUP_SEO_DASHBOARD_LIST_ID;
+  if (!input.token) return { ok: false, error: "Missing ClickUp API token", podByClient: {}, podNames: [] };
+  if (!listId) {
+    return {
+      ok: false,
+      error: "No SEO Dashboard list id configured (set it on the ClickUp connection or CLICKUP_SEO_DASHBOARD_LIST_ID).",
+      podByClient: {},
+      podNames: [],
+    };
+  }
+  try {
+    const tasks = await fetchTasksFromList(input.token, listId);
+    const podByClient: Record<string, string> = {};
+    const podNames = new Set<string>();
+    for (const task of tasks) {
+      const pod = firstField(task, podFieldNames());
+      if (!pod) continue;
+      podNames.add(pod);
+      const keys = [
+        task.name || "",
+        firstField(task, ["Business Name", "⭐️ Business Name"]),
+        firstField(task, ["Client Name", "⭐️ Client Name", "Client"]),
+      ]
+        .map(normalizeComparableValue)
+        .filter(Boolean);
+      for (const k of keys) if (!podByClient[k]) podByClient[k] = pod;
+    }
+    return { ok: true, podByClient, podNames: Array.from(podNames) };
+  } catch (e) {
+    return {
+      ok: false,
+      error: e instanceof Error ? e.message : "clickup_pod_map_failed",
+      podByClient: {},
+      podNames: [],
+    };
+  }
+}
+
 /**
  * Fetch and normalize the active client roster from ClickUp. Prefers an explicit
  * Health Tracker list id; otherwise scans the workspace (team). Returns every

@@ -7,6 +7,7 @@ import {
   type SeoProjectStage,
 } from "@/src/lib/domain/project";
 import { newId, nowIso } from "@/src/lib/ids";
+import { normalizePodKey } from "@/src/lib/domain/pod";
 import { getProjectRepo } from "@/src/lib/server/repositories/project-repo";
 import { getUserRepo } from "@/src/lib/server/repositories/user-repo";
 import {
@@ -15,8 +16,10 @@ import {
 } from "@/src/lib/server/integrations-service";
 import {
   fetchClickUpClientRoster,
+  fetchClickUpPodMap,
   normalizeComparableValue,
 } from "@/src/lib/server/sync/clickup-clients";
+import { podKeysForUser, upsertDiscoveredPods } from "@/src/lib/server/pods-service";
 
 /**
  * Project lifecycle service. Prevents duplicate projects for a canonical client
@@ -109,6 +112,18 @@ export async function syncClientsFromClickUp(tenantId: string): Promise<SyncClie
   });
   if (!roster.ok) return { ...empty, error: roster.error ?? "clickup_roster_failed" };
 
+  // Read-only: map each client to its Pod from the SEO Dashboard (best-effort;
+  // a missing/unconfigured dashboard list just leaves pods unset).
+  const podMap = await fetchClickUpPodMap({
+    token: creds.apiToken,
+    dashboardListId: creds.dashboardListId,
+  });
+  if (podMap.ok && podMap.podNames.length) {
+    await upsertDiscoveredPods(tenantId, podMap.podNames);
+  }
+  const podFor = (name: string): string | undefined =>
+    podMap.podByClient[normalizeComparableValue(name)];
+
   const repo = getProjectRepo();
   let created = 0;
   let updated = 0;
@@ -117,6 +132,8 @@ export async function syncClientsFromClickUp(tenantId: string): Promise<SyncClie
     const externalIds: Record<string, string> = { clickupTaskId: client.taskId };
     if (client.seoSpecialist) externalIds.seoSpecialist = client.seoSpecialist;
     if (client.accountManager) externalIds.accountManager = client.accountManager;
+    const pod = podFor(client.name);
+    if (pod) externalIds.pod = pod;
 
     const existing = await repo.findByClient(tenantId, client.clientId);
     if (existing) {
@@ -209,10 +226,15 @@ export async function listProjectsForViewer(authz: AuthzContextV1): Promise<SeoP
     ? new Set(authz.clientVisibility)
     : new Set<string>();
   const matches = await viewerMatchValues(authz);
+  const myPods = await podKeysForUser(authz.tenantId, authz.userId);
 
   return all.filter((project) => {
     if (projectAssignedToUser(project, authz.userId)) return true;
     if (allowlist.has(project.clientId)) return true;
+    // Pod ownership: the primary MapRanking model — a specialist owns whole pods.
+    const pod = project.externalIds?.pod ? normalizePodKey(project.externalIds.pod) : "";
+    if (pod && myPods.has(pod)) return true;
+    // Fallback: a per-client SEO-specialist field matched to the viewer.
     const specialist = project.externalIds?.seoSpecialist
       ? normalizeComparableValue(project.externalIds.seoSpecialist)
       : "";

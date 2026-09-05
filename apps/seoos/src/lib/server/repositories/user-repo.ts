@@ -8,6 +8,7 @@ const COLLECTION = "seoUsers";
 export interface UserRepo {
   getByEmail(tenantId: string, email: string): Promise<SeoUserV1 | null>;
   getById(tenantId: string, userId: string): Promise<SeoUserV1 | null>;
+  list(tenantId: string): Promise<SeoUserV1[]>;
   anyExists(tenantId: string): Promise<boolean>;
   save(user: SeoUserV1): Promise<SeoUserV1>;
 }
@@ -22,6 +23,9 @@ class InMemoryUserRepo implements UserRepo {
   }
   async getById(tenantId: string, userId: string) {
     return seedStore.users.find((u) => u.tenantId === tenantId && u.userId === userId) ?? null;
+  }
+  async list(tenantId: string) {
+    return seedStore.users.filter((u) => u.tenantId === tenantId);
   }
   async anyExists(tenantId: string) {
     return seedStore.users.some((u) => u.tenantId === tenantId);
@@ -54,6 +58,15 @@ class FirestoreUserRepo implements UserRepo {
     if (!snap.exists) return null;
     const parsed = SeoUserV1.safeParse(snap.data());
     return parsed.success ? parsed.data : null;
+  }
+  async list(tenantId: string) {
+    const db = getFirebaseAdminDb();
+    if (!db) return [];
+    const snap = await tenantCollection(db, tenantId, COLLECTION).get();
+    return snap.docs
+      .map((d) => SeoUserV1.safeParse(d.data()))
+      .filter((r) => r.success)
+      .map((r) => r.data);
   }
   async anyExists(tenantId: string) {
     const db = getFirebaseAdminDb();

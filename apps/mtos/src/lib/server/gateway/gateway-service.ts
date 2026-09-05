@@ -64,8 +64,12 @@ export async function dispatchGatewayResource(
   }
 
   if (resource === "clients.list") {
-    // The canonical client roster (MTOS owns it; synced from ClickUp).
-    const { clients } = await getClientsDirectoryView(context);
+    // The canonical client roster (MTOS owns it; synced from ClickUp). MTOS
+    // filters clients by per-user ClickUp visibility; a "unknown" userId is
+    // MTOS's own see-all sentinel, so the tenant service principal reads the
+    // full tenant roster rather than an (empty) per-user synced set.
+    const rosterContext = { ...context, userId: "unknown" };
+    const { clients } = await getClientsDirectoryView(rosterContext);
     const data = clients.map((c) =>
       CanonicalClientV1.parse({
         id: c.id,

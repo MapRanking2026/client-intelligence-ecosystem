@@ -115,10 +115,11 @@ Files are repo-relative. "verified" = exercised by a build and/or the
 | Item | Status | Evidence |
 |---|---|---|
 | Request submit (validated, idempotent) | verified | `seo-engine.ts`, `api/seo/requests/route.ts` |
-| SEOOS Request Inbox + fulfillment + package | verified | `app/requests/*`, `seo-engine.ts` |
-| QA approve/reject/revise | in_progress | lifecycle present; QA UI not_started |
-| Publish immutable package via outbox | in_progress | package immutable; outbox delivery not_started |
-| MTOS request UI + consume via adapter | not_started | behind `SEOOS_*` flags |
+| SEOOS Request Inbox + fulfillment + package | verified | `app/requests/*`, `seo-engine.ts` (+ `fulfillRequest` for MTOS-created requests, `.../fulfill/route.ts`) |
+| QA approve/reject/revise | in_progress | work-order QA done (Phase 6); package-level QA UI pending |
+| Publish immutable package via durable outbox | verified | `repositories/outbox-repo.ts`, `outbox-service.ts` (backoff + dead-letter), enqueue on package ready, `api/seo/outbox/deliver`, MTOS receiver `api/gateway/deliver` |
+| MTOS-side request UI + creation (idempotent) | verified | MTOS `lib/server/seo-intelligence/request-service.ts`, `api/seo-intelligence/requests`, `app/seo-intelligence/page.tsx`, `components/mtos/seo-intelligence-request-form.tsx` (behind `SEOOS_ENABLED`) |
+| MTOS consume via legacy SeoPerformancePack adapter | not_started | receiver stores delivered package; legacy prep-pack adapter pending |
 | Auto-request on Monthly Touch (idempotent) | not_started | `SEOOS_AUTO_REQUEST_MONTHLY_TOUCH` |
 | Stale/missing-package MTOS fallback | not_started | — |
 

@@ -5,7 +5,9 @@ import { resolveSeoAuthz } from "@/src/lib/auth/context";
 import { AppShell } from "@/src/components/app-shell";
 import { EmptyState, Panel, StatusPill, UnauthorizedPage } from "@/src/components/states";
 import { RequestForm } from "@/src/components/request-form";
+import { FulfillButton } from "@/src/components/fulfill-button";
 import { listRequests } from "@/src/lib/server/seo-engine";
+import { authzHas } from "@/src/lib/auth/context";
 
 export const dynamic = "force-dynamic";
 
@@ -36,6 +38,7 @@ export default async function RequestInboxPage() {
   }
 
   const requests = await listRequests(authz.tenantId);
+  const canFulfill = authzHas(authz, "seo.request.fulfill");
   const sorted = [...requests].sort(
     (a, b) => INBOX_ORDER.indexOf(a.status) - INBOX_ORDER.indexOf(b.status),
   );
@@ -77,7 +80,12 @@ export default async function RequestInboxPage() {
                     <td>{r.priority}</td>
                     <td><StatusPill status={r.status} /></td>
                     <td className="muted">{r.createdAt.slice(0, 10)}</td>
-                    <td><Link href={`/requests/${r.id}`}>view</Link></td>
+                    <td>
+                      <Link href={`/requests/${r.id}`}>view</Link>
+                      {canFulfill && ["submitted", "queued", "needs_input"].includes(r.status) ? (
+                        <span style={{ marginLeft: 8 }}><FulfillButton requestId={r.id} /></span>
+                      ) : null}
+                    </td>
                   </tr>
                 ))}
               </tbody>

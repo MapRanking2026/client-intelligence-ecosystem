@@ -29,6 +29,8 @@ export const OutboxDeliveryV1 = z.object({
   nextAttemptAt: zIsoTimestamp.nullable().default(null),
   lastError: z.string().max(1000).nullable().default(null),
   deadLettered: z.boolean().default(false),
+  /** Set once the event is successfully delivered; null while pending. */
+  deliveredAt: zIsoTimestamp.nullable().default(null),
 });
 export type OutboxDeliveryV1 = z.infer<typeof OutboxDeliveryV1>;
 
@@ -50,6 +52,7 @@ export const OutboxEventV1 = z.object({
     nextAttemptAt: null,
     lastError: null,
     deadLettered: false,
+    deliveredAt: null,
   }),
 });
 export type OutboxEventV1 = z.infer<typeof OutboxEventV1>;

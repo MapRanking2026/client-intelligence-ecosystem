@@ -6,6 +6,7 @@ import {
   type DataGapV1,
   type GatewayResource,
   type MapCheckinActivityV1 as MapCheckinActivity,
+  type OutboxEventV1,
 } from "@cie/contracts";
 import { z } from "zod";
 import { signGatewayRequest } from "@cie/core";
@@ -124,6 +125,40 @@ export async function getIntegrationHealth(
     providers: providers.success ? providers.data : [],
     error: providers.success ? undefined : "invalid_gateway_payload",
   };
+}
+
+/** Deliver an outbox event (e.g. SeoPackageReady) to the MTOS receiver. */
+export async function deliverToMtos(
+  event: OutboxEventV1,
+): Promise<{ ok: boolean; error?: string }> {
+  const env = getServerEnv();
+  if (!env.integrationGatewayUrl || !env.serviceToServiceSecret) {
+    return { ok: false, error: "gateway_not_configured" };
+  }
+  const body = JSON.stringify(event);
+  const headers = await signGatewayRequest(env.serviceToServiceSecret, {
+    tenantId: event.tenantId,
+    body,
+    timestamp: Date.now(),
+    nonce: newId("nonce"),
+  });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 8000);
+  try {
+    const res = await fetch(`${env.integrationGatewayUrl}/api/gateway/deliver`, {
+      method: "POST",
+      headers: { ...headers, "content-type": "application/json" },
+      body,
+      signal: controller.signal,
+      cache: "no-store",
+    });
+    if (!res.ok) return { ok: false, error: `deliver_http_${res.status}` };
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "deliver_unreachable" };
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 export interface MapCheckinResult {

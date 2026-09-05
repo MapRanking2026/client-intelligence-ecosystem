@@ -38,6 +38,9 @@ export function getServerEnv() {
     // Shared secret for the Client Intelligence Ecosystem integration gateway
     // (signed service-to-service requests from SEOOS). Empty disables the gateway.
     serviceToServiceSecret: process.env.CIE_SERVICE_SECRET || "",
+    // SEOOS consumption flags (default OFF preserve current MTOS behavior).
+    seoosEnabled: process.env.SEOOS_ENABLED === "true",
+    seoosRequestsEnabled: process.env.SEOOS_REQUESTS_ENABLED !== "false",
   };
 }
 

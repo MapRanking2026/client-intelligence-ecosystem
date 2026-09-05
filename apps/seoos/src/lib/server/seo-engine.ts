@@ -17,6 +17,7 @@ import {
 } from "@cie/core";
 import { hash32, newId, nowIso } from "@/src/lib/ids";
 import { getRequestRepo } from "@/src/lib/server/repositories/request-repo";
+import { enqueuePackageReady } from "@/src/lib/server/outbox-service";
 
 /**
  * SEO Intelligence engine — the request→package loop, now persisted through the
@@ -207,7 +208,46 @@ export async function submitSeoRequest(
   request = advance(request, "ready");
   await repo.saveRequest(request);
 
+  // Durable delivery: enqueue a SeoPackageReady event for the outbox worker.
+  await enqueuePackageReady(request, pkg);
+
   return { request, package: pkg, deduped: false };
+}
+
+export interface FulfillResult {
+  request: Request;
+  package: Package | null;
+  alreadyDone: boolean;
+}
+
+/**
+ * Fulfill a request that is sitting in the inbox (e.g. created by MTOS). Runs
+ * the produce lifecycle and enqueues delivery. Idempotent: an already-ready
+ * request returns its existing package without reprocessing.
+ */
+export async function fulfillRequest(
+  tenantId: string,
+  requestId: string,
+): Promise<FulfillResult> {
+  const repo = getRequestRepo();
+  let request = await repo.getRequest(tenantId, requestId);
+  if (!request) throw new Error(`Request not found: ${requestId}`);
+  if (!["submitted", "queued", "needs_input"].includes(request.status)) {
+    return {
+      request,
+      package: await repo.getLatestPackage(tenantId, requestId),
+      alreadyDone: true,
+    };
+  }
+  if (request.status === "submitted") request = advance(request, "queued");
+  if (request.status !== "processing") request = advance(request, "processing");
+  const pkg = produce(request);
+  await repo.savePackage(pkg);
+  request = advance(request, "qa_review");
+  request = advance(request, "ready");
+  await repo.saveRequest(request);
+  await enqueuePackageReady(request, pkg);
+  return { request, package: pkg, alreadyDone: false };
 }
 
 export async function getRequest(tenantId: string, requestId: string) {

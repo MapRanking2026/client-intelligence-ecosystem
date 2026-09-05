@@ -1,6 +1,7 @@
 import {
   AppMembershipV1,
   LeadCallRecordV1,
+  OutboxEventV1,
   SeoIntelligencePackageV1,
   SeoIntelligenceRequestV1,
 } from "@cie/contracts";
@@ -34,6 +35,7 @@ interface SeedStore {
   keywords: KeywordV1[];
   recommendations: RecommendationV1[];
   workOrders: WorkOrderV1[];
+  outbox: OutboxEventV1[];
 }
 
 function buildSeed(): SeedStore {
@@ -321,6 +323,8 @@ function buildSeed(): SeedStore {
     }),
   ];
 
+  const outbox: OutboxEventV1[] = [];
+
   return {
     memberships,
     projects,
@@ -330,6 +334,7 @@ function buildSeed(): SeedStore {
     keywords,
     recommendations,
     workOrders,
+    outbox,
   };
 }
 

@@ -104,7 +104,7 @@ Files are repo-relative. "verified" = exercised by a build and/or the
 ## Phase 7 — Monthly audit book & shared Lead & Call Verification
 | Item | Status | Evidence |
 |---|---|---|
-| Monthly SEO audit book | not_started | `app/monthly-audits` (shell) |
+| Monthly SEO audit book (checklist, results, carry-forward, review/QA/publish) | verified | `lib/domain/monthly-audit.ts` (20-item template), `repositories/monthly-audit-repo.ts`, `monthly-audits-service.ts` (carry-forward of unresolved items), `api/seo/monthly-audits/{route,[id]}`, `components/monthly-audit-manager.tsx`, `app/monthly-audits` |
 | MTOS Lead & Call experience preserved | verified | MTOS untouched; `apps/mtos/.../lead-verification/route.ts` (sorting added earlier) |
 | SEOOS Lead & Call section (canonical records) | implemented | `apps/seoos/src/app/lead-verification/page.tsx` |
 | Newest/Oldest sorting (server-side, stable, missing last) | verified | `@cie/core` `orderByOccurredAt` + checks; `lead-sort-toggle.tsx` |

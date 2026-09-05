@@ -1,4 +1,4 @@
-import { jwtVerify } from "jose";
+import { SignJWT, jwtVerify } from "jose";
 
 import { getServerEnv } from "@/src/lib/server/env";
 
@@ -49,6 +49,20 @@ export async function tryGetSessionFromRequest(
   const env = getServerEnv();
   const token = getCookieValue(cookieHeader, env.sessionCookieName);
   return token ? tryGetSessionFromToken(token) : null;
+}
+
+/** Issue a SEOOS session JWT (30d). Uses the shared secret so verify is uniform. */
+export async function createSessionToken(payload: SessionPayload): Promise<string> {
+  const env = getServerEnv();
+  if (!env.sessionCookieSecret) {
+    throw new Error("SESSION_COOKIE_SECRET is required to issue a session");
+  }
+  const secret = new TextEncoder().encode(env.sessionCookieSecret);
+  return new SignJWT({ tenantId: payload.tenantId, userId: payload.userId, role: payload.role })
+    .setProtectedHeader({ alg: "HS256" })
+    .setIssuedAt()
+    .setExpirationTime("30d")
+    .sign(secret);
 }
 
 export async function tryGetSessionFromNextCookies(): Promise<SessionPayload | null> {

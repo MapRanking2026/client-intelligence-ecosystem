@@ -9,6 +9,7 @@ import { SeoProjectV1 } from "@/src/lib/domain/project";
 import { KeywordV1, normalizePhrase } from "@/src/lib/domain/keyword";
 import { RecommendationV1 } from "@/src/lib/domain/recommendation";
 import { WorkOrderV1 } from "@/src/lib/domain/work-order";
+import type { SeoUserV1 } from "@/src/lib/domain/user";
 import { getServerEnv } from "@/src/lib/server/env";
 
 /**
@@ -36,6 +37,7 @@ interface SeedStore {
   recommendations: RecommendationV1[];
   workOrders: WorkOrderV1[];
   outbox: OutboxEventV1[];
+  users: SeoUserV1[];
 }
 
 function buildSeed(): SeedStore {
@@ -324,6 +326,9 @@ function buildSeed(): SeedStore {
   ];
 
   const outbox: OutboxEventV1[] = [];
+  // Login users are provisioned via the bootstrap script (hashed credentials in
+  // Firestore). Seed mode bypasses auth, so this stays empty here.
+  const users: SeoUserV1[] = [];
 
   return {
     memberships,
@@ -335,6 +340,7 @@ function buildSeed(): SeedStore {
     recommendations,
     workOrders,
     outbox,
+    users,
   };
 }
 

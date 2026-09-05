@@ -1,32 +1,32 @@
+import { Suspense } from "react";
 import { getServerEnv } from "@/src/lib/server/env";
+import { SignInForm } from "@/src/components/sign-in-form";
 
 export const dynamic = "force-dynamic";
 
-/**
- * SEOOS sign-in. Sessions are issued by the shared MTOS auth flow (the same
- * signed cookie verifies in both apps); a dedicated SEOOS credential login is a
- * later step. In seed/dev mode the app is open with a seed identity.
- */
+/** SEOOS's own sign-in. Credentials are verified against the SEOOS user store. */
 export default function SignInPage() {
   const env = getServerEnv();
   return (
-    <main className="wrap">
-      <div className="panel">
-        <span className="brand-mark">SEOOS</span>
-        <h1>Sign in</h1>
-        {env.useSeedData ? (
-          <p className="muted">
-            Seed mode is active — the app is open with a seed identity. Set
-            MTOS_USE_SEED_DATA=false to require a real session.
-          </p>
-        ) : (
-          <p className="muted">
-            SEOOS uses the shared Client Intelligence Ecosystem session. Sign in
-            through MTOS; the same session grants SEOOS access when your account
-            has a SEOOS membership. A dedicated SEOOS login is a later step.
-          </p>
-        )}
+    <main className="wrap" style={{ maxWidth: 480 }}>
+      <div style={{ marginBottom: 8 }}>
+        <span className="brand-mark">SEOOS</span>{" "}
+        <span className="brand-sub">SEO Operations</span>
       </div>
+      <h1>Sign in</h1>
+      {env.useSeedData ? (
+        <div className="panel">
+          <span className="badge">Seed mode</span>
+          <p className="muted">
+            Seed/dev mode is active — the app is open with a seed identity, so a
+            password is not required. Set MTOS_USE_SEED_DATA=false to require login.
+          </p>
+        </div>
+      ) : (
+        <Suspense fallback={<div className="panel muted">Loading…</div>}>
+          <SignInForm />
+        </Suspense>
+      )}
     </main>
   );
 }

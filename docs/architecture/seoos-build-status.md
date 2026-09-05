@@ -40,6 +40,7 @@ Files are repo-relative. "verified" = exercised by a build and/or the
 | Migrate package-request form into Request Inbox | verified | `apps/seoos/src/app/requests/*`, `components/request-form.tsx` |
 | Firebase Admin (shared creds; seed fallback) | implemented | `apps/seoos/src/lib/server/firebase/admin.ts`, `env.ts` |
 | Seed/dev mode (credential-free) | verified | `apps/seoos/src/lib/server/seed.ts` |
+| SEOOS own credential login (scrypt-hashed) + admin bootstrap | verified | `lib/domain/user.ts`, `lib/server/password.ts`, `repositories/user-repo.ts`, `api/auth/{login,logout}`, `components/sign-in-form.tsx`, `app/sign-in`, `scripts/bootstrap-seoos-admin.ts` (password from env, never in repo) |
 
 ## Phase 2 — Shared contracts & integration gateway
 | Item | Status | Evidence |

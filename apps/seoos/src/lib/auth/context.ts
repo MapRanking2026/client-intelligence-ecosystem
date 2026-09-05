@@ -7,6 +7,7 @@ import { computePermissions } from "@cie/core";
 
 import { getServerEnv } from "@/src/lib/server/env";
 import { getMembershipRepo } from "@/src/lib/server/repositories/membership-repo";
+import { getUserRepo } from "@/src/lib/server/repositories/user-repo";
 import {
   tryGetSessionFromNextCookies,
   tryGetSessionFromRequest,
@@ -74,6 +75,19 @@ export async function resolveSeoAuthz(
     "seoos",
   );
   if (membership) return membershipToAuthz(membership);
+
+  // A provisioned SEOOS login user carries its own roles + client visibility.
+  const user = await getUserRepo().getById(session.tenantId, session.userId);
+  if (user && !user.disabled) {
+    return AuthzContextV1.parse({
+      tenantId: user.tenantId,
+      userId: user.userId,
+      app: "seoos",
+      roles: user.roles,
+      permissions: computePermissions(user.roles),
+      clientVisibility: user.clientVisibility,
+    });
+  }
 
   // Authenticated tenant_admin without an explicit membership still administers.
   if (session.role === "tenant_admin") {

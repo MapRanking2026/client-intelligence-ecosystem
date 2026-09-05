@@ -59,6 +59,7 @@ export const ChecklistItem = z.object({
 });
 
 export const QaResult = z.enum(["pass", "revision"]);
+export type QaResult = z.infer<typeof QaResult>;
 
 export const WorkOrderQa = z.object({
   result: QaResult,

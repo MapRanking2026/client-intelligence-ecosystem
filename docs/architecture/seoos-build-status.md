@@ -93,9 +93,10 @@ Files are repo-relative. "verified" = exercised by a build and/or the
 ## Phase 6 — Recommendations, work orders, delivery, QA
 | Item | Status | Evidence |
 |---|---|---|
-| Nav destinations + auth + states | implemented | `app/recommendations`, `app/work-orders` |
-| AI recommendation lifecycle (Prompt Engine) | not_started | — |
-| Work-order lifecycle / QA / views | not_started | — |
+| Recommendation lifecycle (create/approve/reject/defer/convert, audited) | verified | `lib/domain/recommendation.ts`, `repositories/recommendation-repo.ts`, `recommendations-service.ts`, `api/seo/recommendations/{route,[id]}`, `components/recommendations-manager.tsx`, `app/recommendations` |
+| AI recommendation generation (Prompt Engine) | not_started | queue feeds from lifecycle above; AI producer pending |
+| Work-order lifecycle / QA / views | verified | `lib/domain/work-order.ts` (10-state machine), `repositories/workorder-repo.ts`, `workorders-service.ts`, `api/seo/work-orders/{route,[id]}`, `components/work-orders-board.tsx`, `app/work-orders` |
+| Recommendation → approved → work order conversion (human-gated) | verified | `convertToWorkOrder` (requires `seo.work.approve`); QA requires `seo.package.qa` |
 | ClickUp reconciliation (human-approved writes) | blocked_external | ClickUp via gateway; approval gate preserved |
 | Content/publication backlog | not_started | — |
 

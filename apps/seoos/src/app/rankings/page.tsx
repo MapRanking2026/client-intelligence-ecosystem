@@ -7,6 +7,7 @@ import { listProjects } from "@/src/lib/server/projects-service";
 import { listKeywords } from "@/src/lib/server/keywords-service";
 import { TRACKED_KEYWORD_STATUSES } from "@/src/lib/domain/keyword";
 import { PopulateButton } from "@/src/components/populate-button";
+import { ProjectMappingForm } from "@/src/components/project-mapping-form";
 import { getPerformanceSnapshotRepo } from "@/src/lib/server/repositories/performance-snapshot-repo";
 
 export const dynamic = "force-dynamic";
@@ -77,6 +78,14 @@ export default async function RankingsPage({
               <PopulateButton projectId={selected.id} />
               {snapshot ? <span className="muted" style={{ fontSize: 12 }}>Last pulled {snapshot.generatedAt.slice(0, 16).replace("T", " ")}</span> : null}
             </div>
+          ) : null}
+          {selected && canManage ? (
+            <Panel title="Project source mapping">
+              <ProjectMappingForm
+                projectId={selected.id}
+                clickupListId={selected.externalIds?.clickupListId}
+              />
+            </Panel>
           ) : null}
 
           <div className="grid-cards" style={{ marginBottom: 14 }}>

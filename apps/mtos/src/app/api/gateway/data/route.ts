@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { GatewayRequestV1, GatewayResponseV1 } from "@cie/contracts";
-import { S2S_HEADERS, verifyGatewayRequest } from "@cie/core";
+import { S2S_HEADERS, secretFingerprint, verifyGatewayRequest } from "@cie/core";
 
 import type { TenantContext } from "@/src/lib/contracts/mtos";
 import { getServerEnv } from "@/src/lib/server/env";
@@ -42,8 +42,9 @@ export async function POST(request: Request) {
     nowMs: Date.now(),
   });
   if (!verdict.ok) {
+    const mtosFingerprint = await secretFingerprint(env.serviceToServiceSecret);
     return NextResponse.json(
-      { error: "unauthorized", reason: verdict.reason },
+      { error: "unauthorized", reason: verdict.reason, mtosFingerprint },
       { status: 401 },
     );
   }

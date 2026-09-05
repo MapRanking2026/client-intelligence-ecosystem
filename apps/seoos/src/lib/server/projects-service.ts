@@ -120,6 +120,24 @@ export async function syncClientsFromMtos(tenantId: string): Promise<SyncClients
   return { configured: true, ok: true, created, skipped, total: roster.clients.length };
 }
 
+/** Merge provider external-id mappings (e.g. clickupListId) into a project. */
+export async function updateProjectExternalIds(
+  tenantId: string,
+  projectId: string,
+  patch: Record<string, string>,
+): Promise<SeoProjectV1> {
+  const repo = getProjectRepo();
+  const project = await repo.get(tenantId, projectId);
+  if (!project) throw new Error(`Project not found: ${projectId}`);
+  const externalIds = { ...project.externalIds };
+  for (const [k, v] of Object.entries(patch)) {
+    const trimmed = v.trim();
+    if (trimmed) externalIds[k] = trimmed;
+    else delete externalIds[k];
+  }
+  return repo.save({ ...project, externalIds, updatedAt: nowIso() });
+}
+
 export async function transitionProject(
   tenantId: string,
   projectId: string,

@@ -13,7 +13,7 @@ import {
   type SeoPerformanceSnapshotV1 as SeoPerformanceSnapshot,
 } from "@cie/contracts";
 import { z } from "zod";
-import { signGatewayRequest } from "@cie/core";
+import { secretFingerprint, signGatewayRequest } from "@cie/core";
 
 import { getServerEnv } from "@/src/lib/server/env";
 import { newId, nowIso } from "@/src/lib/ids";
@@ -194,6 +194,76 @@ export async function getMtosClients(tenantId: string): Promise<ClientsResult> {
     clients: parsed.success ? parsed.data : [],
     error: parsed.success ? undefined : "invalid_gateway_payload",
   };
+}
+
+export interface GatewayDiagnostics {
+  configured: boolean;
+  gatewayUrl: string;
+  localFingerprint: string;
+  ok: boolean;
+  status?: number;
+  reason?: string;
+  mtosFingerprint?: string;
+  secretsMatch?: boolean;
+  error?: string;
+}
+
+/** Probe the gateway and compare secret fingerprints to diagnose 401s. */
+export async function testGateway(tenantId: string): Promise<GatewayDiagnostics> {
+  const env = getServerEnv();
+  const localFingerprint = await secretFingerprint(env.serviceToServiceSecret);
+  if (!env.integrationGatewayUrl || !env.serviceToServiceSecret) {
+    return {
+      configured: false,
+      gatewayUrl: env.integrationGatewayUrl || "(unset)",
+      localFingerprint,
+      ok: false,
+      error: "gateway_not_configured",
+    };
+  }
+  const request = GatewayRequestV1.parse({
+    schemaVersion: 1,
+    resource: "integration-health",
+    tenantId,
+    params: {},
+    correlationId: newId("corr"),
+    issuedAt: nowIso(),
+  });
+  const body = JSON.stringify(request);
+  const headers = await signGatewayRequest(env.serviceToServiceSecret, {
+    tenantId,
+    body,
+    timestamp: Date.now(),
+    nonce: newId("nonce"),
+  });
+  try {
+    const res = await fetch(`${env.integrationGatewayUrl}/api/gateway/data`, {
+      method: "POST",
+      headers: { ...headers, "content-type": "application/json" },
+      body,
+      cache: "no-store",
+    });
+    const json = (await res.json().catch(() => null)) as Record<string, unknown> | null;
+    const mtosFingerprint = json && typeof json.mtosFingerprint === "string" ? json.mtosFingerprint : undefined;
+    return {
+      configured: true,
+      gatewayUrl: env.integrationGatewayUrl,
+      localFingerprint,
+      ok: res.ok,
+      status: res.status,
+      reason: json && typeof json.reason === "string" ? json.reason : undefined,
+      mtosFingerprint,
+      secretsMatch: mtosFingerprint ? mtosFingerprint === localFingerprint : res.ok ? true : undefined,
+    };
+  } catch (e) {
+    return {
+      configured: true,
+      gatewayUrl: env.integrationGatewayUrl,
+      localFingerprint,
+      ok: false,
+      error: e instanceof Error ? e.message : "gateway_unreachable",
+    };
+  }
 }
 
 export interface SeoPerformanceResult {

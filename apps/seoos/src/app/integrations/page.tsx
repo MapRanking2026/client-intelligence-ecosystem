@@ -2,6 +2,7 @@ import { resolveSeoAuthz, authzHas } from "@/src/lib/auth/context";
 import { AppShell } from "@/src/components/app-shell";
 import { UnauthorizedPage } from "@/src/components/states";
 import { IntegrationCard } from "@/src/components/integration-card";
+import { GatewayDiagnostics } from "@/src/components/gateway-diagnostics";
 import { listIntegrations } from "@/src/lib/server/integrations-service";
 
 export const dynamic = "force-dynamic";
@@ -38,6 +39,8 @@ export default async function IntegrationsPage() {
         on a client/project to pull data. SEO-performance (rankings/grids/check-ins)
         can also be relayed from MTOS via the gateway when configured.
       </p>
+
+      <GatewayDiagnostics />
 
       <div className="grid-cards" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))" }}>
         {integrations.map((view) => (

@@ -54,6 +54,17 @@ async function hmacHex(secret: string, message: string): Promise<string> {
   return toHex(sig);
 }
 
+/**
+ * A short, non-reversible fingerprint of a secret (first 8 hex of SHA-256).
+ * Safe to display/return for verifying that two sides share the same secret
+ * without revealing it. Empty secret → "unset".
+ */
+export async function secretFingerprint(secret: string): Promise<string> {
+  if (!secret) return "unset";
+  const digest = await crypto.subtle.digest("SHA-256", enc(secret));
+  return toHex(digest).slice(0, 8);
+}
+
 /** Length-safe constant-time comparison of two hex strings. */
 export function timingSafeEqualHex(a: string, b: string): boolean {
   if (a.length !== b.length) return false;

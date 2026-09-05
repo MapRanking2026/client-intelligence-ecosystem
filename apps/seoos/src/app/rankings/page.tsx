@@ -6,6 +6,8 @@ import { BlockedExternal, EmptyState, Panel, StatCard, StatusPill, UnauthorizedP
 import { listProjects } from "@/src/lib/server/projects-service";
 import { listKeywords } from "@/src/lib/server/keywords-service";
 import { TRACKED_KEYWORD_STATUSES } from "@/src/lib/domain/keyword";
+import { PopulateButton } from "@/src/components/populate-button";
+import { getPerformanceSnapshotRepo } from "@/src/lib/server/repositories/performance-snapshot-repo";
 
 export const dynamic = "force-dynamic";
 
@@ -36,6 +38,20 @@ export default async function RankingsPage({
         TRACKED_KEYWORD_STATUSES.includes(k.status),
       )
     : [];
+  const snapshot = selected
+    ? await getPerformanceSnapshotRepo().get(authz.tenantId, selected.id)
+    : null;
+  const canManage = authzHas(authz, "seo.project.manage");
+  const rankValues = snapshot ? snapshot.grids.filter((g) => g.averageRankPosition != null) : [];
+  const avgRank = rankValues.length
+    ? Math.round((rankValues.reduce((s, g) => s + (g.averageRankPosition ?? 0), 0) / rankValues.length) * 10) / 10
+    : null;
+  const avgShare = snapshot && snapshot.grids.length
+    ? Math.round(
+        snapshot.grids.reduce((s, g) => s + (g.shareOfLocalVoicePercent ?? 0), 0) /
+          (snapshot.grids.filter((g) => g.shareOfLocalVoicePercent != null).length || 1),
+      )
+    : null;
 
   return (
     <AppShell
@@ -56,12 +72,18 @@ export default async function RankingsPage({
               </Link>
             ))}
           </div>
+          {selected && canManage ? (
+            <div className="toolbar">
+              <PopulateButton projectId={selected.id} />
+              {snapshot ? <span className="muted" style={{ fontSize: 12 }}>Last pulled {snapshot.generatedAt.slice(0, 16).replace("T", " ")}</span> : null}
+            </div>
+          ) : null}
 
           <div className="grid-cards" style={{ marginBottom: 14 }}>
             <StatCard label="Tracked keywords" value={tracked.length} />
-            <StatCard label="Avg position" value="—" hint="via Rank Tracker gateway" />
-            <StatCard label="Top-3 coverage" value="—" hint="via Rank Tracker gateway" />
-            <StatCard label="Grid market share" value="—" hint="via GeoGrid gateway" />
+            <StatCard label="Avg position" value={avgRank ?? "—"} hint={snapshot ? "from grid scans" : "pull from MTOS"} />
+            <StatCard label="Grid market share" value={avgShare != null ? `${avgShare}%` : "—"} hint={snapshot ? "share of local voice" : "pull from MTOS"} />
+            <StatCard label="Businesses" value={snapshot ? snapshot.businesses.length : "—"} hint="matched in Rank Tracker" />
           </div>
 
           <Panel title="Tracked keywords">
@@ -104,10 +126,37 @@ export default async function RankingsPage({
           </Panel>
 
           <Panel title="Grid / heatmap coverage">
-            <BlockedExternal
-              provider="geogrid (via gateway)"
-              requirement="a completed GeoGrid sync branch + the normalized grid adapter exposed through the gateway"
-            />
+            {snapshot && snapshot.grids.length ? (
+              <div className="table-scroll">
+                <table className="data">
+                  <thead>
+                    <tr>
+                      <th>Keyword</th>
+                      <th>Avg grid rank</th>
+                      <th>Share of local voice</th>
+                      <th>Top-3</th>
+                      <th>Scan date</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {snapshot.grids.map((g, i) => (
+                      <tr key={`${g.keyword}-${i}`}>
+                        <td>{g.keyword}</td>
+                        <td>{g.averageRankPosition ?? "—"}</td>
+                        <td>{g.shareOfLocalVoicePercent != null ? `${g.shareOfLocalVoicePercent}%` : "—"}</td>
+                        <td>{g.top3Percent != null ? `${g.top3Percent}%` : "—"}</td>
+                        <td className="muted">{g.scanDate ? g.scanDate.slice(0, 10) : "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <BlockedExternal
+                provider="geogrid (via gateway)"
+                requirement="pull data from MTOS above (needs the gateway configured + a completed grid scan for the client)"
+              />
+            )}
           </Panel>
         </>
       )}

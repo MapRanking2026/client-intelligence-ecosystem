@@ -56,7 +56,10 @@ export async function POST(request: Request) {
   };
 
   try {
-    const result = await dispatchGatewayResource(context, parsed.resource);
+    const result = await dispatchGatewayResource(context, parsed.resource, {
+      clientId: parsed.clientId,
+      params: parsed.params,
+    });
     const response = GatewayResponseV1.parse({
       schemaVersion: 1,
       ok: true,

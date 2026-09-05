@@ -67,6 +67,7 @@ export type ProviderHealthV1 = z.infer<typeof ProviderHealthV1>;
 export const GatewayResource = z.enum([
   "integration-health",
   "clients.list",
+  "seo-performance",
   "map-checkins.activity",
   "gohighlevel.leads",
   "rank-tracker.rankings",
@@ -74,6 +75,37 @@ export const GatewayResource = z.enum([
   "search-console.performance",
 ]);
 export type GatewayResource = z.infer<typeof GatewayResource>;
+
+/** Normalized per-client SEO snapshot assembled by MTOS (aggregate, secret-free). */
+export const SeoPerformanceBusinessV1 = z.object({
+  businessId: z.string().optional(),
+  businessName: z.string(),
+  status: z.enum(["active", "inactive"]).default("active"),
+});
+export const SeoPerformanceKeywordV1 = z.object({
+  keyword: z.string(),
+  businessName: z.string().optional(),
+});
+export const SeoPerformanceGridV1 = z.object({
+  keyword: z.string(),
+  scanDate: z.string().optional(),
+  gridSize: z.number().optional(),
+  averageRankPosition: z.number().nullable().default(null),
+  shareOfLocalVoicePercent: z.number().nullable().default(null),
+  top3Percent: z.number().nullable().default(null),
+});
+export const SeoPerformanceSnapshotV1 = z.object({
+  schemaVersion: z.literal(1),
+  clientId: zClientId,
+  generatedAt: zIsoTimestamp,
+  businesses: z.array(SeoPerformanceBusinessV1).default([]),
+  keywords: z.array(SeoPerformanceKeywordV1).default([]),
+  grids: z.array(SeoPerformanceGridV1).default([]),
+  checkinBusinessCount: z.number().int().nonnegative().default(0),
+  checkinTotalPosts: z.number().int().nonnegative().default(0),
+  notes: z.array(z.string()).default([]),
+});
+export type SeoPerformanceSnapshotV1 = z.infer<typeof SeoPerformanceSnapshotV1>;
 
 /** Canonical client roster entry relayed from MTOS (the source of client truth). */
 export const CanonicalClientV1 = z.object({

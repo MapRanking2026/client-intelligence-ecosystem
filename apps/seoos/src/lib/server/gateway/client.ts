@@ -4,11 +4,13 @@ import {
   GatewayResponseV1,
   MapCheckinActivityV1,
   ProviderHealthV1,
+  SeoPerformanceSnapshotV1,
   type CanonicalClientV1 as CanonicalClient,
   type DataGapV1,
   type GatewayResource,
   type MapCheckinActivityV1 as MapCheckinActivity,
   type OutboxEventV1,
+  type SeoPerformanceSnapshotV1 as SeoPerformanceSnapshot,
 } from "@cie/contracts";
 import { z } from "zod";
 import { signGatewayRequest } from "@cie/core";
@@ -34,7 +36,7 @@ export interface GatewayCallResult {
 async function callGateway(
   resource: GatewayResource,
   tenantId: string,
-  params: Record<string, unknown> = {},
+  opts: { clientId?: string; params?: Record<string, unknown> } = {},
 ): Promise<GatewayCallResult> {
   const env = getServerEnv();
   if (!env.integrationGatewayUrl || !env.serviceToServiceSecret) {
@@ -51,7 +53,8 @@ async function callGateway(
     schemaVersion: 1,
     resource,
     tenantId,
-    params,
+    clientId: opts.clientId,
+    params: opts.params ?? {},
     correlationId: newId("corr"),
     issuedAt: nowIso(),
   });
@@ -189,6 +192,39 @@ export async function getMtosClients(tenantId: string): Promise<ClientsResult> {
     configured: true,
     ok: parsed.success,
     clients: parsed.success ? parsed.data : [],
+    error: parsed.success ? undefined : "invalid_gateway_payload",
+  };
+}
+
+export interface SeoPerformanceResult {
+  configured: boolean;
+  ok: boolean;
+  snapshot: SeoPerformanceSnapshot | null;
+  dataGaps: DataGapV1[];
+  error?: string;
+}
+
+/** Assembled per-client SEO snapshot (rankings, grids, keywords, check-ins). */
+export async function getSeoPerformance(
+  tenantId: string,
+  clientId: string,
+): Promise<SeoPerformanceResult> {
+  const result = await callGateway("seo-performance", tenantId, { clientId });
+  if (!result.ok) {
+    return {
+      configured: result.configured,
+      ok: false,
+      snapshot: null,
+      dataGaps: result.dataGaps,
+      error: result.error,
+    };
+  }
+  const parsed = SeoPerformanceSnapshotV1.safeParse(result.data);
+  return {
+    configured: true,
+    ok: parsed.success,
+    snapshot: parsed.success ? parsed.data : null,
+    dataGaps: result.dataGaps,
     error: parsed.success ? undefined : "invalid_gateway_payload",
   };
 }

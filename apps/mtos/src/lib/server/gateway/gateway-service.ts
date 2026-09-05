@@ -2,15 +2,20 @@ import {
   CanonicalClientV1,
   MapCheckinActivityV1,
   ProviderHealthV1,
+  SeoPerformanceSnapshotV1,
   type GatewayResource,
 } from "@cie/contracts";
 import type { TenantContext } from "@/src/lib/contracts/mtos";
 import { listIntegrationViews } from "@/src/lib/server/integrations";
-import { getClientsDirectoryView } from "@/src/lib/server/services/clients-service";
+import {
+  getClientsDirectoryView,
+  getClientWorkspaceView,
+} from "@/src/lib/server/services/clients-service";
 import {
   fetchCheckinBusinesses,
   openDashboardSession,
 } from "@/src/lib/server/services/mapranking-dashboard";
+import { fetchLiveRankTrackerEvidence } from "@/src/lib/server/services/monthly-touch-prep-service";
 
 /**
  * MTOS-side gateway service. Exposes SECRET-FREE, read-only views of MTOS's
@@ -54,6 +59,7 @@ export interface DispatchResult {
 export async function dispatchGatewayResource(
   context: TenantContext,
   resource: GatewayResource,
+  opts?: { clientId?: string; params?: Record<string, unknown> },
 ): Promise<DispatchResult> {
   if (resource === "integration-health") {
     return {
@@ -81,6 +87,49 @@ export async function dispatchGatewayResource(
         healthScore: typeof c.healthScore === "number" ? c.healthScore : undefined,
       }),
     );
+    return { data, freshness: "live", dataGaps: [] };
+  }
+
+  if (resource === "seo-performance") {
+    if (!opts?.clientId) {
+      return {
+        freshness: "unknown",
+        dataGaps: [{ schemaVersion: 1, area: "seo-performance", reason: "clientId is required.", severity: "warning" }],
+      };
+    }
+    const seeAll = { ...context, userId: "unknown" };
+    const workspace = await getClientWorkspaceView(seeAll, opts.clientId);
+    if (!workspace) {
+      return {
+        freshness: "unknown",
+        dataGaps: [{ schemaVersion: 1, area: "seo-performance", reason: `Client not found: ${opts.clientId}`, severity: "warning" }],
+      };
+    }
+    // Reuse MTOS's exact live per-client SEO assembler (Rank Tracker + grids +
+    // Map Check-Ins). Aggregate/secret-free; no tokens leave the boundary.
+    const evidence = await fetchLiveRankTrackerEvidence(seeAll, workspace.client, [], []);
+    const data = SeoPerformanceSnapshotV1.parse({
+      schemaVersion: 1,
+      clientId: opts.clientId,
+      generatedAt: new Date().toISOString(),
+      businesses: evidence.profiles.map((p) => ({
+        businessId: p.business.businessId,
+        businessName: p.business.businessName,
+        status: p.status,
+      })),
+      keywords: evidence.keywordHistory.map((k) => ({ keyword: k.keyword, businessName: k.businessName })),
+      grids: evidence.heatmapGrids.map((g) => ({
+        keyword: g.keyword,
+        scanDate: g.scanDate,
+        gridSize: g.gridSize,
+        averageRankPosition: g.averageRankPosition,
+        shareOfLocalVoicePercent: g.shareOfLocalVoicePercent,
+        top3Percent: g.top3Percent,
+      })),
+      checkinBusinessCount: evidence.checkinBusinesses.length,
+      checkinTotalPosts: evidence.checkinBusinesses.reduce((s, b) => s + (b.totalPosts ?? 0), 0),
+      notes: [],
+    });
     return { data, freshness: "live", dataGaps: [] };
   }
 

@@ -1247,7 +1247,7 @@ function isProfileInactive(
   return noReviewPresence && (noMapPresence || !latestScans.length);
 }
 
-async function fetchLiveRankTrackerEvidence(
+export async function fetchLiveRankTrackerEvidence(
   context: TenantContext,
   client: ClientRecord,
   snapshotMatches: ReturnType<typeof extractMatchedBusinesses>,

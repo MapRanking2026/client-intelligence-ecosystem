@@ -57,6 +57,7 @@ Files are repo-relative. "verified" = exercised by a build and/or the
 | **Integration gateway — signed S2S boundary** | verified | `packages/contracts/src/gateway.ts`, `packages/core/src/s2s.ts` (HMAC sign/verify + replay, tested), MTOS `apps/mtos/src/app/api/gateway/data/route.ts` + `lib/server/gateway/gateway-service.ts`, SEOOS `apps/seoos/src/lib/server/gateway/client.ts` |
 | Gateway: integration-health resource (real MTOS connection state) | implemented | MTOS `getIntegrationHealth` → `listIntegrationViews` (secret-free); SEOOS Integrations page + Dashboard consume it |
 | Gateway: clients.list resource (real MTOS client roster) | verified | MTOS dispatch → `getClientsDirectoryView`; SEOOS `getMtosClients` + `syncClientsFromMtos` create SEO projects for existing clients (dedup), `api/seo/projects/sync`, `components/sync-clients-button.tsx` |
+| Gateway: seo-performance resource (per-client rankings/grids/keywords/check-ins) | verified | MTOS reuses its exact assembler (`fetchLiveRankTrackerEvidence`) → normalized `SeoPerformanceSnapshotV1`; SEOOS `getSeoPerformance` + `populateProjectFromMtos` auto-imports keywords + stores snapshot; `api/seo/projects/[projectId]/populate`, `components/populate-button.tsx`; Rankings page renders live grid data |
 | Gateway: per-provider data reads (Map Check-Ins/GHL/Rank Tracker/GBP/SC) | blocked_external | resource dispatch + data-gap in place; needs each MTOS normalized adapter exposed + `CIE_SERVICE_SECRET`/`MTOS_GATEWAY_URL` set |
 | OAuth centralization / callback reuse | not_started | design in boundaries doc §OAuth |
 
@@ -79,9 +80,10 @@ Files are repo-relative. "verified" = exercised by a build and/or the
 | Nav destinations + auth + states | implemented | `app/keywords`, `app/rankings` |
 | Scan orchestration / snapshots / retries | not_started | — |
 | Keyword CRUD / import / group / approve / bulk / dedup | verified | `lib/domain/keyword.ts`, `repositories/keyword-repo.ts`, `keywords-service.ts`, `api/seo/keywords/{route,import,bulk}`, `components/keywords-manager.tsx`, `app/keywords/page.tsx` |
-| Rankings (keyword-linked view, tracked set) | in_progress | `app/rankings/page.tsx` (positions/grid = gateway data-gap) |
-| Rank Tracker sync + live positions | blocked_external | Rank Tracker adapter via gateway |
-| GeoGrid grid data | blocked_external | no completed GeoGrid sync branch in audited source |
+| Rankings (keyword-linked + live grid data) | implemented | `app/rankings/page.tsx` renders pulled grid rank / share / top-3 from the seo-performance snapshot |
+| Rank Tracker sync + live positions | implemented | pulled via gateway seo-performance (reuses MTOS's live Rank Tracker assembler); requires gateway configured + client mapped in Rank Tracker |
+| GeoGrid grid data | implemented | grids relayed via seo-performance (MTOS's live heatmap evidence); live when the client has completed scans |
+| Auto-populate project from MTOS (keywords + snapshot) | verified | `populate-service.ts`, `performance-snapshot-repo.ts`, "Pull data from MTOS" on Rankings |
 | Competitor management | not_started | — |
 
 ## Phase 5 — GBP, Map Check-Ins, reviews, Search Console, audits

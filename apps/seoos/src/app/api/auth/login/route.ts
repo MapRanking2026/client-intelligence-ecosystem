@@ -18,6 +18,12 @@ const LoginBody = z.object({
  */
 export async function POST(request: Request) {
   const env = getServerEnv();
+  if (!env.sessionCookieSecret) {
+    return NextResponse.json(
+      { error: "Auth is not configured on the server (SESSION_COOKIE_SECRET missing)." },
+      { status: 500 },
+    );
+  }
   const parsed = LoginBody.safeParse(await request.json().catch(() => null));
   if (!parsed.success) {
     return NextResponse.json({ error: "Invalid credentials" }, { status: 400 });

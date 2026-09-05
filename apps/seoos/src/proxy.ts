@@ -18,6 +18,7 @@ export async function proxy(request: NextRequest) {
   const isPublic =
     path === "/sign-in" ||
     path.startsWith("/api/auth/login") ||
+    path.startsWith("/api/auth/signup") ||
     path.startsWith("/api/auth/logout") ||
     path.startsWith("/api/health") ||
     path.startsWith("/_next") ||

@@ -13,11 +13,42 @@
 import { cert, getApps, initializeApp } from "firebase-admin/app";
 import { getFirestore } from "firebase-admin/firestore";
 import { randomBytes, scryptSync } from "node:crypto";
+import { existsSync, readFileSync } from "node:fs";
+import { resolve } from "node:path";
 
 function fail(msg: string): never {
   console.error(`bootstrap-seoos-admin: ${msg}`);
   process.exit(1);
 }
+
+/** Minimal .env loader (no dependency): fills missing vars from local .env files. */
+function loadDotEnv(): void {
+  const candidates = [
+    ".env.local",
+    ".env",
+    "../../.env.local",
+    "../../.env",
+    "../mtos/.env.local",
+    "../mtos/.env",
+  ];
+  for (const rel of candidates) {
+    const p = resolve(process.cwd(), rel);
+    if (!existsSync(p)) continue;
+    for (const line of readFileSync(p, "utf8").split(/\r?\n/)) {
+      const m = line.match(/^\s*([A-Za-z0-9_]+)\s*=\s*(.*)\s*$/);
+      if (!m) continue;
+      let val = m[2];
+      if (
+        (val.startsWith('"') && val.endsWith('"')) ||
+        (val.startsWith("'") && val.endsWith("'"))
+      ) {
+        val = val.slice(1, -1);
+      }
+      if (process.env[m[1]] === undefined) process.env[m[1]] = val;
+    }
+  }
+}
+loadDotEnv();
 
 const email = (process.env.SEOOS_ADMIN_EMAIL || "francisco@mapranking.com").trim().toLowerCase();
 const password = process.env.SEOOS_ADMIN_PASSWORD;
@@ -36,48 +67,56 @@ if (!projectId || !clientEmail || !privateKey) {
   fail("FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL and FIREBASE_PRIVATE_KEY are required.");
 }
 
-if (!getApps().length) {
-  initializeApp({ credential: cert({ projectId, clientEmail, privateKey }) });
-}
-const db = getFirestore();
+async function main() {
+  if (!getApps().length) {
+    initializeApp({ credential: cert({ projectId, clientEmail, privateKey }) });
+  }
+  const db = getFirestore();
 
-const salt = randomBytes(16).toString("hex");
-const passwordHash = scryptSync(password, salt, 64).toString("hex");
-const now = new Date().toISOString();
+  const salt = randomBytes(16).toString("hex");
+  const passwordHash = scryptSync(password as string, salt, 64).toString("hex");
+  const now = new Date().toISOString();
 
-const user = {
-  schemaVersion: 1 as const,
-  tenantId,
-  userId,
-  email,
-  displayName,
-  passwordSalt: salt,
-  passwordHash,
-  roles: [role],
-  clientVisibility: "all" as const,
-  disabled: false,
-  createdAt: now,
-  updatedAt: now,
-};
-
-await db.collection("tenants").doc(tenantId).collection("seoUsers").doc(userId).set(user);
-// Mirror an app membership so authorization is explicit either way.
-await db
-  .collection("tenants")
-  .doc(tenantId)
-  .collection("appMemberships")
-  .doc(`seoos__${userId}`)
-  .set({
-    schemaVersion: 1,
+  const user = {
+    schemaVersion: 1 as const,
     tenantId,
     userId,
-    app: "seoos",
+    email,
+    displayName,
+    passwordSalt: salt,
+    passwordHash,
     roles: [role],
-    clientVisibility: "all",
-    extraPermissions: [],
+    clientVisibility: "all" as const,
+    disabled: false,
     createdAt: now,
     updatedAt: now,
-  });
+  };
 
-console.log(`Provisioned SEOOS user ${email} (userId "${userId}", role ${role}) in tenant ${tenantId}.`);
-process.exit(0);
+  await db.collection("tenants").doc(tenantId).collection("seoUsers").doc(userId).set(user);
+  // Mirror an app membership so authorization is explicit either way.
+  await db
+    .collection("tenants")
+    .doc(tenantId)
+    .collection("appMemberships")
+    .doc(`seoos__${userId}`)
+    .set({
+      schemaVersion: 1,
+      tenantId,
+      userId,
+      app: "seoos",
+      roles: [role],
+      clientVisibility: "all",
+      extraPermissions: [],
+      createdAt: now,
+      updatedAt: now,
+    });
+
+  console.log(`Provisioned SEOOS user ${email} (userId "${userId}", role ${role}) in tenant ${tenantId}.`);
+}
+
+main()
+  .then(() => process.exit(0))
+  .catch((err) => {
+    console.error(`bootstrap-seoos-admin failed: ${err instanceof Error ? err.message : err}`);
+    process.exit(1);
+  });

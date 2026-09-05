@@ -10,6 +10,7 @@ interface View {
   category: string;
   authMode: "api_key" | "oauth";
   connectable: boolean;
+  poweredBy?: string;
   syncable: boolean;
   description: string;
   fields: IntegrationField[];
@@ -78,6 +79,10 @@ export function IntegrationCard({ view }: { view: View }) {
             Disconnect
           </button>
         </div>
+      ) : view.poweredBy ? (
+        <p className="muted" style={{ fontSize: 12 }}>
+          Powered by the <strong>{view.poweredBy}</strong> connection — connect that provider.
+        </p>
       ) : !view.connectable ? (
         <p className="muted" style={{ fontSize: 12 }}>
           Requires OAuth — connect form coming. (Google sign-in flow.)

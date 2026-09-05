@@ -16,6 +16,7 @@ export interface IntegrationView {
   authMode: "api_key" | "oauth";
   syncable: boolean;
   connectable: boolean;
+  poweredBy?: string;
   description: string;
   fields: IntegrationField[];
   status: "not_connected" | "connected" | "error";
@@ -35,7 +36,8 @@ export async function listIntegrations(tenantId: string): Promise<IntegrationVie
       category: def.category,
       authMode: def.authMode,
       syncable: def.syncable,
-      connectable: def.authMode === "api_key",
+      connectable: def.authMode === "api_key" && !def.poweredBy,
+      poweredBy: def.poweredBy,
       description: def.description,
       fields: def.fields,
       status: conn?.status ?? "not_connected",
@@ -56,6 +58,9 @@ export async function connectIntegration(
 ): Promise<IntegrationConnectionV1> {
   const def = getProviderDef(providerId);
   if (!def) throw new ConnectError(`Unknown provider: ${providerId}`);
+  if (def.poweredBy) {
+    throw new ConnectError(`${def.name} is powered by the ${def.poweredBy} connection.`);
+  }
   if (def.authMode !== "api_key") {
     throw new ConnectError(`${def.name} requires OAuth; the credential form is not available.`);
   }

@@ -25,6 +25,8 @@ export interface IntegrationProviderDef {
   description: string;
   fields: IntegrationField[];
   dataKinds: string[];
+  /** If set, this provider is served by another provider's connection (no own form). */
+  poweredBy?: string;
 }
 
 /**
@@ -48,23 +50,29 @@ export const SEO_INTEGRATION_CATALOG: IntegrationProviderDef[] = [
   },
   {
     id: "rank-tracker",
-    name: "Rank Tracker",
+    name: "Rank Tracker (MapRanking)",
     category: "search",
     authMode: "api_key",
-    syncable: false,
-    description: "Keyword rankings and scan history.",
-    fields: [{ key: "apiKey", label: "API Key", secret: true, required: true }],
-    dataKinds: ["rankings", "keywords"],
+    syncable: true,
+    description:
+      "MapRanking dashboard login. One connection powers Rank Tracker rankings, grids, AND Map Check-Ins. A fresh bearer token is fetched per sync.",
+    fields: [
+      { key: "clientId", label: "Client ID (login email)", secret: false, required: true, placeholder: "you@agency.com" },
+      { key: "clientSecret", label: "Client Secret (password)", secret: true, required: true },
+      { key: "apiBaseUrl", label: "API Base URL (optional)", secret: false, required: false, placeholder: "https://dashboardapi.mapranking.com" },
+    ],
+    dataKinds: ["rankings", "keywords", "grids", "map-checkins"],
   },
   {
-    id: "geogrid",
-    name: "GeoGrid",
-    category: "search",
+    id: "map-checkins",
+    name: "Map Check-Ins",
+    category: "operations",
     authMode: "api_key",
     syncable: false,
-    description: "Local grid / heatmap scans.",
-    fields: [{ key: "apiKey", label: "API Key", secret: true, required: true }],
-    dataKinds: ["grids"],
+    poweredBy: "rank-tracker",
+    description: "Check-in activity and counts. Uses the Rank Tracker (MapRanking) connection.",
+    fields: [],
+    dataKinds: ["map-checkins"],
   },
   {
     id: "ahrefs",

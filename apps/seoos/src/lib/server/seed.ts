@@ -6,6 +6,8 @@ import {
 } from "@cie/contracts";
 import { SeoProjectV1 } from "@/src/lib/domain/project";
 import { KeywordV1, normalizePhrase } from "@/src/lib/domain/keyword";
+import { RecommendationV1 } from "@/src/lib/domain/recommendation";
+import { WorkOrderV1 } from "@/src/lib/domain/work-order";
 import { getServerEnv } from "@/src/lib/server/env";
 
 /**
@@ -30,6 +32,8 @@ interface SeedStore {
   packages: SeoIntelligencePackageV1[];
   leadCalls: LeadCallRecordV1[];
   keywords: KeywordV1[];
+  recommendations: RecommendationV1[];
+  workOrders: WorkOrderV1[];
 }
 
 function buildSeed(): SeedStore {
@@ -257,7 +261,76 @@ function buildSeed(): SeedStore {
     }),
   );
 
-  return { memberships, projects, requests, packages, leadCalls, keywords };
+  const recommendations: RecommendationV1[] = [
+    RecommendationV1.parse({
+      schemaVersion: 1,
+      id: "rec-acme-1",
+      tenantId: TENANT,
+      projectId: "proj-acme",
+      clientId: "client-acme",
+      type: "gbp_category_service",
+      title: "Add 'Emergency Plumbing Service' as a secondary GBP category",
+      rationale:
+        "Competitors ranking in the emergency grid all carry this category; the profile is missing it.",
+      clientSafeExplanation:
+        "Adding this category helps the business show up when people search for urgent plumbing help nearby.",
+      evidence: [
+        {
+          schemaVersion: 1,
+          id: "ev-rec-1",
+          sourceProvider: "geogrid",
+          freshness: "cached",
+          confidence: "medium",
+          redactionLevel: "aggregate",
+          lineage: [{ source: "geogrid", detail: "emergency grid comparison" }],
+        },
+      ],
+      expectedImpact: "high",
+      confidence: "medium",
+      estimatedEffort: "s",
+      requiresApproval: true,
+      status: "proposed",
+      source: "manual",
+      createdAt: iso(21),
+      updatedAt: iso(21),
+    }),
+  ];
+
+  const workOrders: WorkOrderV1[] = [
+    WorkOrderV1.parse({
+      schemaVersion: 1,
+      id: "wo-acme-1",
+      tenantId: TENANT,
+      projectId: "proj-acme",
+      clientId: "client-acme",
+      type: "content_on_page",
+      title: "Optimize water-heater-repair service page",
+      scope: "Title, H1, intro copy, and internal links to the emergency page.",
+      priority: "high",
+      status: "in_progress",
+      checklist: [
+        { label: "Rewrite title + meta", done: true },
+        { label: "Add FAQ schema", done: false },
+      ],
+      requiresApproval: false,
+      activity: [
+        { at: iso(22), actorUserId: "seed-specialist", kind: "created", detail: "Created from backlog" },
+      ],
+      createdAt: iso(22),
+      updatedAt: iso(23),
+    }),
+  ];
+
+  return {
+    memberships,
+    projects,
+    requests,
+    packages,
+    leadCalls,
+    keywords,
+    recommendations,
+    workOrders,
+  };
 }
 
 /** Singleton so writes within a server process persist across requests. */

@@ -56,6 +56,7 @@ Files are repo-relative. "verified" = exercised by a build and/or the
 | Legacy `SeoPerformancePack` compatibility adapter | not_started | — |
 | **Integration gateway — signed S2S boundary** | verified | `packages/contracts/src/gateway.ts`, `packages/core/src/s2s.ts` (HMAC sign/verify + replay, tested), MTOS `apps/mtos/src/app/api/gateway/data/route.ts` + `lib/server/gateway/gateway-service.ts`, SEOOS `apps/seoos/src/lib/server/gateway/client.ts` |
 | Gateway: integration-health resource (real MTOS connection state) | implemented | MTOS `getIntegrationHealth` → `listIntegrationViews` (secret-free); SEOOS Integrations page + Dashboard consume it |
+| Gateway: clients.list resource (real MTOS client roster) | verified | MTOS dispatch → `getClientsDirectoryView`; SEOOS `getMtosClients` + `syncClientsFromMtos` create SEO projects for existing clients (dedup), `api/seo/projects/sync`, `components/sync-clients-button.tsx` |
 | Gateway: per-provider data reads (Map Check-Ins/GHL/Rank Tracker/GBP/SC) | blocked_external | resource dispatch + data-gap in place; needs each MTOS normalized adapter exposed + `CIE_SERVICE_SECRET`/`MTOS_GATEWAY_URL` set |
 | OAuth centralization / callback reuse | not_started | design in boundaries doc §OAuth |
 
@@ -65,6 +66,7 @@ Files are repo-relative. "verified" = exercised by a build and/or the
 | Portfolio dashboard (totals, requests, data health) | implemented | `apps/seoos/src/app/page.tsx` |
 | Client/project list | verified | `apps/seoos/src/app/clients/page.tsx` |
 | Create project + duplicate prevention | verified | `projects-service.ts`, `api/seo/projects/route.ts`, `create-project-form.tsx` |
+| Sync existing MTOS clients → SEO projects | verified | `syncClientsFromMtos` via gateway `clients.list`; `api/seo/projects/sync`; "Sync clients from MTOS" on the Clients page |
 | Project stages + validated transitions | implemented | `apps/seoos/src/lib/domain/project.ts` |
 | Repositories (in-memory seed + Firestore) | implemented | `apps/seoos/src/lib/server/repositories/*` |
 | New-project wizard (resumable, autosave) | not_started | — |

@@ -4,6 +4,7 @@ import { resolveSeoAuthz, authzHas } from "@/src/lib/auth/context";
 import { AppShell } from "@/src/components/app-shell";
 import { EmptyState, Panel, StatusPill, UnauthorizedPage } from "@/src/components/states";
 import { CreateProjectForm } from "@/src/components/create-project-form";
+import { SyncClientsButton } from "@/src/components/sync-clients-button";
 import { listProjects } from "@/src/lib/server/projects-service";
 
 export const dynamic = "force-dynamic";
@@ -29,6 +30,7 @@ export default async function ClientsPage() {
         </div>
       ) : (
         <>
+          <SyncClientsButton />
           <CreateProjectForm />
           <Panel title={`Projects (${projects.length})`}>
             {projects.length === 0 ? (

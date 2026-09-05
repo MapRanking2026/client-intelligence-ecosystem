@@ -66,6 +66,7 @@ export type ProviderHealthV1 = z.infer<typeof ProviderHealthV1>;
 /** Resources SEOOS may request through the gateway. */
 export const GatewayResource = z.enum([
   "integration-health",
+  "clients.list",
   "map-checkins.activity",
   "gohighlevel.leads",
   "rank-tracker.rankings",
@@ -73,6 +74,19 @@ export const GatewayResource = z.enum([
   "search-console.performance",
 ]);
 export type GatewayResource = z.infer<typeof GatewayResource>;
+
+/** Canonical client roster entry relayed from MTOS (the source of client truth). */
+export const CanonicalClientV1 = z.object({
+  id: zClientId,
+  name: z.string(),
+  industry: z.string().optional(),
+  lifecycleStage: z.string().optional(),
+  accountManager: z.string().optional(),
+  location: z.string().optional(),
+  healthScore: z.number().optional(),
+  website: z.string().optional(),
+});
+export type CanonicalClientV1 = z.infer<typeof CanonicalClientV1>;
 
 export const GatewayRequestV1 = z.object({
   schemaVersion: z.literal(1),

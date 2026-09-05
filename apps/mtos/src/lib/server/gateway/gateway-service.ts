@@ -1,6 +1,12 @@
-import { MapCheckinActivityV1, ProviderHealthV1, type GatewayResource } from "@cie/contracts";
+import {
+  CanonicalClientV1,
+  MapCheckinActivityV1,
+  ProviderHealthV1,
+  type GatewayResource,
+} from "@cie/contracts";
 import type { TenantContext } from "@/src/lib/contracts/mtos";
 import { listIntegrationViews } from "@/src/lib/server/integrations";
+import { getClientsDirectoryView } from "@/src/lib/server/services/clients-service";
 import {
   fetchCheckinBusinesses,
   openDashboardSession,
@@ -55,6 +61,23 @@ export async function dispatchGatewayResource(
       freshness: "live",
       dataGaps: [],
     };
+  }
+
+  if (resource === "clients.list") {
+    // The canonical client roster (MTOS owns it; synced from ClickUp).
+    const { clients } = await getClientsDirectoryView(context);
+    const data = clients.map((c) =>
+      CanonicalClientV1.parse({
+        id: c.id,
+        name: c.name,
+        industry: c.industry || undefined,
+        lifecycleStage: c.lifecycleStage || undefined,
+        accountManager: c.accountManager || undefined,
+        location: c.location || undefined,
+        healthScore: typeof c.healthScore === "number" ? c.healthScore : undefined,
+      }),
+    );
+    return { data, freshness: "live", dataGaps: [] };
   }
 
   if (resource === "map-checkins.activity") {

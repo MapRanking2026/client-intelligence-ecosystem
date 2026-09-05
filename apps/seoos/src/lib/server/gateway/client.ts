@@ -1,8 +1,10 @@
 import {
+  CanonicalClientV1,
   GatewayRequestV1,
   GatewayResponseV1,
   MapCheckinActivityV1,
   ProviderHealthV1,
+  type CanonicalClientV1 as CanonicalClient,
   type DataGapV1,
   type GatewayResource,
   type MapCheckinActivityV1 as MapCheckinActivity,
@@ -159,6 +161,28 @@ export async function deliverToMtos(
   } finally {
     clearTimeout(timeout);
   }
+}
+
+export interface ClientsResult {
+  configured: boolean;
+  ok: boolean;
+  clients: CanonicalClient[];
+  error?: string;
+}
+
+/** The canonical client roster from MTOS (source of client truth). */
+export async function getMtosClients(tenantId: string): Promise<ClientsResult> {
+  const result = await callGateway("clients.list", tenantId);
+  if (!result.ok) {
+    return { configured: result.configured, ok: false, clients: [], error: result.error };
+  }
+  const parsed = z.array(CanonicalClientV1).safeParse(result.data);
+  return {
+    configured: true,
+    ok: parsed.success,
+    clients: parsed.success ? parsed.data : [],
+    error: parsed.success ? undefined : "invalid_gateway_payload",
+  };
 }
 
 export interface MapCheckinResult {

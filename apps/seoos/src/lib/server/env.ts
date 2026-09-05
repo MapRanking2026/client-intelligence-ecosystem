@@ -28,7 +28,10 @@ export function getServerEnv() {
     sessionCookieName: process.env.SESSION_COOKIE_NAME || "mtos_session",
     sessionCookieSecret: process.env.SESSION_COOKIE_SECRET || "",
     integrationsEncryptionSecret:
-      process.env.MTOS_INTEGRATIONS_SECRET || process.env.SESSION_COOKIE_SECRET || "",
+      process.env.SEOOS_INTEGRATIONS_SECRET ||
+      process.env.MTOS_INTEGRATIONS_SECRET ||
+      process.env.SESSION_COOKIE_SECRET ||
+      "",
     pilotTenantId: process.env.MTOS_PILOT_TENANT_ID || "map-ranking",
     // Optional gate for self-service sign-up. When set, sign-up requires this
     // code. The first user in a tenant always becomes tenant_admin.

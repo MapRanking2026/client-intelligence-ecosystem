@@ -5,6 +5,7 @@ import { AppShell } from "@/src/components/app-shell";
 import { EmptyState, Panel, StatusPill, UnauthorizedPage } from "@/src/components/states";
 import { CreateProjectForm } from "@/src/components/create-project-form";
 import { SyncClientsButton } from "@/src/components/sync-clients-button";
+import { SyncSourcesButton } from "@/src/components/sync-sources-button";
 import { listProjects } from "@/src/lib/server/projects-service";
 
 export const dynamic = "force-dynamic";
@@ -47,6 +48,7 @@ export default async function ClientsPage() {
                       <th>Priority</th>
                       <th>Setup</th>
                       <th>Next deadline</th>
+                      <th>Actions</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -59,6 +61,7 @@ export default async function ClientsPage() {
                         <td>{p.priority}</td>
                         <td>{p.setupReadiness}%</td>
                         <td className="muted">{p.nextDeadlineAt ? p.nextDeadlineAt.slice(0, 10) : "—"}</td>
+                        <td><SyncSourcesButton projectId={p.id} /></td>
                       </tr>
                     ))}
                   </tbody>

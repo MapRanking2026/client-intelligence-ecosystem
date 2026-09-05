@@ -1,0 +1,109 @@
+"use client";
+
+import { useRouter } from "next/navigation";
+import { useState } from "react";
+import type { IntegrationField } from "@/src/lib/domain/integration";
+
+interface View {
+  id: string;
+  name: string;
+  category: string;
+  authMode: "api_key" | "oauth";
+  connectable: boolean;
+  syncable: boolean;
+  description: string;
+  fields: IntegrationField[];
+  status: "not_connected" | "connected" | "error";
+  connectedAt?: string;
+  metadata: Record<string, string>;
+}
+
+export function IntegrationCard({ view }: { view: View }) {
+  const router = useRouter();
+  const [values, setValues] = useState<Record<string, string>>({});
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+
+  async function connect(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setMessage(null);
+    try {
+      const res = await fetch(`/api/seo/integrations/${view.id}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ values }),
+      });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) setMessage((body && body.error) || "Connect failed");
+      else {
+        setMessage("Connected.");
+        setValues({});
+        router.refresh();
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function disconnect() {
+    setBusy(true);
+    setMessage(null);
+    try {
+      const res = await fetch(`/api/seo/integrations/${view.id}`, { method: "DELETE" });
+      if (res.ok) router.refresh();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="panel">
+      <div className="panel-head">
+        <h3 className="panel-title">{view.name}</h3>
+        <span className={`badge status-${view.status === "connected" ? "active" : view.status}`}>
+          {view.status.replace(/_/g, " ")}
+        </span>
+      </div>
+      <p className="muted" style={{ marginTop: 0, fontSize: 13 }}>{view.description}</p>
+
+      {view.status === "connected" ? (
+        <div className="toolbar">
+          <span className="muted" style={{ fontSize: 12 }}>
+            Connected{view.connectedAt ? ` ${view.connectedAt.slice(0, 10)}` : ""}
+            {view.syncable ? " · syncable" : ""}
+          </span>
+          <button type="button" onClick={disconnect} disabled={busy}
+            style={{ background: "transparent", color: "var(--danger)", border: "1px solid var(--border)" }}>
+            Disconnect
+          </button>
+        </div>
+      ) : !view.connectable ? (
+        <p className="muted" style={{ fontSize: 12 }}>
+          Requires OAuth — connect form coming. (Google sign-in flow.)
+        </p>
+      ) : (
+        <form onSubmit={connect}>
+          {view.fields.map((f) => (
+            <div key={f.key} style={{ marginBottom: 8 }}>
+              <label htmlFor={`${view.id}-${f.key}`}>{f.label}{f.required ? " *" : ""}</label>
+              <input
+                id={`${view.id}-${f.key}`}
+                type={f.secret ? "password" : "text"}
+                autoComplete="off"
+                placeholder={f.placeholder}
+                value={values[f.key] ?? ""}
+                onChange={(e) => setValues((v) => ({ ...v, [f.key]: e.target.value }))}
+              />
+            </div>
+          ))}
+          <div className="toolbar" style={{ marginTop: 4 }}>
+            <button type="submit" disabled={busy}>{busy ? "Connecting…" : "Connect"}</button>
+            {message ? <span className="muted" style={{ fontSize: 12 }}>{message}</span> : null}
+          </div>
+        </form>
+      )}
+      {view.status === "connected" && message ? <p className="muted" style={{ fontSize: 12 }}>{message}</p> : null}
+    </div>
+  );
+}

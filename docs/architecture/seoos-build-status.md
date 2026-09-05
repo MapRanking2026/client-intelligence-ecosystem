@@ -132,7 +132,9 @@ Files are repo-relative. "verified" = exercised by a build and/or the
 | Item | Status | Evidence |
 |---|---|---|
 | Reports/packages history/preview/export | in_progress | `app/reports` (Request Inbox is the live loop) |
-| Integrations & Data Health screen | verified | `app/integrations` wired to the gateway (real health when configured; honest data-gap otherwise) |
+| Integrations & Data Health screen | verified | `app/integrations` — SEOOS-native connect/disconnect per provider (gateway relay optional) |
+| SEOOS-native integrations (encrypted credential store) | verified | `lib/domain/integration.ts` (catalog), `lib/server/crypto.ts` (AES-256-GCM), `repositories/integration-repo.ts`, `integrations-service.ts`, `api/seo/integrations/*`, `components/integration-card.tsx` — plaintext never stored/returned |
+| ClickUp native adapter + source sync | verified | `lib/server/sync/clickup-adapter.ts` (token REST), `source-sync-service.ts`, `client-data-repo.ts`, `api/seo/projects/[id]/sync-sources`, "Sync all sources" on Clients; aggregates native ClickUp + gateway SEO-performance per project |
 | Knowledge / Team / Settings screens | implemented | `app/knowledge`, `app/team` (shells) |
 | Shadow-mode comparison | not_started | `SEOOS_SHADOW_MODE` flag wired in env |
 | Full test suite (unit/contract/integration/authz/e2e) | in_progress | `@cie/core` checks cover sort/idempotency/permissions/catalog |

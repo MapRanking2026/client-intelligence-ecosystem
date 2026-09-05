@@ -1,7 +1,8 @@
 import { resolveSeoAuthz, authzHas } from "@/src/lib/auth/context";
 import { AppShell } from "@/src/components/app-shell";
-import { BlockedExternal, EmptyState, Panel, StatusPill, UnauthorizedPage } from "@/src/components/states";
-import { getIntegrationHealth } from "@/src/lib/server/gateway/client";
+import { UnauthorizedPage } from "@/src/components/states";
+import { IntegrationCard } from "@/src/components/integration-card";
+import { listIntegrations } from "@/src/lib/server/integrations-service";
 
 export const dynamic = "force-dynamic";
 
@@ -14,69 +15,35 @@ export default async function IntegrationsPage() {
       <AppShell authz={authz} title="Integrations & Data Health" breadcrumbs={[{ label: "SEOOS" }, { label: "Integrations" }]}>
         <div className="state state--blocked">
           <span className="badge badge--warn">Permission required</span>
-          <p className="muted">You need integrations.manage to view integration health.</p>
+          <p className="muted">You need integrations.manage to view integrations.</p>
         </div>
       </AppShell>
     );
   }
 
-  const health = await getIntegrationHealth(authz.tenantId);
+  const integrations = await listIntegrations(authz.tenantId);
+  const connectedCount = integrations.filter((i) => i.status === "connected").length;
 
   return (
     <AppShell
       authz={authz}
       title="Integrations & Data Health"
-      subtitle="Shared MTOS connections, consumed through the signed integration gateway"
+      subtitle="SEOOS-native connections · credentials are encrypted at rest, never shown"
       breadcrumbs={[{ label: "SEOOS" }, { label: "Integrations" }]}
     >
       <p className="muted" style={{ marginTop: 0 }}>
-        SEOOS never stores provider credentials. Connection state is read from the
-        existing MTOS token store over a signed service-to-service request; no
-        tokens or raw URLs reach this app or the browser.
+        Connect each source directly with its API credentials. {connectedCount} of{" "}
+        {integrations.length} connected. Credentials are AES-encrypted at rest and
+        never returned to the browser. After connecting, use <strong>Sync all sources</strong>{" "}
+        on a client/project to pull data. SEO-performance (rankings/grids/check-ins)
+        can also be relayed from MTOS via the gateway when configured.
       </p>
 
-      {!health.configured ? (
-        <BlockedExternal
-          provider="Integration gateway"
-          requirement="MTOS_GATEWAY_URL + CIE_SERVICE_SECRET set for the SEOOS project (same secret on MTOS)"
-        />
-      ) : !health.ok ? (
-        <div className="state state--blocked">
-          <span className="badge badge--warn">Gateway error</span>
-          <p className="muted">The gateway responded with: {health.error ?? "unknown error"}.</p>
-        </div>
-      ) : health.providers.length === 0 ? (
-        <EmptyState title="No providers reported" message="The gateway returned no provider health for this tenant." />
-      ) : (
-        <Panel title={`Providers (${health.providers.length})`}>
-          <div className="table-scroll">
-            <table className="data">
-              <thead>
-                <tr>
-                  <th>Provider</th>
-                  <th>Category</th>
-                  <th>Ownership</th>
-                  <th>Status</th>
-                  <th>Last sync</th>
-                  <th>Token expires</th>
-                </tr>
-              </thead>
-              <tbody>
-                {health.providers.map((p) => (
-                  <tr key={p.id}>
-                    <td>{p.name}</td>
-                    <td className="muted">{p.category}</td>
-                    <td className="muted">{p.isShared ? "shared" : "per-user"}</td>
-                    <td><StatusPill status={p.status} /></td>
-                    <td className="muted">{p.lastSyncAt ? p.lastSyncAt.slice(0, 10) : "—"}</td>
-                    <td className="muted">{p.tokenExpiresAt ? p.tokenExpiresAt.slice(0, 10) : "—"}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </Panel>
-      )}
+      <div className="grid-cards" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))" }}>
+        {integrations.map((view) => (
+          <IntegrationCard key={view.id} view={view} />
+        ))}
+      </div>
     </AppShell>
   );
 }

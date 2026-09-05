@@ -80,6 +80,8 @@ export const SeoProjectV1 = z.object({
   startDate: zIsoTimestamp.optional(),
   renewalDate: zIsoTimestamp.optional(),
   notes: z.string().optional(),
+  /** Provider-specific external ids (e.g. { clickupListId, rankTrackerBusinessId }). */
+  externalIds: z.record(z.string(), z.string()).default({}),
   /** Setup readiness 0-100, derived from mapped sources during intake. */
   setupReadiness: z.number().int().min(0).max(100).default(0),
   nextDeadlineAt: zIsoTimestamp.optional(),

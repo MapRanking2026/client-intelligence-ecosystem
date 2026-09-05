@@ -73,16 +73,24 @@ async function callGateway(
       signal: controller.signal,
       cache: "no-store",
     });
-    const json = await res.json().catch(() => null);
-    const parsed = GatewayResponseV1.safeParse(json);
-    if (!res.ok || !parsed.success) {
+    const json: unknown = await res.json().catch(() => null);
+    if (!res.ok) {
+      // Surface the MTOS-side reason (e.g. bad_signature / stale / tenant_mismatch).
+      const detail =
+        json && typeof json === "object"
+          ? ((json as Record<string, unknown>).reason ?? (json as Record<string, unknown>).error)
+          : null;
       return {
         configured: true,
         ok: false,
         dataGaps: [],
         freshness: "unknown",
-        error: parsed.success ? parsed.data.error : `gateway_http_${res.status}`,
+        error: detail ? `gateway_http_${res.status}: ${String(detail)}` : `gateway_http_${res.status}`,
       };
+    }
+    const parsed = GatewayResponseV1.safeParse(json);
+    if (!parsed.success) {
+      return { configured: true, ok: false, dataGaps: [], freshness: "unknown", error: "invalid_gateway_payload" };
     }
     return {
       configured: true,

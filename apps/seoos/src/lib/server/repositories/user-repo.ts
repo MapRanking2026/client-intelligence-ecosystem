@@ -55,6 +55,12 @@ class FirestoreUserRepo implements UserRepo {
     const parsed = SeoUserV1.safeParse(snap.data());
     return parsed.success ? parsed.data : null;
   }
+  async anyExists(tenantId: string) {
+    const db = getFirebaseAdminDb();
+    if (!db) return false;
+    const snap = await tenantCollection(db, tenantId, COLLECTION).limit(1).get();
+    return !snap.empty;
+  }
   async save(user: SeoUserV1) {
     const db = getFirebaseAdminDb();
     if (!db) throw new Error("Firestore unavailable");

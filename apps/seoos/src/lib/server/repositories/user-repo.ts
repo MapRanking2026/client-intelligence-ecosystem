@@ -8,6 +8,7 @@ const COLLECTION = "seoUsers";
 export interface UserRepo {
   getByEmail(tenantId: string, email: string): Promise<SeoUserV1 | null>;
   getById(tenantId: string, userId: string): Promise<SeoUserV1 | null>;
+  anyExists(tenantId: string): Promise<boolean>;
   save(user: SeoUserV1): Promise<SeoUserV1>;
 }
 
@@ -21,6 +22,9 @@ class InMemoryUserRepo implements UserRepo {
   }
   async getById(tenantId: string, userId: string) {
     return seedStore.users.find((u) => u.tenantId === tenantId && u.userId === userId) ?? null;
+  }
+  async anyExists(tenantId: string) {
+    return seedStore.users.some((u) => u.tenantId === tenantId);
   }
   async save(user: SeoUserV1) {
     const idx = seedStore.users.findIndex((u) => u.tenantId === user.tenantId && u.userId === user.userId);

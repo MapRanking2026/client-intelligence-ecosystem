@@ -6,7 +6,7 @@ import { EmptyState, Panel, StatusPill, UnauthorizedPage } from "@/src/component
 import { CreateProjectForm } from "@/src/components/create-project-form";
 import { SyncClientsButton } from "@/src/components/sync-clients-button";
 import { SyncSourcesButton } from "@/src/components/sync-sources-button";
-import { listProjects } from "@/src/lib/server/projects-service";
+import { listProjectsForViewer } from "@/src/lib/server/projects-service";
 
 export const dynamic = "force-dynamic";
 
@@ -15,7 +15,8 @@ export default async function ClientsPage() {
   if (!authz) return <UnauthorizedPage />;
 
   const canManage = authzHas(authz, "seo.project.manage");
-  const projects = canManage ? await listProjects(authz.tenantId) : [];
+  const isAdmin = authz.clientVisibility === "all";
+  const projects = canManage ? await listProjectsForViewer(authz) : [];
 
   return (
     <AppShell
@@ -31,11 +32,26 @@ export default async function ClientsPage() {
         </div>
       ) : (
         <>
-          <SyncClientsButton />
-          <CreateProjectForm />
-          <Panel title={`Projects (${projects.length})`}>
+          {isAdmin ? (
+            <>
+              <SyncClientsButton />
+              <CreateProjectForm />
+            </>
+          ) : (
+            <p className="muted" style={{ fontSize: 13 }}>
+              Showing the clients assigned to you. An admin syncs the full roster from ClickUp.
+            </p>
+          )}
+          <Panel title={isAdmin ? `Projects (${projects.length})` : `Your clients (${projects.length})`}>
             {projects.length === 0 ? (
-              <EmptyState title="No projects yet" message="Create the first SEO project for a canonical client." />
+              <EmptyState
+                title={isAdmin ? "No projects yet" : "No clients assigned to you yet"}
+                message={
+                  isAdmin
+                    ? "Connect ClickUp under Integrations, then Sync all clients from ClickUp."
+                    : "Ask an admin to assign you (via the ClickUp SEO Specialist field) and re-sync."
+                }
+              />
             ) : (
               <div className="table-scroll">
                 <table className="data">
@@ -43,6 +59,7 @@ export default async function ClientsPage() {
                     <tr>
                       <th>Business</th>
                       <th>Client</th>
+                      {isAdmin ? <th>Specialist</th> : null}
                       <th>Stage</th>
                       <th>Health</th>
                       <th>Priority</th>
@@ -56,6 +73,9 @@ export default async function ClientsPage() {
                       <tr key={p.id}>
                         <td>{p.businessName}</td>
                         <td className="muted">{p.clientId}</td>
+                        {isAdmin ? (
+                          <td className="muted">{p.externalIds?.seoSpecialist ?? "—"}</td>
+                        ) : null}
                         <td><StatusPill status={p.stage} /></td>
                         <td><StatusPill status={p.health} /></td>
                         <td>{p.priority}</td>

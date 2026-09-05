@@ -1,3 +1,5 @@
+import type { AuthzContextV1 } from "@cie/contracts";
+
 import {
   CreateSeoProjectInput,
   SeoProjectV1,
@@ -6,7 +8,15 @@ import {
 } from "@/src/lib/domain/project";
 import { newId, nowIso } from "@/src/lib/ids";
 import { getProjectRepo } from "@/src/lib/server/repositories/project-repo";
-import { getMtosClients } from "@/src/lib/server/gateway/client";
+import { getUserRepo } from "@/src/lib/server/repositories/user-repo";
+import {
+  getIntegrationCredentials,
+  listIntegrations,
+} from "@/src/lib/server/integrations-service";
+import {
+  fetchClickUpClientRoster,
+  normalizeComparableValue,
+} from "@/src/lib/server/sync/clickup-clients";
 
 /**
  * Project lifecycle service. Prevents duplicate projects for a canonical client
@@ -60,48 +70,77 @@ export async function createProject(
 }
 
 export interface SyncClientsResult {
-  configured: boolean;
   ok: boolean;
   created: number;
+  updated: number;
+  /** Roster tasks that were skipped as inactive/closed. */
   skipped: number;
+  /** Active clients considered. */
   total: number;
   error?: string;
 }
 
 /**
- * Pull the existing MTOS clients through the gateway and create a matching SEO
- * project for any client that doesn't have one yet (dedup by canonical client
- * id). Never duplicates a project or reaches into MTOS storage directly.
+ * Pull the full client roster from ClickUp (each Health Tracker task = one
+ * client) and upsert a matching SEO project for every active client. Dedups by
+ * canonical client id (the ClickUp task id), so re-running refreshes existing
+ * projects instead of duplicating them, and records the client's SEO-specialist
+ * and account-manager field values on the project for per-user visibility.
+ *
+ * Admin-only at the API layer (any admin can pull ALL clients at once).
  */
-export async function syncClientsFromMtos(tenantId: string): Promise<SyncClientsResult> {
-  const roster = await getMtosClients(tenantId);
-  if (!roster.ok) {
-    return {
-      configured: roster.configured,
-      ok: false,
-      created: 0,
-      skipped: 0,
-      total: 0,
-      error: roster.error ?? "gateway_unavailable",
-    };
+export async function syncClientsFromClickUp(tenantId: string): Promise<SyncClientsResult> {
+  const empty = { ok: false as const, created: 0, updated: 0, skipped: 0, total: 0 };
+
+  const integrations = await listIntegrations(tenantId);
+  const clickup = integrations.find((i) => i.id === "clickup" && i.status === "connected");
+  if (!clickup) {
+    return { ...empty, error: "ClickUp is not connected. Connect it under Integrations first." };
   }
+  const creds = await getIntegrationCredentials(tenantId, "clickup");
+  if (!creds?.apiToken) {
+    return { ...empty, error: "ClickUp credentials are missing. Reconnect ClickUp under Integrations." };
+  }
+
+  const roster = await fetchClickUpClientRoster({
+    token: creds.apiToken,
+    listId: creds.listId || creds.healthTrackerListId,
+    teamId: creds.teamId,
+  });
+  if (!roster.ok) return { ...empty, error: roster.error ?? "clickup_roster_failed" };
 
   const repo = getProjectRepo();
   let created = 0;
-  let skipped = 0;
+  let updated = 0;
   for (const client of roster.clients) {
-    const existing = await repo.findByClient(tenantId, client.id);
+    const now = nowIso();
+    const externalIds: Record<string, string> = { clickupTaskId: client.taskId };
+    if (client.seoSpecialist) externalIds.seoSpecialist = client.seoSpecialist;
+    if (client.accountManager) externalIds.accountManager = client.accountManager;
+
+    const existing = await repo.findByClient(tenantId, client.clientId);
     if (existing) {
-      skipped += 1;
+      const mergedLocations = client.location
+        ? Array.from(new Set([...(existing.targetLocations ?? []), client.location]))
+        : existing.targetLocations;
+      await repo.save({
+        ...existing,
+        businessName: client.name || existing.businessName,
+        website: client.website ?? existing.website,
+        targetLocations: mergedLocations,
+        externalIds: { ...existing.externalIds, ...externalIds },
+        updatedAt: now,
+      });
+      updated += 1;
       continue;
     }
-    const now = nowIso();
+
     await repo.save(
       SeoProjectV1.parse({
         schemaVersion: 1,
         id: newId("proj"),
         tenantId,
-        clientId: client.id,
+        clientId: client.clientId,
         businessName: client.name,
         website: client.website,
         stage: "intake",
@@ -110,6 +149,7 @@ export async function syncClientsFromMtos(tenantId: string): Promise<SyncClients
         priority: "normal",
         targetLocations: client.location ? [client.location] : [],
         goals: [],
+        externalIds,
         setupReadiness: 10,
         createdAt: now,
         updatedAt: now,
@@ -117,7 +157,67 @@ export async function syncClientsFromMtos(tenantId: string): Promise<SyncClients
     );
     created += 1;
   }
-  return { configured: true, ok: true, created, skipped, total: roster.clients.length };
+
+  return {
+    ok: true,
+    created,
+    updated,
+    skipped: Math.max(0, roster.fetched - roster.clients.length),
+    total: roster.clients.length,
+  };
+}
+
+/** True when the project is explicitly assigned to this user id. */
+function projectAssignedToUser(project: SeoProjectV1, userId: string): boolean {
+  const a = project.assignments;
+  if (
+    a.seoSpecialistUserId === userId ||
+    a.seoLeadUserId === userId ||
+    a.qaReviewerUserId === userId ||
+    a.accountManagerUserId === userId
+  ) {
+    return true;
+  }
+  return a.supportingUserIds.includes(userId);
+}
+
+/** The viewer's normalized identity tokens (email, local-part, display name). */
+async function viewerMatchValues(authz: AuthzContextV1): Promise<string[]> {
+  const user = await getUserRepo().getById(authz.tenantId, authz.userId);
+  const tokens: string[] = [];
+  if (user?.email) {
+    tokens.push(user.email);
+    tokens.push(user.email.split("@")[0] ?? "");
+  }
+  if (user?.displayName) tokens.push(user.displayName);
+  return Array.from(new Set(tokens.map(normalizeComparableValue).filter(Boolean)));
+}
+
+/**
+ * List the projects a given viewer may see. Admins (clientVisibility "all") see
+ * every project; everyone else sees only projects assigned to them — by explicit
+ * assignment userId, by an explicit client-visibility allowlist, or by matching
+ * their identity to the ClickUp "SEO Specialist" field captured on the project.
+ * The field match means a specialist who signs up after a sync still sees their
+ * accounts without a re-sync.
+ */
+export async function listProjectsForViewer(authz: AuthzContextV1): Promise<SeoProjectV1[]> {
+  const all = await getProjectRepo().list(authz.tenantId);
+  if (authz.clientVisibility === "all") return all;
+
+  const allowlist = Array.isArray(authz.clientVisibility)
+    ? new Set(authz.clientVisibility)
+    : new Set<string>();
+  const matches = await viewerMatchValues(authz);
+
+  return all.filter((project) => {
+    if (projectAssignedToUser(project, authz.userId)) return true;
+    if (allowlist.has(project.clientId)) return true;
+    const specialist = project.externalIds?.seoSpecialist
+      ? normalizeComparableValue(project.externalIds.seoSpecialist)
+      : "";
+    return specialist ? matches.includes(specialist) : false;
+  });
 }
 
 /** Merge provider external-id mappings (e.g. clickupListId) into a project. */

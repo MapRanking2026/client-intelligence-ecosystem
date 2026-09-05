@@ -3,6 +3,10 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
+/**
+ * Admin action: pull the full client roster from ClickUp into SEOOS. Renders
+ * only for admins (the parent gates on tenant-wide visibility).
+ */
 export function SyncClientsButton() {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
@@ -19,12 +23,13 @@ export function SyncClientsButton() {
         return;
       }
       const d = body.data;
-      if (!d.configured) {
-        setMessage("Integration gateway not configured — set MTOS_GATEWAY_URL + CIE_SERVICE_SECRET.");
-      } else if (!d.ok) {
-        setMessage(`Sync error: ${d.error ?? "unknown"}`);
+      if (!d.ok) {
+        setMessage(d.error ?? "Sync error");
       } else {
-        setMessage(`Synced ${d.total} client(s): ${d.created} new project(s), ${d.skipped} already linked.`);
+        setMessage(
+          `Synced ${d.total} active client(s): ${d.created} new, ${d.updated} refreshed` +
+            (d.skipped ? `, ${d.skipped} inactive skipped.` : "."),
+        );
         router.refresh();
       }
     } catch {
@@ -37,7 +42,7 @@ export function SyncClientsButton() {
   return (
     <div className="toolbar">
       <button type="button" onClick={sync} disabled={busy}>
-        {busy ? "Syncing…" : "Sync clients from MTOS"}
+        {busy ? "Syncing…" : "Sync all clients from ClickUp"}
       </button>
       {message ? <span className="muted" style={{ fontSize: 12 }}>{message}</span> : null}
     </div>

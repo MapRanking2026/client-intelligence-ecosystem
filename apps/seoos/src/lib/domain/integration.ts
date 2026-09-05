@@ -41,12 +41,13 @@ export const SEO_INTEGRATION_CATALOG: IntegrationProviderDef[] = [
     category: "operations",
     authMode: "api_key",
     syncable: true,
-    description: "Client Book, tasks, and delivery context. Personal API token.",
+    description: "Client roster (each Health Tracker task = one client), tasks, and delivery context. Personal API token.",
     fields: [
       { key: "apiToken", label: "API Token", secret: true, required: true, placeholder: "pk_..." },
       { key: "teamId", label: "Team ID (optional)", secret: false, required: false, placeholder: "workspace/team id" },
+      { key: "listId", label: "Client roster list ID (Health Tracker)", secret: false, required: false, placeholder: "e.g. 901234567" },
     ],
-    dataKinds: ["tasks", "docs"],
+    dataKinds: ["clients", "tasks", "docs"],
   },
   {
     id: "rank-tracker",

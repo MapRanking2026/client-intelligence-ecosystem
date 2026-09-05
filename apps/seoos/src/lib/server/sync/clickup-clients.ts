@@ -1,0 +1,271 @@
+/**
+ * ClickUp client-roster reader for SEOOS.
+ *
+ * Mirrors MTOS's model: a ClickUp "Health Tracker" list where each task is one
+ * client. We read the same custom fields MTOS uses (Account Manager, Client
+ * Status, Location) plus an "SEO Specialist" field so SEOOS can show each
+ * specialist only their assigned accounts. Uses a personal API token
+ * (Authorization header, no Bearer) exactly like the SEOOS ClickUp adapter.
+ *
+ * No token or raw payload ever leaves the server; only a normalized roster is
+ * returned.
+ */
+const BASE = "https://api.clickup.com/api/v2";
+
+type ClickUpTask = {
+  id: string;
+  name?: string;
+  description?: string;
+  due_date?: string | null;
+  date_updated?: string | null;
+  status?: { status?: string; type?: string };
+  custom_fields?: Array<{
+    name?: string;
+    value?: unknown;
+    type_config?: { options?: Array<{ id?: string; name?: string; orderindex?: number }> };
+  }>;
+};
+
+const CLOSED_TOKENS = ["closed", "complete", "completed", "done", "cancelled", "archived"];
+
+export interface RosterClient {
+  /** Canonical client id = the ClickUp task id (stable, never duplicated). */
+  clientId: string;
+  name: string;
+  website?: string;
+  location?: string;
+  /** Raw, normalized value of the SEO Specialist field (for read-time matching). */
+  seoSpecialist?: string;
+  accountManager?: string;
+  taskId: string;
+  updatedAt?: string;
+}
+
+export interface RosterResult {
+  ok: boolean;
+  error?: string;
+  fetched: number;
+  clients: RosterClient[];
+}
+
+function normalizeFieldName(value: string) {
+  return value
+    .normalize("NFKD")
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ");
+}
+
+/** Lowercase + strip separators so "Jane Doe", "jane.doe", "jane@x.com" compare. */
+export function normalizeComparableValue(value?: string | null): string {
+  if (!value) return "";
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[@._-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function fieldByName(task: ClickUpTask, fieldName: string) {
+  const target = normalizeFieldName(fieldName);
+  return task.custom_fields?.find((f) => normalizeFieldName(f.name || "") === target);
+}
+
+function stringifyField(task: ClickUpTask, fieldName: string): string {
+  const field = fieldByName(task, fieldName);
+  if (!field) return "";
+  const { value } = field;
+  if (typeof value === "string") {
+    const opt = field.type_config?.options?.find(
+      (o) => o.id === value || String(o.orderindex ?? "") === value,
+    );
+    return opt?.name || value;
+  }
+  if (typeof value === "number") {
+    const opt = field.type_config?.options?.find(
+      (o) => Number(o.orderindex) === value || o.id === String(value),
+    );
+    return opt?.name || String(value);
+  }
+  if (Array.isArray(value)) return value.map((v) => String(v)).join(", ");
+  if (value && typeof value === "object") return "";
+  return "";
+}
+
+function firstField(task: ClickUpTask, names: string[], fallback = ""): string {
+  for (const n of names) {
+    const v = stringifyField(task, n);
+    if (v) return v;
+  }
+  return fallback;
+}
+
+function specialistFieldNames() {
+  const configured = process.env.CLICKUP_SEO_SPECIALIST_FIELD || "SEO Specialist";
+  return Array.from(
+    new Set([configured, "SEO Specialist", "SEO Spec", "Specialist", "SEO Lead", "SEO"]),
+  );
+}
+
+function managerFieldNames() {
+  const configured = process.env.CLICKUP_ACCOUNT_MANAGER_FIELD || "Account Manager";
+  return Array.from(
+    new Set([configured, "Account Manager", "Manager", "AM", "⭐️ Account Manager", "⭐ Account Manager"]),
+  );
+}
+
+function statusFieldNames() {
+  const configured = process.env.CLICKUP_CLIENT_STATUS_FIELD || "Client Status";
+  return Array.from(
+    new Set([configured, "Client Status", "Lifecycle Stage", "Stage", "Status"]),
+  );
+}
+
+function isActiveTask(task: ClickUpTask): boolean {
+  const type = (task.status?.type || "").trim().toLowerCase();
+  if (type === "closed") return false;
+  const status = (task.status?.status || "").trim().toLowerCase();
+  if (CLOSED_TOKENS.some((t) => status.includes(t))) return false;
+
+  const clientStatus = normalizeComparableValue(firstField(task, statusFieldNames()));
+  if (!clientStatus) return true;
+  if (
+    clientStatus.includes("inactive") ||
+    clientStatus.includes("cancel") ||
+    clientStatus.includes("churn") ||
+    clientStatus.includes("former") ||
+    clientStatus.includes("lost")
+  ) {
+    return false;
+  }
+  return true;
+}
+
+async function clickupGet(token: string, path: string): Promise<Record<string, unknown>> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 12000);
+  try {
+    const res = await fetch(`${BASE}${path}`, {
+      headers: { Authorization: token, "content-type": "application/json" },
+      signal: controller.signal,
+      cache: "no-store",
+    });
+    const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+    if (!res.ok) {
+      const msg =
+        (typeof body.err === "string" && body.err) ||
+        (typeof body.error === "string" && body.error) ||
+        `clickup_http_${res.status}`;
+      throw new Error(msg);
+    }
+    return body;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+/** Explicit roster list id, else the env-configured Health Tracker list. */
+function resolveListId(listId?: string): string | undefined {
+  return listId?.trim() || process.env.CLICKUP_HEALTH_TRACKER_LIST_ID || undefined;
+}
+
+async function fetchTasksFromList(token: string, listId: string): Promise<ClickUpTask[]> {
+  const tasks: ClickUpTask[] = [];
+  for (let page = 0; page < 10; page += 1) {
+    const body = await clickupGet(
+      token,
+      `/list/${listId}/task?include_closed=true&subtasks=true&page=${page}`,
+    );
+    const pageTasks = Array.isArray(body.tasks) ? (body.tasks as ClickUpTask[]) : [];
+    tasks.push(...pageTasks);
+    if (pageTasks.length < 100) break;
+  }
+  return tasks;
+}
+
+async function fetchTasksFromTeam(token: string, teamId: string): Promise<ClickUpTask[]> {
+  const tasks: ClickUpTask[] = [];
+  for (let page = 0; page < 10; page += 1) {
+    const body = await clickupGet(
+      token,
+      `/team/${teamId}/task?include_closed=true&subtasks=true&order_by=updated&page=${page}`,
+    );
+    const pageTasks = Array.isArray(body.tasks) ? (body.tasks as ClickUpTask[]) : [];
+    tasks.push(...pageTasks);
+    if (pageTasks.length < 100) break;
+  }
+  return tasks;
+}
+
+/**
+ * Fetch and normalize the active client roster from ClickUp. Prefers an explicit
+ * Health Tracker list id; otherwise scans the workspace (team). Returns every
+ * active client with its SEO-specialist and account-manager field values.
+ */
+export async function fetchClickUpClientRoster(input: {
+  token: string;
+  listId?: string;
+  teamId?: string;
+}): Promise<RosterResult> {
+  const { token } = input;
+  if (!token) return { ok: false, error: "Missing ClickUp API token", fetched: 0, clients: [] };
+
+  try {
+    const listId = resolveListId(input.listId);
+
+    let raw: ClickUpTask[];
+    if (listId) {
+      raw = await fetchTasksFromList(token, listId);
+    } else {
+      // No roster list configured: scan the selected/first workspace.
+      let teamId = input.teamId;
+      if (!teamId) {
+        const teamsBody = await clickupGet(token, "/team");
+        const teams = Array.isArray(teamsBody.teams)
+          ? (teamsBody.teams as Array<{ id?: string }>)
+          : [];
+        teamId = teams[0]?.id ? String(teams[0].id) : undefined;
+      }
+      if (!teamId) {
+        return {
+          ok: false,
+          error:
+            "No ClickUp roster list configured and no workspace found. Set the Client roster list ID on the ClickUp connection (or CLICKUP_HEALTH_TRACKER_LIST_ID).",
+          fetched: 0,
+          clients: [],
+        };
+      }
+      raw = await fetchTasksFromTeam(token, teamId);
+    }
+
+    const active = raw.filter(isActiveTask);
+    const clients: RosterClient[] = active.map((task) => {
+      const name = task.name?.trim() || "Unnamed Client";
+      const website = firstField(task, ["Website", "URL", "Domain", "Site"]) || undefined;
+      const location = firstField(task, ["Location", "Market", "City"]) || undefined;
+      const seoSpecialist = normalizeComparableValue(firstField(task, specialistFieldNames())) || undefined;
+      const accountManager = firstField(task, managerFieldNames()) || undefined;
+      return {
+        clientId: task.id,
+        name,
+        website,
+        location,
+        seoSpecialist,
+        accountManager,
+        taskId: task.id,
+        updatedAt: task.date_updated || undefined,
+      };
+    });
+
+    return { ok: true, fetched: raw.length, clients };
+  } catch (e) {
+    return {
+      ok: false,
+      error: e instanceof Error ? e.message : "clickup_roster_failed",
+      fetched: 0,
+      clients: [],
+    };
+  }
+}

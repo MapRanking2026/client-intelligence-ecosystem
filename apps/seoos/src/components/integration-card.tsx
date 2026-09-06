@@ -68,7 +68,15 @@ export function IntegrationCard({ view }: { view: View }) {
       </div>
       <p className="muted" style={{ marginTop: 0, fontSize: 13 }}>{view.description}</p>
 
-      {view.status === "connected" ? (
+      {view.poweredBy ? (
+        <p className="muted" style={{ fontSize: 12 }}>
+          {view.status === "connected" ? (
+            <>Connected via the <strong>{view.poweredBy}</strong> connection.</>
+          ) : (
+            <>Powered by the <strong>{view.poweredBy}</strong> connection — connect that provider.</>
+          )}
+        </p>
+      ) : view.status === "connected" ? (
         <div className="toolbar">
           <span className="muted" style={{ fontSize: 12 }}>
             Connected{view.connectedAt ? ` ${view.connectedAt.slice(0, 10)}` : ""}
@@ -79,10 +87,6 @@ export function IntegrationCard({ view }: { view: View }) {
             Disconnect
           </button>
         </div>
-      ) : view.poweredBy ? (
-        <p className="muted" style={{ fontSize: 12 }}>
-          Powered by the <strong>{view.poweredBy}</strong> connection — connect that provider.
-        </p>
       ) : !view.connectable ? (
         <p className="muted" style={{ fontSize: 12 }}>
           Requires OAuth — connect form coming. (Google sign-in flow.)

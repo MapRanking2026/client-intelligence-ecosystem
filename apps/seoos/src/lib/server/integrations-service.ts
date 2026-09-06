@@ -30,6 +30,17 @@ export async function listIntegrations(tenantId: string): Promise<IntegrationVie
   const byId = new Map(connections.map((c) => [c.providerId, c]));
   return SEO_INTEGRATION_CATALOG.map((def) => {
     const conn = byId.get(def.id);
+    let status = conn?.status ?? "not_connected";
+    let connectedAt = conn?.connectedAt;
+    // A "powered by" provider (e.g. Map Check-Ins) has no connection of its own —
+    // it inherits the status of the provider that powers it (e.g. Rank Tracker).
+    if (def.poweredBy && status !== "connected") {
+      const powering = byId.get(def.poweredBy);
+      if (powering?.status === "connected") {
+        status = "connected";
+        connectedAt = powering.connectedAt;
+      }
+    }
     return {
       id: def.id,
       name: def.name,
@@ -40,8 +51,8 @@ export async function listIntegrations(tenantId: string): Promise<IntegrationVie
       poweredBy: def.poweredBy,
       description: def.description,
       fields: def.fields,
-      status: conn?.status ?? "not_connected",
-      connectedAt: conn?.connectedAt,
+      status,
+      connectedAt,
       metadata: conn?.metadata ?? {},
       errorMessage: conn?.errorMessage,
     };

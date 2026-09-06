@@ -1,15 +1,43 @@
-import { resolveSeoAuthz } from "@/src/lib/auth/context";
+import Link from "next/link";
+
+import { resolveSeoAuthz, authzHas } from "@/src/lib/auth/context";
 import { AppShell } from "@/src/components/app-shell";
-import { BlockedExternal, EmptyState, Panel, PhaseNote, StatCard, UnauthorizedPage } from "@/src/components/states";
-import { getMapCheckinActivity } from "@/src/lib/server/gateway/client";
+import { EmptyState, Panel, StatCard, UnauthorizedPage } from "@/src/components/states";
+import { ClientSelect } from "@/src/components/client-select";
+import { listProjectsForViewer } from "@/src/lib/server/projects-service";
+import { getPerformanceSnapshotRepo } from "@/src/lib/server/repositories/performance-snapshot-repo";
+import { listIntegrations } from "@/src/lib/server/integrations-service";
 
 export const dynamic = "force-dynamic";
 
-export default async function GbpPage() {
+// SEO Dashboard metric labels that belong to GBP performance / reviews.
+const GBP_METRICS = ["Aug GBP views", "Aug check-ins", "Jul check-ins", "Satisfaction", "Health score", "Main category"];
+
+export default async function GbpPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ projectId?: string }>;
+}) {
   const authz = await resolveSeoAuthz();
   if (!authz) return <UnauthorizedPage />;
+  if (!authzHas(authz, "seo.package.read")) {
+    return (
+      <AppShell authz={authz} title="GBP & Local Presence" breadcrumbs={[{ label: "SEOOS" }, { label: "GBP & Local Presence" }]}>
+        <div className="state state--blocked"><span className="badge badge--warn">Permission required</span></div>
+      </AppShell>
+    );
+  }
 
-  const checkins = await getMapCheckinActivity(authz.tenantId);
+  const projects = await listProjectsForViewer(authz);
+  const { projectId } = await searchParams;
+  const selected = projects.find((p) => p.id === projectId) ?? projects[0];
+  const snapshot = selected ? await getPerformanceSnapshotRepo().get(authz.tenantId, selected.id) : null;
+
+  const integrations = await listIntegrations(authz.tenantId);
+  const gbpConnected = integrations.some((i) => i.id === "google-business-profile" && i.status === "connected");
+
+  const metrics = selected?.dashboardMetrics ?? {};
+  const gbpEntries = GBP_METRICS.filter((k) => metrics[k]).map((k) => [k, metrics[k]] as const);
 
   return (
     <AppShell
@@ -18,68 +46,57 @@ export default async function GbpPage() {
       subtitle="GBP performance, reviews, and Map Check-In activity"
       breadcrumbs={[{ label: "SEOOS" }, { label: "GBP & Local Presence" }]}
     >
-      <PhaseNote
-        phase="Phase 5"
-        purpose="GBP performance and profile-change tracking build on the shared connections; Map Check-Ins is wired live through the gateway below."
-      />
-
-      <Panel title="Map Check-In activity">
-        {!checkins.configured ? (
-          <BlockedExternal
-            provider="Map Check-Ins (via gateway)"
-            requirement="MTOS_GATEWAY_URL + CIE_SERVICE_SECRET set (reuses the shared tenant-wide connection)"
-          />
-        ) : !checkins.ok || !checkins.activity ? (
-          <div className="state state--blocked">
-            <span className="badge badge--warn">No Map Check-In data</span>
-            <p className="muted">
-              {checkins.dataGaps[0]?.reason ?? checkins.error ?? "No connection for this tenant."}
-            </p>
-          </div>
-        ) : checkins.activity.businessCount === 0 ? (
-          <EmptyState title="No businesses" message="The Map Check-Ins connection returned no businesses." />
-        ) : (
-          <>
-            <div className="grid-cards" style={{ marginBottom: 14 }}>
-              <StatCard label="Businesses" value={checkins.activity.businessCount} />
-              <StatCard label="Total posts" value={checkins.activity.totalPosts} />
-            </div>
-            <div className="table-scroll">
-              <table className="data">
-                <thead>
-                  <tr>
-                    <th>Business</th>
-                    <th>Posts</th>
-                    <th>Scheduled</th>
-                    <th>Platforms</th>
-                    <th>Last post</th>
-                    <th>Next scheduled</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {checkins.activity.businesses.map((b) => (
-                    <tr key={b.businessName}>
-                      <td>{b.businessName}</td>
-                      <td>{b.totalPosts}</td>
-                      <td>{b.scheduledPosts}</td>
-                      <td className="muted">{b.connectedPlatforms.join(", ") || "—"}</td>
-                      <td className="muted">{b.lastPostAt ? b.lastPostAt.slice(0, 10) : "—"}</td>
-                      <td className="muted">{b.nextScheduledPostAt ? b.nextScheduledPostAt.slice(0, 10) : "—"}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </>
-        )}
-      </Panel>
-
-      <Panel title="GBP performance & reviews">
-        <BlockedExternal
-          provider="google-business-profile (via gateway)"
-          requirement="the GBP normalized adapter exposed through dispatchGatewayResource + gateway config"
+      {projects.length === 0 ? (
+        <EmptyState
+          title="No clients yet"
+          message="Sync clients from ClickUp, then pick one to see its local presence."
+          action={<Link href="/clients">Clients →</Link>}
         />
-      </Panel>
+      ) : (
+        <>
+          <ClientSelect
+            projects={projects.map((p) => ({ id: p.id, businessName: p.businessName }))}
+            selectedId={selected?.id}
+            basePath="/gbp"
+          />
+
+          <Panel title="Map Check-In activity">
+            {snapshot ? (
+              <div className="grid-cards">
+                <StatCard label="Businesses" value={snapshot.checkinBusinessCount} hint="Map Check-Ins" />
+                <StatCard label="Total posts" value={snapshot.checkinTotalPosts} hint="from Rank Tracker sync" />
+              </div>
+            ) : (
+              <EmptyState
+                title="No check-in data yet"
+                message="Run a full scan on this client (Rank Tracker connection) to pull Map Check-In activity."
+                action={selected ? <Link href={`/clients/${selected.id}`}>Open client →</Link> : undefined}
+              />
+            )}
+          </Panel>
+
+          <Panel title="GBP performance & reviews">
+            <p className="muted" style={{ marginTop: 0, fontSize: 12 }}>
+              {gbpConnected
+                ? "Google Business Profile is connected. Live GBP insights/reviews pull is being wired; the figures below are from the ClickUp SEO Dashboard."
+                : "Connect Google Business Profile under Integrations for live insights & reviews. The figures below are from the ClickUp SEO Dashboard."}
+            </p>
+            {gbpEntries.length ? (
+              <div className="grid-cards">
+                {gbpEntries.map(([label, value]) => (
+                  <StatCard key={label} label={label} value={value} />
+                ))}
+              </div>
+            ) : (
+              <EmptyState
+                title="No GBP figures yet"
+                message="These come from the SEO Dashboard fields (GBP views, check-ins, satisfaction) — run a client sync."
+                action={<Link href="/integrations">Integrations →</Link>}
+              />
+            )}
+          </Panel>
+        </>
+      )}
     </AppShell>
   );
 }

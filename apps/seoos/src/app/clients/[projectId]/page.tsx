@@ -57,6 +57,12 @@ export default async function ProjectSetupPage({
       subtitle={`Setup ${project.setupReadiness}% · ${project.stage}`}
       breadcrumbs={[{ label: "SEOOS" }, { label: "Clients", href: "/clients" }, { label: project.businessName }]}
     >
+      <div className="toolbar" style={{ marginBottom: 12 }}>
+        <a className="badge status-active" href="#projects" style={{ padding: "8px 14px" }}>
+          Projects ({project.services?.length ?? 0})
+        </a>
+      </div>
+
       <Panel title="Client">
         <div className="grid-cards" style={{ marginBottom: 12 }}>
           <StatCard label="Setup readiness" value={`${project.setupReadiness}%`} />
@@ -84,12 +90,7 @@ export default async function ProjectSetupPage({
 
       {canManage ? (
         <Panel title="Setup wizard">
-          <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
-            <FullScanButton projectId={project.id} />
-            <a className="badge status-active" href="#projects" style={{ padding: "8px 14px" }}>
-              Projects ({project.services?.length ?? 0})
-            </a>
-          </div>
+          <FullScanButton projectId={project.id} />
           <ol style={{ listStyle: "none", padding: 0, marginTop: 10 }}>
             <Check done={Boolean(project.niche || project.valueProposition)}>
               Intake context (niche / value proposition) — <Link href="/clients">edit on create</Link>

@@ -5,6 +5,7 @@ import { resolveSeoAuthz, authzHas } from "@/src/lib/auth/context";
 import { AppShell } from "@/src/components/app-shell";
 import { EmptyState, PhaseNote, UnauthorizedPage } from "@/src/components/states";
 import { RecommendationsManager } from "@/src/components/recommendations-manager";
+import { GenerateAiRecsButton } from "@/src/components/generate-ai-recs-button";
 import { listProjects } from "@/src/lib/server/projects-service";
 import { listRecommendations } from "@/src/lib/server/recommendations-service";
 
@@ -52,6 +53,9 @@ export default async function RecommendationsPage({
               </Link>
             ))}
           </div>
+          {selected && authzHas(authz, "seo.project.manage") ? (
+            <GenerateAiRecsButton projectId={selected.id} />
+          ) : null}
           <RecommendationsManager
             recommendations={recs}
             canManage={authzHas(authz, "seo.project.manage")}

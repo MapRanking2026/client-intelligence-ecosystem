@@ -74,6 +74,12 @@ export const RecommendationV1 = z.object({
   rationale: z.string().min(1),
   /** Why it matters to the client, in plain language (required for client-facing types). */
   clientSafeExplanation: z.string().optional(),
+  /**
+   * Plain-language reason for a CHANGE this makes to what the client had
+   * (e.g. switching a primary GBP category/service). Surfaced in reports so
+   * category/service changes never confuse the client (Phase 1/2 fix).
+   */
+  changeExplanation: z.string().optional(),
   evidence: z.array(EvidenceRefV1).default([]),
   expectedImpact: z.enum(["low", "medium", "high"]).default("medium"),
   confidence: Confidence.default("medium"),

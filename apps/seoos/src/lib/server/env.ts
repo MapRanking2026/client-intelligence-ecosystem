@@ -39,6 +39,12 @@ export function getServerEnv() {
     // URL of the MTOS integration gateway SEOOS calls for shared connections.
     integrationGatewayUrl: process.env.MTOS_GATEWAY_URL || "",
     serviceToServiceSecret: process.env.CIE_SERVICE_SECRET || "",
+    // LLM providers for AI recommendation generation. Same var names as MTOS.
+    // AI features are only enabled when a key is present (never fabricated).
+    anthropicApiKey: process.env.ANTHROPIC_API_KEY || "",
+    anthropicModel: process.env.ANTHROPIC_MODEL || "claude-3-5-sonnet-latest",
+    openaiApiKey: process.env.OPENAI_API_KEY || "",
+    openaiModel: process.env.OPENAI_MODEL || "gpt-4o",
     // SEOOS feature flags (server-evaluated; env is the initial source).
     seoosEnabled: boolEnv("SEOOS_ENABLED", true),
     seoosRequestsEnabled: boolEnv("SEOOS_REQUESTS_ENABLED", true),
@@ -57,4 +63,10 @@ export function hasFirebaseAdminConfig() {
   return Boolean(
     env.firebaseProjectId && env.firebaseClientEmail && env.firebasePrivateKey,
   );
+}
+
+/** True when at least one LLM provider key is configured. */
+export function hasAiConfig() {
+  const env = getServerEnv();
+  return Boolean(env.anthropicApiKey || env.openaiApiKey);
 }

@@ -3,7 +3,10 @@ import Link from "next/link";
 import { resolveSeoAuthz, authzHas } from "@/src/lib/auth/context";
 import { AppShell } from "@/src/components/app-shell";
 import { EmptyState, Panel, UnauthorizedPage } from "@/src/components/states";
+import { NicheStudyManager, type StudyRow } from "@/src/components/niche-study-manager";
 import { listProjectsForViewer } from "@/src/lib/server/projects-service";
+import { listNicheStudies } from "@/src/lib/server/niche-studies-service";
+import { listIntegrations } from "@/src/lib/server/integrations-service";
 
 export const dynamic = "force-dynamic";
 
@@ -18,7 +21,13 @@ export default async function KnowledgePage() {
     );
   }
 
+  const isAdmin = authz.clientVisibility === "all";
   const projects = await listProjectsForViewer(authz);
+  const studies = await listNicheStudies(authz.tenantId);
+  const driveConnected = isAdmin
+    ? (await listIntegrations(authz.tenantId)).some((i) => i.id === "google-drive" && i.status === "connected")
+    : false;
+  const studyRows: StudyRow[] = studies.map((s) => ({ id: s.id, title: s.title, niche: s.niche, source: s.source }));
   const byNiche = new Map<string, number>();
   for (const p of projects) {
     const n = (p.niche ?? "").trim();
@@ -58,11 +67,16 @@ export default async function KnowledgePage() {
         )}
       </Panel>
 
-      <Panel title="Niche case studies (Drive)">
-        <p className="muted" style={{ fontSize: 13 }}>
-          Importing your Drive niche studies into the AI context is the next step here — it will let the
-          AI cite proven playbooks per niche. Not connected yet.
+      <Panel title={`Niche case studies (${studies.length})`}>
+        <p className="muted" style={{ marginTop: 0, fontSize: 13 }}>
+          These playbooks are fed to the AI when it generates recommendations for a matching-niche client.
+          Add them by hand or import Google Docs from a Drive folder.
         </p>
+        {isAdmin ? (
+          <NicheStudyManager studies={studyRows} driveConnected={driveConnected} />
+        ) : (
+          <p className="muted" style={{ fontSize: 13 }}>{studies.length} study/studies available. Admins manage them.</p>
+        )}
       </Panel>
     </AppShell>
   );

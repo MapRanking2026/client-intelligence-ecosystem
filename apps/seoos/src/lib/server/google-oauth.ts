@@ -6,6 +6,7 @@ import { getServerEnv } from "@/src/lib/server/env";
 export const GOOGLE_SCOPES: Record<string, string> = {
   "google-business-profile": "https://www.googleapis.com/auth/business.manage",
   "google-search-console": "https://www.googleapis.com/auth/webmasters.readonly",
+  "google-drive": "https://www.googleapis.com/auth/drive.readonly",
 };
 
 export function isGoogleOAuthProvider(providerId: string): boolean {

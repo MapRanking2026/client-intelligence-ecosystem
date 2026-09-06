@@ -161,6 +161,16 @@ export const SEO_INTEGRATION_CATALOG: IntegrationProviderDef[] = [
     fields: [],
     dataKinds: ["search-analytics"],
   },
+  {
+    id: "google-drive",
+    name: "Google Drive (Niche Studies)",
+    category: "knowledge",
+    authMode: "oauth",
+    syncable: false,
+    description: "Read niche case studies from a Drive folder to ground the AI (read-only).",
+    fields: [],
+    dataKinds: ["niche-studies"],
+  },
 ];
 
 export function getProviderDef(id: string): IntegrationProviderDef | undefined {

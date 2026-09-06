@@ -5,6 +5,7 @@ import { getPerformanceSnapshotRepo } from "@/src/lib/server/repositories/perfor
 import { getRecommendationRepo } from "@/src/lib/server/repositories/recommendation-repo";
 import { AiNotConfiguredError, extractJson, generateText } from "@/src/lib/server/ai/llm";
 import { hasAiConfig } from "@/src/lib/server/env";
+import { findForNiche } from "@/src/lib/server/niche-studies-service";
 
 const TYPES = RecommendationType.options;
 
@@ -24,8 +25,11 @@ const SYSTEM = [
   "You are a senior local-SEO strategist for a Google Business Profile / map-pack agency.",
   "You propose specific, tactical, defensible actions grounded ONLY in the data provided.",
   "Never invent metrics. If the data is thin, propose fewer, higher-confidence actions.",
-  "Every action must be something a specialist can execute (GBP posts, category/service changes,",
-  "on-page content, schema, image optimization, review operations, keyword moves).",
+  "Favor concrete, executable actions of these kinds, tied to the weakest grid keywords:",
+  "(1) a GBP post to write (give a title/angle), (2) an image to add or RENAME to a keyword-rich",
+  "file name (state the suggested file name), (3) a per-keyword move (which keyword, why, what to change),",
+  "(4) category/service changes, on-page content, schema, or review operations.",
+  "When niche playbooks are provided, apply their proven tactics.",
   "Return STRICT JSON only — no prose, no code fences.",
 ].join(" ");
 
@@ -41,6 +45,7 @@ function buildUserPrompt(input: {
   keywords: string[];
   checkinBusinessCount: number;
   checkinTotalPosts: number;
+  nichePlaybooks: string;
 }): string {
   const allowed = TYPES.join(", ");
   return [
@@ -57,6 +62,7 @@ function buildUserPrompt(input: {
       (g) => `- ${g.keyword} | ${g.rank ?? "n/a"} | ${g.share ?? "n/a"} | ${g.top3 ?? "n/a"}`,
     ),
     input.keywords.length ? `Tracked keywords: ${input.keywords.slice(0, 40).join(", ")}` : "",
+    input.nichePlaybooks ? `\nNiche playbooks (apply these proven tactics):\n${input.nichePlaybooks}` : "",
     "",
     `Propose 5-8 recommendations. Each "type" MUST be one of: ${allowed}.`,
     'Return JSON: {"recommendations":[{"type","title","rationale","clientSafeExplanation",',
@@ -110,6 +116,11 @@ export async function generateAiRecommendations(
   const avgRank = rankVals.length ? Math.round((rankVals.reduce((a, b) => a + b, 0) / rankVals.length) * 10) / 10 : null;
   const avgShare = shareVals.length ? Math.round((shareVals.reduce((a, b) => a + b, 0) / shareVals.length) * 10) / 10 : null;
 
+  const studies = await findForNiche(tenantId, project.niche);
+  const nichePlaybooks = studies
+    .map((s) => `- ${s.title}: ${s.content.replace(/\s+/g, " ").slice(0, 1200)}`)
+    .join("\n");
+
   const user = buildUserPrompt({
     businessName: project.businessName,
     website: project.website,
@@ -127,6 +138,7 @@ export async function generateAiRecommendations(
     keywords: snapshot.keywords.map((k) => k.keyword),
     checkinBusinessCount: snapshot.checkinBusinessCount,
     checkinTotalPosts: snapshot.checkinTotalPosts,
+    nichePlaybooks,
   });
 
   let parsed: { recommendations?: AiRec[] };

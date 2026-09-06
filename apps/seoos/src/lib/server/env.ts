@@ -49,6 +49,12 @@ export function getServerEnv() {
     // covers both; the redirect URI is {appUrl}/api/seo/integrations/google/callback.
     googleOAuthClientId: process.env.GOOGLE_OAUTH_CLIENT_ID || "",
     googleOAuthClientSecret: process.env.GOOGLE_OAUTH_CLIENT_SECRET || "",
+    // Email delivery for client reports (Resend). From address must be on a
+    // verified domain. Sending is always an explicit, human-initiated action.
+    resendApiKey: process.env.RESEND_API_KEY || "",
+    emailFrom: process.env.EMAIL_FROM || "",
+    // Google Drive folder holding niche case studies (fed to the AI).
+    driveNicheFolderId: process.env.GOOGLE_DRIVE_NICHE_FOLDER_ID || "",
     // SEOOS feature flags (server-evaluated; env is the initial source).
     seoosEnabled: boolEnv("SEOOS_ENABLED", true),
     seoosRequestsEnabled: boolEnv("SEOOS_REQUESTS_ENABLED", true),
@@ -79,4 +85,10 @@ export function hasAiConfig() {
 export function hasGoogleOAuth() {
   const env = getServerEnv();
   return Boolean(env.googleOAuthClientId && env.googleOAuthClientSecret && env.appUrl);
+}
+
+/** True when email delivery (Resend) is configured. */
+export function hasEmailConfig() {
+  const env = getServerEnv();
+  return Boolean(env.resendApiKey && env.emailFrom);
 }

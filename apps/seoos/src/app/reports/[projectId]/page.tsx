@@ -5,6 +5,7 @@ import { resolveSeoAuthz, authzHas } from "@/src/lib/auth/context";
 import { AppShell } from "@/src/components/app-shell";
 import { EmptyState, Panel, StatCard, UnauthorizedPage } from "@/src/components/states";
 import { PrintButton } from "@/src/components/print-button";
+import { EmailReportButton } from "@/src/components/email-report-button";
 import { getProject } from "@/src/lib/server/projects-service";
 import { composeMonthlyReport } from "@/src/lib/server/report-service";
 
@@ -58,6 +59,7 @@ export default async function ReportPage({
         <>
           <div className="toolbar">
             <PrintButton />
+            {authzHas(authz, "seo.project.manage") ? <EmailReportButton projectId={project.id} /> : null}
             <span className="muted" style={{ fontSize: 12 }}>
               Generated {report.generatedAt.slice(0, 10)}
               {report.website ? ` · ${report.website}` : ""}

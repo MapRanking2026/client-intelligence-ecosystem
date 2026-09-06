@@ -58,6 +58,8 @@ export async function createProject(
     clientId: parsed.clientId,
     businessName: parsed.businessName,
     website: parsed.website,
+    valueProposition: parsed.valueProposition,
+    niche: parsed.niche,
     stage: "draft",
     health: "healthy",
     assignments: parsed.assignments,
@@ -137,6 +139,7 @@ export async function syncClientsFromClickUp(tenantId: string): Promise<SyncClie
   }
   const podFor = (name: string): string | undefined =>
     podMap.podByClient[normalizeComparableValue(name)];
+  const infoFor = (name: string) => podMap.infoByClient[normalizeComparableValue(name)];
   const podNote = podMap.ok ? undefined : podMap.error;
 
   const repo = getProjectRepo();
@@ -153,6 +156,8 @@ export async function syncClientsFromClickUp(tenantId: string): Promise<SyncClie
       externalIds.pod = pod;
       podsMatched += 1;
     }
+    const info = infoFor(client.name);
+    const website = client.website ?? info?.website;
 
     const existing = await repo.findByClient(tenantId, client.clientId);
     if (existing) {
@@ -162,7 +167,9 @@ export async function syncClientsFromClickUp(tenantId: string): Promise<SyncClie
       await repo.save({
         ...existing,
         businessName: client.name || existing.businessName,
-        website: client.website ?? existing.website,
+        website: existing.website ?? website,
+        // Fill AI-context fields only when empty — never clobber manual edits.
+        niche: existing.niche ?? info?.niche,
         targetLocations: mergedLocations,
         externalIds: { ...existing.externalIds, ...externalIds },
         updatedAt: now,
@@ -178,7 +185,8 @@ export async function syncClientsFromClickUp(tenantId: string): Promise<SyncClie
         tenantId,
         clientId: client.clientId,
         businessName: client.name,
-        website: client.website,
+        website,
+        niche: info?.niche,
         stage: "intake",
         health: "healthy",
         assignments: { supportingUserIds: [] },

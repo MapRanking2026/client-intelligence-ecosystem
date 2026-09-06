@@ -9,6 +9,8 @@ export function CreateProjectForm() {
   const [clientId, setClientId] = useState("");
   const [businessName, setBusinessName] = useState("");
   const [website, setWebsite] = useState("");
+  const [valueProposition, setValueProposition] = useState("");
+  const [niche, setNiche] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
@@ -20,7 +22,13 @@ export function CreateProjectForm() {
       const res = await fetch("/api/seo/projects", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ clientId, businessName, website: website || undefined }),
+        body: JSON.stringify({
+          clientId,
+          businessName,
+          website: website || undefined,
+          valueProposition: valueProposition || undefined,
+          niche: niche || undefined,
+        }),
       });
       const body = await res.json();
       if (!res.ok) {
@@ -30,6 +38,8 @@ export function CreateProjectForm() {
         setClientId("");
         setBusinessName("");
         setWebsite("");
+        setValueProposition("");
+        setNiche("");
         setOpen(false);
         router.refresh();
       }
@@ -71,6 +81,24 @@ export function CreateProjectForm() {
         <label htmlFor="website">Website (optional)</label>
         <input id="website" value={website} onChange={(e) => setWebsite(e.target.value)} placeholder="https://…" />
       </div>
+      <div className="row" style={{ marginTop: 12 }}>
+        <div>
+          <label htmlFor="niche">Niche (optional)</label>
+          <input id="niche" value={niche} onChange={(e) => setNiche(e.target.value)} placeholder="e.g. Roofing, HVAC, Plumbing" />
+        </div>
+        <div>
+          <label htmlFor="valueProposition">Value proposition (optional)</label>
+          <input
+            id="valueProposition"
+            value={valueProposition}
+            onChange={(e) => setValueProposition(e.target.value)}
+            placeholder="What makes this business win locally"
+          />
+        </div>
+      </div>
+      <p className="muted" style={{ fontSize: 12, marginTop: 8 }}>
+        Niche + value proposition ground the AI recommendations (learns from similar niches / case studies).
+      </p>
       <div style={{ marginTop: 16, display: "flex", gap: 12, alignItems: "center" }}>
         <button type="submit" disabled={busy}>{busy ? "Creating…" : "Create project"}</button>
         {message ? <span className="muted">{message}</span> : null}

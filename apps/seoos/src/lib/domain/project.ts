@@ -70,6 +70,9 @@ export const SeoProjectV1 = z.object({
   clientId: zClientId,
   businessName: z.string().min(1),
   website: z.string().optional(),
+  /** Intake context that grounds AI recommendations (meeting: "max initial info"). */
+  valueProposition: z.string().optional(),
+  niche: z.string().optional(),
   stage: SeoProjectStage.default("draft"),
   health: SeoProjectHealth.default("healthy"),
   assignments: SeoProjectAssignments.default({ supportingUserIds: [] }),
@@ -95,6 +98,8 @@ export const CreateSeoProjectInput = z.object({
   clientId: zClientId,
   businessName: z.string().min(1),
   website: z.string().optional(),
+  valueProposition: z.string().optional(),
+  niche: z.string().optional(),
   serviceTier: z.string().optional(),
   priority: z.enum(["normal", "high", "urgent"]).default("normal"),
   targetLocations: z.array(z.string()).default([]),

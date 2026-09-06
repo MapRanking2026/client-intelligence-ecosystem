@@ -204,11 +204,19 @@ function podFieldNames() {
   return Array.from(new Set([configured, "Pod", "SEO Pod", "Team Pod"]));
 }
 
+export interface DashboardInfo {
+  pod?: string;
+  niche?: string;
+  website?: string;
+}
+
 export interface PodMapResult {
   ok: boolean;
   error?: string;
   /** normalized client identity (name/business/client) -> pod display name. */
   podByClient: Record<string, string>;
+  /** normalized client identity -> extra intake info (niche, website) from the dashboard. */
+  infoByClient: Record<string, DashboardInfo>;
   /** distinct pod display names seen. */
   podNames: string[];
 }
@@ -224,23 +232,28 @@ export async function fetchClickUpPodMap(input: {
   dashboardListId?: string;
 }): Promise<PodMapResult> {
   const listId = input.dashboardListId?.trim() || process.env.CLICKUP_SEO_DASHBOARD_LIST_ID;
-  if (!input.token) return { ok: false, error: "Missing ClickUp API token", podByClient: {}, podNames: [] };
+  if (!input.token) {
+    return { ok: false, error: "Missing ClickUp API token", podByClient: {}, infoByClient: {}, podNames: [] };
+  }
   if (!listId) {
     return {
       ok: false,
       error: "No SEO Dashboard list id configured (set it on the ClickUp connection or CLICKUP_SEO_DASHBOARD_LIST_ID).",
       podByClient: {},
+      infoByClient: {},
       podNames: [],
     };
   }
   try {
     const tasks = await fetchTasksFromList(input.token, listId);
     const podByClient: Record<string, string> = {};
+    const infoByClient: Record<string, DashboardInfo> = {};
     const podNames = new Set<string>();
     for (const task of tasks) {
-      const pod = firstField(task, podFieldNames());
-      if (!pod) continue;
-      podNames.add(pod);
+      const pod = firstField(task, podFieldNames()) || undefined;
+      const niche = firstField(task, ["Niche", "Main Category", "Industry", "Vertical"]) || undefined;
+      const website = firstField(task, ["Website", "URL", "Domain", "Site"]) || undefined;
+      if (pod) podNames.add(pod);
       const keys = [
         task.name || "",
         firstField(task, ["Business Name", "⭐️ Business Name"]),
@@ -248,14 +261,18 @@ export async function fetchClickUpPodMap(input: {
       ]
         .map(normalizeComparableValue)
         .filter(Boolean);
-      for (const k of keys) if (!podByClient[k]) podByClient[k] = pod;
+      for (const k of keys) {
+        if (pod && !podByClient[k]) podByClient[k] = pod;
+        if (!infoByClient[k]) infoByClient[k] = { pod, niche, website };
+      }
     }
-    return { ok: true, podByClient, podNames: Array.from(podNames) };
+    return { ok: true, podByClient, infoByClient, podNames: Array.from(podNames) };
   } catch (e) {
     return {
       ok: false,
       error: e instanceof Error ? e.message : "clickup_pod_map_failed",
       podByClient: {},
+      infoByClient: {},
       podNames: [],
     };
   }

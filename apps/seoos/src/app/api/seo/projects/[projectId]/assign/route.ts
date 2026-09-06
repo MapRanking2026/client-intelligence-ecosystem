@@ -17,13 +17,13 @@ export async function POST(
       return NextResponse.json({ error: "Admin only", code: "admin_required" }, { status: 403 });
     }
     const { projectId } = await params;
-    const body = (await request.json().catch(() => null)) as { specialistUserId?: string | null } | null;
+    const body = (await request.json().catch(() => null)) as { specialistId?: string | null } | null;
     const project = await assignProjectSpecialist(
       authz.tenantId,
       projectId,
-      body?.specialistUserId ? body.specialistUserId : null,
+      body?.specialistId ? body.specialistId : null,
     );
-    return NextResponse.json({ data: { id: project.id, specialistUserId: project.assignments.seoSpecialistUserId ?? null } });
+    return NextResponse.json({ data: { id: project.id, assignedSpecialistId: project.assignedSpecialistId ?? null } });
   } catch (e) {
     if (e instanceof AuthzError) {
       return NextResponse.json({ error: e.message, code: e.code }, { status: 403 });

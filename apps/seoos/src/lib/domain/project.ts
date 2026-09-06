@@ -76,6 +76,8 @@ export const SeoProjectV1 = z.object({
   stage: SeoProjectStage.default("draft"),
   health: SeoProjectHealth.default("healthy"),
   assignments: SeoProjectAssignments.default({ supportingUserIds: [] }),
+  /** Admin's direct specialist assignment (roster id) — overrides the ClickUp specialist. */
+  assignedSpecialistId: z.string().optional(),
   serviceTier: z.string().optional(),
   /** Individual services (from ClickUp ⭐ Services) = the projects run for this client. */
   services: z.array(z.string()).default([]),

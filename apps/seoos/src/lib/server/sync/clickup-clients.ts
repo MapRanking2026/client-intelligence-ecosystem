@@ -135,9 +135,9 @@ function firstField(task: ClickUpTask, names: string[], fallback = ""): string {
 }
 
 function specialistFieldNames() {
-  const configured = process.env.CLICKUP_SEO_SPECIALIST_FIELD || "SEO Specialist";
+  const configured = process.env.CLICKUP_SEO_SPECIALIST_FIELD || "Responsable";
   return Array.from(
-    new Set([configured, "SEO Specialist", "SEO Spec", "Specialist", "SEO Lead", "SEO"]),
+    new Set([configured, "Responsable", "SEO Specialist", "SEO Spec", "Specialist", "SEO Lead"]),
   );
 }
 

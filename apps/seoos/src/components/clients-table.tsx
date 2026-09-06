@@ -15,16 +15,16 @@ export interface ClientRow {
   services: number;
   avgRanking: string;
   stage: string;
-  /** Direct assignment (assignments.seoSpecialistUserId) or "" when following pod. */
-  specialistUserId: string;
-  /** Effective specialist display name (direct override, else pod, else Unassigned). */
+  /** Admin's direct assignment (roster id) or "" when auto (from ClickUp). */
+  assignedSpecialistId: string;
+  /** Effective specialist display name (override, else ClickUp match, else Unassigned). */
   specialistName: string;
-  /** The pod's specialist name, for the "Auto (pod)" option label. */
-  podSpecialistName: string;
+  /** ClickUp-derived specialist name, for the "Auto" option label. */
+  autoSpecialistName: string;
 }
 
 export interface SpecialistOption {
-  userId: string;
+  id: string;
   name: string;
 }
 
@@ -35,7 +35,6 @@ function columns(admin: boolean): Col[] {
   if (admin) base.push({ key: "specialistName", label: "Specialist" });
   return [
     ...base,
-    { key: "pod", label: "Pod" },
     { key: "status", label: "Status" },
     { key: "health", label: "Health" },
     { key: "setup", label: "Setup %", numeric: true },
@@ -82,13 +81,13 @@ export function ClientsTable({
     }
   }
 
-  async function assign(projectId: string, specialistUserId: string) {
+  async function assign(projectId: string, specialistId: string) {
     setBusyId(projectId);
     try {
       await fetch(`/api/seo/projects/${projectId}/assign`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ specialistUserId: specialistUserId || null }),
+        body: JSON.stringify({ specialistId: specialistId || null }),
       });
       router.refresh();
     } finally {
@@ -100,7 +99,7 @@ export function ClientsTable({
     const q = query.trim().toLowerCase();
     const filtered = q
       ? rows.filter((r) =>
-          [r.businessName, r.pod, r.status, r.health, r.stage, r.avgRanking, r.specialistName]
+          [r.businessName, r.status, r.health, r.stage, r.avgRanking, r.specialistName]
             .join(" ")
             .toLowerCase()
             .includes(q),
@@ -149,21 +148,20 @@ export function ClientsTable({
                 {admin ? (
                   <td>
                     <select
-                      value={r.specialistUserId}
+                      value={r.assignedSpecialistId}
                       disabled={busyId === r.id}
                       onChange={(e) => assign(r.id, e.target.value)}
                       style={{ maxWidth: 200 }}
                     >
                       <option value="">
-                        Auto — pod: {r.podSpecialistName || "unassigned"}
+                        Auto: {r.autoSpecialistName || "unassigned"}
                       </option>
                       {specialists.map((s) => (
-                        <option key={s.userId} value={s.userId}>{s.name}</option>
+                        <option key={s.id} value={s.id}>{s.name}</option>
                       ))}
                     </select>
                   </td>
                 ) : null}
-                <td className="muted">{r.pod || "—"}</td>
                 <td>{r.status || "—"}</td>
                 <td>{r.health || "—"}</td>
                 <td>{r.setup}%</td>

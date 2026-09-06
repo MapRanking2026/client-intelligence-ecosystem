@@ -7,18 +7,17 @@ import {
   type SeoProjectStage,
 } from "@/src/lib/domain/project";
 import { newId, nowIso } from "@/src/lib/ids";
-import { normalizePodKey } from "@/src/lib/domain/pod";
 import { getProjectRepo } from "@/src/lib/server/repositories/project-repo";
-import { getUserRepo } from "@/src/lib/server/repositories/user-repo";
 import {
   getIntegrationCredentials,
   listIntegrations,
 } from "@/src/lib/server/integrations-service";
+import { fetchClickUpClientRoster } from "@/src/lib/server/sync/clickup-clients";
 import {
-  fetchClickUpClientRoster,
-  normalizeComparableValue,
-} from "@/src/lib/server/sync/clickup-clients";
-import { podKeysForUser, upsertDiscoveredPods } from "@/src/lib/server/pods-service";
+  listSpecialists,
+  matchSpecialistId,
+  resolveViewerSpecialistId,
+} from "@/src/lib/server/specialists-service";
 
 /**
  * Project lifecycle service. Prevents duplicate projects for a canonical client
@@ -135,11 +134,11 @@ export async function syncClientsFromClickUp(tenantId: string): Promise<SyncClie
   });
   if (!roster.ok) return { ...empty, error: roster.error ?? "clickup_roster_failed" };
 
-  // Pods come straight off the roster rows now (no separate join).
+  // ClickUp pod values are kept on the client for reference only (informational);
+  // client → specialist grouping is driven by the ⭐ Responsable field + the roster.
   const discoveredPods = Array.from(
     new Set(roster.clients.map((c) => c.pod).filter((p): p is string => Boolean(p))),
   );
-  if (discoveredPods.length) await upsertDiscoveredPods(tenantId, discoveredPods);
 
   const repo = getProjectRepo();
   let created = 0;
@@ -222,61 +221,39 @@ export async function syncClientsFromClickUp(tenantId: string): Promise<SyncClie
   };
 }
 
-/** True when the project is explicitly assigned to this user id. */
-function projectAssignedToUser(project: SeoProjectV1, userId: string): boolean {
-  const a = project.assignments;
-  if (
-    a.seoSpecialistUserId === userId ||
-    a.seoLeadUserId === userId ||
-    a.qaReviewerUserId === userId ||
-    a.accountManagerUserId === userId
-  ) {
-    return true;
-  }
-  return a.supportingUserIds.includes(userId);
-}
-
-/** The viewer's normalized identity tokens (email, local-part, display name). */
-async function viewerMatchValues(authz: AuthzContextV1): Promise<string[]> {
-  const user = await getUserRepo().getById(authz.tenantId, authz.userId);
-  const tokens: string[] = [];
-  if (user?.email) {
-    tokens.push(user.email);
-    tokens.push(user.email.split("@")[0] ?? "");
-  }
-  if (user?.displayName) tokens.push(user.displayName);
-  return Array.from(new Set(tokens.map(normalizeComparableValue).filter(Boolean)));
+/**
+ * The specialist a client belongs to: the admin's direct assignment if set,
+ * otherwise the roster specialist matched from the ClickUp ⭐ Responsable field.
+ */
+export function effectiveSpecialistId(
+  project: SeoProjectV1,
+  specialists: import("@/src/lib/domain/specialist").SpecialistV1[],
+): string | undefined {
+  if (project.assignedSpecialistId) return project.assignedSpecialistId;
+  return matchSpecialistId(project.externalIds?.seoSpecialist, specialists);
 }
 
 /**
  * List the projects a given viewer may see. Admins (clientVisibility "all") see
- * every project; everyone else sees only projects assigned to them — by explicit
- * assignment userId, by an explicit client-visibility allowlist, or by matching
- * their identity to the ClickUp "SEO Specialist" field captured on the project.
- * The field match means a specialist who signs up after a sync still sees their
- * accounts without a re-sync.
+ * every client; everyone else sees only the clients belonging to their own
+ * specialist (resolved by login email/name against the roster). This scopes each
+ * specialist to their own accounts, like an MTOS account manager.
  */
 export async function listProjectsForViewer(authz: AuthzContextV1): Promise<SeoProjectV1[]> {
   const all = await getProjectRepo().list(authz.tenantId);
   if (authz.clientVisibility === "all") return all;
 
+  const specialists = await listSpecialists(authz.tenantId);
+  const mySpecialistId = await resolveViewerSpecialistId(authz.tenantId, authz.userId);
   const allowlist = Array.isArray(authz.clientVisibility)
     ? new Set(authz.clientVisibility)
     : new Set<string>();
-  const matches = await viewerMatchValues(authz);
-  const myPods = await podKeysForUser(authz.tenantId, authz.userId);
+
+  if (!mySpecialistId) return all.filter((p) => allowlist.has(p.clientId));
 
   return all.filter((project) => {
-    if (projectAssignedToUser(project, authz.userId)) return true;
     if (allowlist.has(project.clientId)) return true;
-    // Pod ownership: the primary MapRanking model — a specialist owns whole pods.
-    const pod = project.externalIds?.pod ? normalizePodKey(project.externalIds.pod) : "";
-    if (pod && myPods.has(pod)) return true;
-    // Fallback: a per-client SEO-specialist field matched to the viewer.
-    const specialist = project.externalIds?.seoSpecialist
-      ? normalizeComparableValue(project.externalIds.seoSpecialist)
-      : "";
-    return specialist ? matches.includes(specialist) : false;
+    return effectiveSpecialistId(project, specialists) === mySpecialistId;
   });
 }
 
@@ -359,15 +336,16 @@ export async function runFullScan(tenantId: string, projectId: string): Promise<
 export async function assignProjectSpecialist(
   tenantId: string,
   projectId: string,
-  specialistUserId: string | null,
+  specialistId: string | null,
 ): Promise<SeoProjectV1> {
   const repo = getProjectRepo();
   const project = await repo.get(tenantId, projectId);
   if (!project) throw new Error(`Project not found: ${projectId}`);
-  const assignments = { ...project.assignments };
-  if (specialistUserId) assignments.seoSpecialistUserId = specialistUserId;
-  else delete assignments.seoSpecialistUserId;
-  return repo.save({ ...project, assignments, updatedAt: nowIso() });
+  if (specialistId) {
+    return repo.save({ ...project, assignedSpecialistId: specialistId, updatedAt: nowIso() });
+  }
+  const { assignedSpecialistId: _drop, ...rest } = project;
+  return repo.save({ ...rest, updatedAt: nowIso() });
 }
 
 /** Merge provider external-id mappings (e.g. clickupListId) into a project. */

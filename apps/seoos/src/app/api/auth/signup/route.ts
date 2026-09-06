@@ -69,7 +69,8 @@ export async function POST(request: Request) {
     passwordSalt: salt,
     passwordHash: hash,
     roles: [role],
-    clientVisibility: "all",
+    // Only admins see everyone; specialists are scoped to their assigned clients.
+    clientVisibility: isFirstUser ? "all" : [],
     disabled: false,
     createdAt: now,
     updatedAt: now,

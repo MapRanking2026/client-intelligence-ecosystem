@@ -11,6 +11,7 @@ import { RecommendationV1 } from "@/src/lib/domain/recommendation";
 import { WorkOrderV1 } from "@/src/lib/domain/work-order";
 import type { SeoUserV1 } from "@/src/lib/domain/user";
 import type { SeoPodV1 } from "@/src/lib/domain/pod";
+import type { SpecialistV1 } from "@/src/lib/domain/specialist";
 import type { MonthlyAuditV1 } from "@/src/lib/domain/monthly-audit";
 import type { IntegrationConnectionV1 } from "@/src/lib/domain/integration";
 import { getServerEnv } from "@/src/lib/server/env";
@@ -42,6 +43,7 @@ interface SeedStore {
   outbox: OutboxEventV1[];
   users: SeoUserV1[];
   pods: SeoPodV1[];
+  specialists: SpecialistV1[];
   monthlyAudits: MonthlyAuditV1[];
   integrations: IntegrationConnectionV1[];
 }
@@ -336,6 +338,7 @@ function buildSeed(): SeedStore {
   // Firestore). Seed mode bypasses auth, so this stays empty here.
   const users: SeoUserV1[] = [];
   const pods: SeoPodV1[] = [];
+  const specialists: SpecialistV1[] = [];
   const monthlyAudits: MonthlyAuditV1[] = [];
   const integrations: IntegrationConnectionV1[] = [];
 
@@ -351,6 +354,7 @@ function buildSeed(): SeedStore {
     outbox,
     users,
     pods,
+    specialists,
     monthlyAudits,
     integrations,
   };

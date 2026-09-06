@@ -154,7 +154,12 @@ export async function syncClientsFromClickUp(tenantId: string): Promise<SyncClie
       externalIds.pod = client.pod;
       podsMatched += 1;
     }
+    if (client.status) externalIds.status = client.status;
     const metrics = client.metrics ?? {};
+    const services = (client.serviceTier ?? "")
+      .split(/[,|]/)
+      .map((s) => s.trim())
+      .filter(Boolean);
 
     const existing = await repo.findByClient(tenantId, client.clientId);
     if (existing) {
@@ -167,7 +172,8 @@ export async function syncClientsFromClickUp(tenantId: string): Promise<SyncClie
         website: existing.website ?? client.website,
         // Fill AI-context fields only when empty — never clobber manual edits.
         niche: existing.niche ?? client.niche,
-        serviceTier: existing.serviceTier ?? client.serviceTier,
+        serviceTier: client.serviceTier ?? existing.serviceTier,
+        services: services.length ? services : existing.services,
         targetLocations: mergedLocations,
         externalIds: { ...existing.externalIds, ...externalIds },
         dashboardMetrics: { ...existing.dashboardMetrics, ...metrics },
@@ -187,6 +193,7 @@ export async function syncClientsFromClickUp(tenantId: string): Promise<SyncClie
         website: client.website,
         niche: client.niche,
         serviceTier: client.serviceTier,
+        services,
         stage: "intake",
         health: "healthy",
         assignments: { supportingUserIds: [] },

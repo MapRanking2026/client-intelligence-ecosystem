@@ -84,7 +84,12 @@ export default async function ProjectSetupPage({
 
       {canManage ? (
         <Panel title="Setup wizard">
-          <FullScanButton projectId={project.id} />
+          <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
+            <FullScanButton projectId={project.id} />
+            <a className="badge status-active" href="#projects" style={{ padding: "8px 14px" }}>
+              Projects ({project.services?.length ?? 0})
+            </a>
+          </div>
           <ol style={{ listStyle: "none", padding: 0, marginTop: 10 }}>
             <Check done={Boolean(project.niche || project.valueProposition)}>
               Intake context (niche / value proposition) — <Link href="/clients">edit on create</Link>
@@ -100,6 +105,36 @@ export default async function ProjectSetupPage({
           <GenerateAiRecsButton projectId={project.id} />
         </Panel>
       ) : null}
+
+      <div id="projects">
+        <Panel title={`Projects for ${project.businessName} (${project.services?.length ?? 0})`}>
+          {project.services && project.services.length ? (
+            <div className="table-scroll">
+              <table className="data">
+                <thead>
+                  <tr><th>Project / service</th><th>Client</th><th>Actions</th></tr>
+                </thead>
+                <tbody>
+                  {project.services.map((s) => (
+                    <tr key={s}>
+                      <td>{s}</td>
+                      <td className="muted">{project.businessName}</td>
+                      <td>
+                        <Link className="badge" href={`/work-orders?projectId=${project.id}`}>Work orders</Link>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <p className="muted" style={{ fontSize: 13 }}>
+              No projects/services listed for this client yet. They come from the ClickUp
+              <strong> ⭐ Services</strong> field — run a full scan to pull them.
+            </p>
+          )}
+        </Panel>
+      </div>
 
       <Panel title="Workspace">
         <div className="toolbar" style={{ flexWrap: "wrap", gap: 8 }}>

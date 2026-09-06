@@ -77,6 +77,8 @@ export const SeoProjectV1 = z.object({
   health: SeoProjectHealth.default("healthy"),
   assignments: SeoProjectAssignments.default({ supportingUserIds: [] }),
   serviceTier: z.string().optional(),
+  /** Individual services (from ClickUp ⭐ Services) = the projects run for this client. */
+  services: z.array(z.string()).default([]),
   priority: z.enum(["normal", "high", "urgent"]).default("normal"),
   targetLocations: z.array(z.string()).default([]),
   goals: z.array(z.string()).default([]),

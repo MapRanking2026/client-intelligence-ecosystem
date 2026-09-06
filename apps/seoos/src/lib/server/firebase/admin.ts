@@ -1,6 +1,6 @@
 import { cert, getApp, getApps, initializeApp } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
-import { getFirestore } from "firebase-admin/firestore";
+import { getFirestore, type Firestore } from "firebase-admin/firestore";
 
 import { getServerEnv, hasFirebaseAdminConfig } from "@/src/lib/server/env";
 
@@ -34,7 +34,22 @@ export function getFirebaseAdminAuth() {
   return app ? getAuth(app) : null;
 }
 
+let dbInstance: Firestore | null = null;
+
 export function getFirebaseAdminDb() {
   const app = initializeFirebaseAdmin();
-  return app ? getFirestore(app) : null;
+  if (!app) return null;
+  if (!dbInstance) {
+    dbInstance = getFirestore(app);
+    // Roster/pod records carry optional fields (website, serviceTier, dates…)
+    // that are undefined for many clients. Firestore rejects undefined values,
+    // so drop them instead of failing the write. Settings must be applied once,
+    // before the first operation; guard against a hot-reload double-apply.
+    try {
+      dbInstance.settings({ ignoreUndefinedProperties: true });
+    } catch {
+      // Already initialized on this Firestore singleton (dev hot reload) — fine.
+    }
+  }
+  return dbInstance;
 }

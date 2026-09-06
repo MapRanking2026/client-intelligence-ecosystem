@@ -21,8 +21,7 @@ export default async function ClientsPage() {
   const specialists = isAdmin ? await listSpecialists(authz.tenantId) : [];
   const nameOf = (id?: string) => specialists.find((s) => s.id === id)?.name ?? "";
 
-  const rows: ClientRow[] = projects.map((p) => {
-    const effId = isAdmin ? effectiveSpecialistId(p, specialists) : undefined;
+  const toRow = (p: (typeof projects)[number], effId?: string): ClientRow => {
     const autoId = isAdmin ? matchSpecialistId(p.externalIds?.seoSpecialist, specialists) : undefined;
     return {
       id: p.id,
@@ -39,31 +38,43 @@ export default async function ClientsPage() {
       specialistName: effId ? nameOf(effId) : "Unassigned",
       autoSpecialistName: autoId ? nameOf(autoId) : "",
     };
-  });
+  };
 
-  // Coverage: clients per specialist (including 0) + unassigned.
-  const counts = new Map<string, number>();
-  let unassigned = 0;
-  if (isAdmin) {
-    for (const p of projects) {
-      const effId = effectiveSpecialistId(p, specialists);
-      if (effId) counts.set(effId, (counts.get(effId) ?? 0) + 1);
-      else unassigned += 1;
+  // Bucket clients by their effective specialist (admin view).
+  const bySpecialist = new Map<string, ClientRow[]>();
+  const unassignedRows: ClientRow[] = [];
+  const flatRows: ClientRow[] = [];
+  for (const p of projects) {
+    const effId = isAdmin ? effectiveSpecialistId(p, specialists) : undefined;
+    const row = toRow(p, effId);
+    flatRows.push(row);
+    if (isAdmin) {
+      if (effId) bySpecialist.set(effId, [...(bySpecialist.get(effId) ?? []), row]);
+      else unassignedRows.push(row);
     }
   }
+
   const specialistRows: SpecialistRow[] = specialists.map((s) => ({
     id: s.id,
     name: s.name,
     email: s.email,
-    count: counts.get(s.id) ?? 0,
+    count: bySpecialist.get(s.id)?.length ?? 0,
   }));
   const specialistOptions: SpecialistOption[] = specialists.map((s) => ({ id: s.id, name: s.name }));
+
+  // Groups to render: each specialist with ≥1 client, then Unassigned.
+  const groups: Array<{ key: string; name: string; rows: ClientRow[] }> = [
+    ...specialists
+      .filter((s) => (bySpecialist.get(s.id)?.length ?? 0) > 0)
+      .map((s) => ({ key: s.id, name: s.name, rows: bySpecialist.get(s.id) ?? [] })),
+    ...(unassignedRows.length ? [{ key: "unassigned", name: "Unassigned", rows: unassignedRows }] : []),
+  ];
 
   return (
     <AppShell
       authz={authz}
       title="Clients"
-      subtitle="Every client, its specialist, health, setup, and projects"
+      subtitle="Grouped by SEO specialist"
       breadcrumbs={[{ label: "SEOOS" }, { label: "Clients" }]}
     >
       {!canManage ? (
@@ -71,43 +82,47 @@ export default async function ClientsPage() {
           <span className="badge badge--warn">Permission required</span>
           <p className="muted">You need the seo.project.manage permission to view clients.</p>
         </div>
+      ) : !isAdmin ? (
+        <Panel title={`Your clients (${flatRows.length})`}>
+          {flatRows.length === 0 ? (
+            <EmptyState title="No clients assigned to you yet" message="Ask an admin to assign you and re-sync." />
+          ) : (
+            <ClientsTable rows={flatRows} />
+          )}
+        </Panel>
       ) : (
         <>
-          {isAdmin ? (
-            <>
-              <Panel title={`SEO specialists (${specialists.length})`}>
-                <SpecialistManager specialists={specialistRows} />
-                {unassigned > 0 ? (
-                  <p className="muted" style={{ fontSize: 12 }}>
-                    <strong>{unassigned}</strong> client(s) are currently Unassigned — assign them in
-                    the table below.
-                  </p>
-                ) : null}
-              </Panel>
-              <CreateProjectForm />
-            </>
-          ) : (
-            <p className="muted" style={{ fontSize: 13 }}>
-              Showing the clients assigned to you. An admin manages the roster (Integrations) and it
-              refreshes daily.
-            </p>
-          )}
-
-          <Panel title={isAdmin ? `Clients (${projects.length})` : `Your clients (${projects.length})`}>
-            {projects.length === 0 ? (
-              <EmptyState
-                title={isAdmin ? "No clients yet" : "No clients assigned to you yet"}
-                message={
-                  isAdmin
-                    ? "Connect ClickUp under Integrations, then run the ClickUp client sync."
-                    : "Ask an admin to assign you and re-sync."
-                }
-                action={isAdmin ? <Link href="/integrations">Integrations →</Link> : undefined}
-              />
-            ) : (
-              <ClientsTable rows={rows} admin={isAdmin} specialists={specialistOptions} />
-            )}
+          <Panel title={`SEO specialists (${specialists.length})`}>
+            <SpecialistManager specialists={specialistRows} />
           </Panel>
+          <CreateProjectForm />
+
+          {projects.length === 0 ? (
+            <Panel title="Clients (0)">
+              <EmptyState
+                title="No clients yet"
+                message="Connect ClickUp under Integrations, then run the ClickUp client sync."
+                action={<Link href="/integrations">Integrations →</Link>}
+              />
+            </Panel>
+          ) : (
+            <>
+              <p className="muted" style={{ fontSize: 13 }}>
+                {projects.length} client(s) across {groups.length} group(s). Reassign any client with the
+                Specialist dropdown.
+              </p>
+              {groups.map((g) => (
+                <details key={g.key} open className="panel" style={{ marginBottom: 12 }}>
+                  <summary style={{ cursor: "pointer", fontWeight: 600, fontSize: 16, listStyle: "revert" }}>
+                    {g.name} <span className="muted" style={{ fontWeight: 400 }}>({g.rows.length})</span>
+                  </summary>
+                  <div style={{ marginTop: 10 }}>
+                    <ClientsTable rows={g.rows} admin specialists={specialistOptions} />
+                  </div>
+                </details>
+              ))}
+            </>
+          )}
         </>
       )}
     </AppShell>

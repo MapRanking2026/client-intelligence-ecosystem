@@ -10,9 +10,9 @@ import {
   StatusPill,
   UnauthorizedPage,
 } from "@/src/components/states";
-import { getProjectRepo } from "@/src/lib/server/repositories/project-repo";
+import { listProjectsForViewer } from "@/src/lib/server/projects-service";
 import { listRequests } from "@/src/lib/server/seo-engine";
-import { getIntegrationHealth } from "@/src/lib/server/gateway/client";
+import { listIntegrations } from "@/src/lib/server/integrations-service";
 
 export const dynamic = "force-dynamic";
 
@@ -30,9 +30,10 @@ export default async function DashboardPage() {
   const authz = await resolveSeoAuthz();
   if (!authz) return <UnauthorizedPage />;
 
-  const projects = await getProjectRepo().list(authz.tenantId);
+  const projects = await listProjectsForViewer(authz);
   const requests = await listRequests(authz.tenantId);
-  const health = await getIntegrationHealth(authz.tenantId);
+  const integrations = await listIntegrations(authz.tenantId);
+  const connectedIntegrations = integrations.filter((i) => i.status === "connected");
 
   const active = projects.filter((p) => p.stage === "active").length;
   const onboarding = projects.filter((p) =>
@@ -92,22 +93,22 @@ export default async function DashboardPage() {
         )}
       </Panel>
 
-      <Panel title="Data health" actions={<Link href="/integrations">Details →</Link>}>
-        {!health.configured ? (
+      <Panel
+        title={`Data health · ${connectedIntegrations.length}/${integrations.length} connected`}
+        actions={<Link href="/integrations">Details →</Link>}
+      >
+        {connectedIntegrations.length === 0 ? (
           <p className="muted" style={{ marginTop: 0 }}>
-            Integration gateway not configured. Provider health appears here once
-            MTOS_GATEWAY_URL + CIE_SERVICE_SECRET are set — SEOOS then reads the
-            shared MTOS connections with no duplicate credentials.
+            No sources connected yet. Connect ClickUp, Rank Tracker, and the rest under{" "}
+            <Link href="/integrations">Integrations</Link>.
           </p>
-        ) : !health.ok ? (
-          <p className="muted" style={{ marginTop: 0 }}>Gateway error: {health.error ?? "unknown"}.</p>
         ) : (
           <div className="grid-cards">
-            {health.providers.slice(0, 8).map((p) => (
+            {integrations.map((p) => (
               <div key={p.id} className="stat-card">
                 <div className="stat-label">{p.name}</div>
                 <div style={{ marginTop: 6 }}>
-                  <StatusPill status={p.status} />
+                  <StatusPill status={p.status === "connected" ? "active" : p.status.replace(/_/g, " ")} />
                 </div>
               </div>
             ))}

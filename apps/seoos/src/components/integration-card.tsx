@@ -17,6 +17,8 @@ interface View {
   status: "not_connected" | "connected" | "error";
   connectedAt?: string;
   metadata: Record<string, string>;
+  oauthStartPath?: string;
+  oauthUnconfigured?: boolean;
 }
 
 export function IntegrationCard({ view }: { view: View }) {
@@ -87,9 +89,21 @@ export function IntegrationCard({ view }: { view: View }) {
             Disconnect
           </button>
         </div>
+      ) : view.oauthStartPath ? (
+        <div className="toolbar">
+          <a href={view.oauthStartPath}>
+            <button type="button">Connect with Google</button>
+          </a>
+          <span className="muted" style={{ fontSize: 12 }}>Grants read access; offline token stored encrypted.</span>
+        </div>
+      ) : view.oauthUnconfigured ? (
+        <p className="muted" style={{ fontSize: 12 }}>
+          Requires the Google OAuth app — set <strong>GOOGLE_OAUTH_CLIENT_ID</strong> and{" "}
+          <strong>GOOGLE_OAUTH_CLIENT_SECRET</strong>.
+        </p>
       ) : !view.connectable ? (
         <p className="muted" style={{ fontSize: 12 }}>
-          Requires OAuth — connect form coming. (Google sign-in flow.)
+          Requires OAuth — connect form coming.
         </p>
       ) : (
         <form onSubmit={connect}>

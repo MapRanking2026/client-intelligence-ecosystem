@@ -8,9 +8,14 @@ import { listIntegrations } from "@/src/lib/server/integrations-service";
 
 export const dynamic = "force-dynamic";
 
-export default async function IntegrationsPage() {
+export default async function IntegrationsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ connected?: string; error?: string }>;
+}) {
   const authz = await resolveSeoAuthz();
   if (!authz) return <UnauthorizedPage />;
+  const { connected, error } = await searchParams;
 
   if (!authzHas(authz, "integrations.manage")) {
     return (
@@ -35,6 +40,19 @@ export default async function IntegrationsPage() {
       subtitle="SEOOS-native connections · credentials are encrypted at rest, never shown"
       breadcrumbs={[{ label: "SEOOS" }, { label: "Integrations" }]}
     >
+      {connected ? (
+        <div className="state" style={{ borderColor: "var(--ok, #3fb950)" }}>
+          <span className="badge status-active">connected</span>
+          <p className="muted" style={{ margin: 0 }}>{connected.replace(/-/g, " ")} connected via Google.</p>
+        </div>
+      ) : null}
+      {error ? (
+        <div className="state state--blocked">
+          <span className="badge badge--warn">connection error</span>
+          <p className="muted" style={{ margin: 0 }}>{error.replace(/_/g, " ")}</p>
+        </div>
+      ) : null}
+
       <p className="muted" style={{ marginTop: 0 }}>
         Connect each source directly with its API credentials. {connectedCount} of{" "}
         {integrations.length} connected. Credentials are AES-encrypted at rest and

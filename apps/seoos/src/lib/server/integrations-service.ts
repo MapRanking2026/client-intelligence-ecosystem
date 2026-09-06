@@ -8,6 +8,8 @@ import { decryptJson, encryptJson } from "@/src/lib/server/crypto";
 import { nowIso } from "@/src/lib/ids";
 import { getIntegrationRepo } from "@/src/lib/server/repositories/integration-repo";
 import { validateIntegration } from "@/src/lib/server/integrations-validate";
+import { hasGoogleOAuth } from "@/src/lib/server/env";
+import { isGoogleOAuthProvider } from "@/src/lib/server/google-oauth";
 
 /** Secret-free view for the Integrations UI. */
 export interface IntegrationView {
@@ -24,6 +26,10 @@ export interface IntegrationView {
   connectedAt?: string;
   metadata: Record<string, string>;
   errorMessage?: string;
+  /** For OAuth providers: the path to start the flow, when OAuth is configured. */
+  oauthStartPath?: string;
+  /** For OAuth providers: true when the server has no OAuth app configured. */
+  oauthUnconfigured?: boolean;
 }
 
 export async function listIntegrations(tenantId: string): Promise<IntegrationView[]> {
@@ -42,6 +48,7 @@ export async function listIntegrations(tenantId: string): Promise<IntegrationVie
         connectedAt = powering.connectedAt;
       }
     }
+    const googleOAuth = def.authMode === "oauth" && isGoogleOAuthProvider(def.id);
     return {
       id: def.id,
       name: def.name,
@@ -56,6 +63,9 @@ export async function listIntegrations(tenantId: string): Promise<IntegrationVie
       connectedAt,
       metadata: conn?.metadata ?? {},
       errorMessage: conn?.errorMessage,
+      oauthStartPath:
+        googleOAuth && hasGoogleOAuth() ? `/api/seo/integrations/google/start?provider=${def.id}` : undefined,
+      oauthUnconfigured: googleOAuth && !hasGoogleOAuth(),
     };
   });
 }
@@ -104,6 +114,32 @@ export async function connectIntegration(
     status: "connected",
     authMode: def.authMode,
     credentialCiphertext: encryptJson(credentials),
+    metadata,
+    connectedByUserId: userId,
+    connectedAt: now,
+    updatedAt: now,
+  });
+  return getIntegrationRepo().save(conn);
+}
+
+/** Persist an OAuth connection (e.g. Google) after the token exchange. */
+export async function saveOAuthConnection(
+  tenantId: string,
+  providerId: string,
+  tokens: { refreshToken?: string; accessToken: string; scope?: string; expiresAt?: string },
+  userId: string,
+): Promise<IntegrationConnectionV1> {
+  const now = nowIso();
+  const metadata: Record<string, string> = { auth: "google-oauth" };
+  if (tokens.scope) metadata.scope = tokens.scope;
+  if (!tokens.refreshToken) metadata.validation = "Connected, but Google returned no refresh token — reconnect and grant offline access.";
+  const conn = IntegrationConnectionV1.parse({
+    schemaVersion: 1,
+    tenantId,
+    providerId,
+    status: "connected",
+    authMode: "oauth",
+    credentialCiphertext: encryptJson(tokens),
     metadata,
     connectedByUserId: userId,
     connectedAt: now,

@@ -45,6 +45,10 @@ export function getServerEnv() {
     anthropicModel: process.env.ANTHROPIC_MODEL || "claude-3-5-sonnet-latest",
     openaiApiKey: process.env.OPENAI_API_KEY || "",
     openaiModel: process.env.OPENAI_MODEL || "gpt-4o",
+    // Google OAuth (for Google Business Profile + Search Console). One OAuth app
+    // covers both; the redirect URI is {appUrl}/api/seo/integrations/google/callback.
+    googleOAuthClientId: process.env.GOOGLE_OAUTH_CLIENT_ID || "",
+    googleOAuthClientSecret: process.env.GOOGLE_OAUTH_CLIENT_SECRET || "",
     // SEOOS feature flags (server-evaluated; env is the initial source).
     seoosEnabled: boolEnv("SEOOS_ENABLED", true),
     seoosRequestsEnabled: boolEnv("SEOOS_REQUESTS_ENABLED", true),
@@ -69,4 +73,10 @@ export function hasFirebaseAdminConfig() {
 export function hasAiConfig() {
   const env = getServerEnv();
   return Boolean(env.anthropicApiKey || env.openaiApiKey);
+}
+
+/** True when the Google OAuth app (GBP + Search Console) is configured. */
+export function hasGoogleOAuth() {
+  const env = getServerEnv();
+  return Boolean(env.googleOAuthClientId && env.googleOAuthClientSecret && env.appUrl);
 }

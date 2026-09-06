@@ -3,6 +3,7 @@ import { AppShell } from "@/src/components/app-shell";
 import { UnauthorizedPage } from "@/src/components/states";
 import { IntegrationCard } from "@/src/components/integration-card";
 import { GatewayDiagnostics } from "@/src/components/gateway-diagnostics";
+import { SyncClientsButton } from "@/src/components/sync-clients-button";
 import { listIntegrations } from "@/src/lib/server/integrations-service";
 
 export const dynamic = "force-dynamic";
@@ -24,6 +25,8 @@ export default async function IntegrationsPage() {
 
   const integrations = await listIntegrations(authz.tenantId);
   const connectedCount = integrations.filter((i) => i.status === "connected").length;
+  const clickupConnected = integrations.some((i) => i.id === "clickup" && i.status === "connected");
+  const isAdmin = authz.clientVisibility === "all";
 
   return (
     <AppShell
@@ -39,6 +42,20 @@ export default async function IntegrationsPage() {
         on a client/project to pull data. SEO-performance (rankings/grids/check-ins)
         can also be relayed from MTOS via the gateway when configured.
       </p>
+
+      {isAdmin && clickupConnected ? (
+        <div className="panel">
+          <div className="panel-head">
+            <h3 className="panel-title">ClickUp client sync</h3>
+            <span className="badge status-active">connected</span>
+          </div>
+          <p className="muted" style={{ marginTop: 0, fontSize: 13 }}>
+            Pull the full client roster + SEO data from the SEO Dashboard list. This also runs
+            automatically once a day to keep clients current.
+          </p>
+          <SyncClientsButton />
+        </div>
+      ) : null}
 
       <GatewayDiagnostics />
 

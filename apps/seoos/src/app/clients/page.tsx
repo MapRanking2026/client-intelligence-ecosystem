@@ -4,7 +4,6 @@ import { resolveSeoAuthz, authzHas } from "@/src/lib/auth/context";
 import { AppShell } from "@/src/components/app-shell";
 import { EmptyState, Panel, StatusPill, UnauthorizedPage } from "@/src/components/states";
 import { CreateProjectForm } from "@/src/components/create-project-form";
-import { SyncClientsButton } from "@/src/components/sync-clients-button";
 import { SyncSourcesButton } from "@/src/components/sync-sources-button";
 import { listProjectsForViewer } from "@/src/lib/server/projects-service";
 
@@ -33,10 +32,7 @@ export default async function ClientsPage() {
       ) : (
         <>
           {isAdmin ? (
-            <>
-              <SyncClientsButton />
-              <CreateProjectForm />
-            </>
+            <CreateProjectForm />
           ) : (
             <p className="muted" style={{ fontSize: 13 }}>
               Showing the clients assigned to you. An admin syncs the full roster from ClickUp.

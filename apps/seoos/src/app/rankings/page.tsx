@@ -2,12 +2,12 @@ import Link from "next/link";
 
 import { resolveSeoAuthz, authzHas } from "@/src/lib/auth/context";
 import { AppShell } from "@/src/components/app-shell";
-import { BlockedExternal, EmptyState, Panel, StatCard, StatusPill, UnauthorizedPage } from "@/src/components/states";
-import { listProjects } from "@/src/lib/server/projects-service";
+import { EmptyState, Panel, StatCard, StatusPill, UnauthorizedPage } from "@/src/components/states";
+import { listProjectsForViewer } from "@/src/lib/server/projects-service";
 import { listKeywords } from "@/src/lib/server/keywords-service";
 import { TRACKED_KEYWORD_STATUSES } from "@/src/lib/domain/keyword";
-import { PopulateButton } from "@/src/components/populate-button";
-import { ProjectMappingForm } from "@/src/components/project-mapping-form";
+import { ClientSelect } from "@/src/components/client-select";
+import { FullScanButton } from "@/src/components/full-scan-button";
 import { getPerformanceSnapshotRepo } from "@/src/lib/server/repositories/performance-snapshot-repo";
 
 export const dynamic = "force-dynamic";
@@ -30,7 +30,7 @@ export default async function RankingsPage({
   }
 
   const projects = authzHas(authz, "seo.project.manage")
-    ? await listProjects(authz.tenantId)
+    ? await listProjectsForViewer(authz)
     : [];
   const { projectId } = await searchParams;
   const selected = projects.find((p) => p.id === projectId) ?? projects[0];
@@ -65,33 +65,22 @@ export default async function RankingsPage({
         <EmptyState title="No projects" message="Create a project and approve keywords to track rankings." action={<Link href="/clients">Clients →</Link>} />
       ) : (
         <>
-          <div className="toolbar">
-            <span className="muted" style={{ fontSize: 12 }}>Project:</span>
-            {projects.map((p) => (
-              <Link key={p.id} href={`/rankings?projectId=${p.id}`} className={`badge${p.id === selected?.id ? " status-active" : ""}`}>
-                {p.businessName}
-              </Link>
-            ))}
-          </div>
+          <ClientSelect
+            projects={projects.map((p) => ({ id: p.id, businessName: p.businessName }))}
+            selectedId={selected?.id}
+            basePath="/rankings"
+          />
           {selected && canManage ? (
             <div className="toolbar">
-              <PopulateButton projectId={selected.id} />
+              <FullScanButton projectId={selected.id} />
               {snapshot ? <span className="muted" style={{ fontSize: 12 }}>Last pulled {snapshot.generatedAt.slice(0, 16).replace("T", " ")}</span> : null}
             </div>
-          ) : null}
-          {selected && canManage ? (
-            <Panel title="Project source mapping">
-              <ProjectMappingForm
-                projectId={selected.id}
-                clickupListId={selected.externalIds?.clickupListId}
-              />
-            </Panel>
           ) : null}
 
           <div className="grid-cards" style={{ marginBottom: 14 }}>
             <StatCard label="Tracked keywords" value={tracked.length} />
-            <StatCard label="Avg position" value={avgRank ?? "—"} hint={snapshot ? "from grid scans" : "pull from MTOS"} />
-            <StatCard label="Grid market share" value={avgShare != null ? `${avgShare}%` : "—"} hint={snapshot ? "share of local voice" : "pull from MTOS"} />
+            <StatCard label="Avg position" value={avgRank ?? "—"} hint={snapshot ? "from grid scans" : "run a full scan"} />
+            <StatCard label="Grid market share" value={avgShare != null ? `${avgShare}%` : "—"} hint={snapshot ? "share of local voice" : "run a full scan"} />
             <StatCard label="Businesses" value={snapshot ? snapshot.businesses.length : "—"} hint="matched in Rank Tracker" />
           </div>
 
@@ -129,8 +118,8 @@ export default async function RankingsPage({
               </div>
             )}
             <p className="muted" style={{ fontSize: 12, marginTop: 10 }}>
-              Positions and grid data populate from Rank Tracker / GeoGrid through the
-              integration gateway. Historical gaps are labeled, never fabricated.
+              Positions and grid data come from the Rank Tracker (MapRanking) connection.
+              Run a full scan to pull the latest. Historical gaps are labeled, never fabricated.
             </p>
           </Panel>
 
@@ -161,9 +150,10 @@ export default async function RankingsPage({
                 </table>
               </div>
             ) : (
-              <BlockedExternal
-                provider="geogrid (via gateway)"
-                requirement="pull data from MTOS above (needs the gateway configured + a completed grid scan for the client)"
+              <EmptyState
+                title="No grid scan yet"
+                message="Connect Rank Tracker (MapRanking) under Integrations, then Generate full scan above to pull this client's grids and heatmaps."
+                action={selected ? <Link href={`/clients/${selected.id}`}>Open client →</Link> : undefined}
               />
             )}
           </Panel>

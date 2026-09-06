@@ -4,7 +4,8 @@ import { resolveSeoAuthz, authzHas } from "@/src/lib/auth/context";
 import { AppShell } from "@/src/components/app-shell";
 import { EmptyState, UnauthorizedPage } from "@/src/components/states";
 import { KeywordsManager } from "@/src/components/keywords-manager";
-import { listProjects } from "@/src/lib/server/projects-service";
+import { ClientSelect } from "@/src/components/client-select";
+import { listProjectsForViewer } from "@/src/lib/server/projects-service";
 import { listKeywords } from "@/src/lib/server/keywords-service";
 
 export const dynamic = "force-dynamic";
@@ -28,7 +29,7 @@ export default async function KeywordsPage({
     );
   }
 
-  const projects = await listProjects(authz.tenantId);
+  const projects = await listProjectsForViewer(authz);
   const { projectId } = await searchParams;
   const selected = projects.find((p) => p.id === projectId) ?? projects[0];
 
@@ -47,24 +48,23 @@ export default async function KeywordsPage({
         />
       ) : (
         <>
-          <div className="toolbar">
-            <span className="muted" style={{ fontSize: 12 }}>Project:</span>
-            {projects.map((p) => (
-              <Link
-                key={p.id}
-                href={`/keywords?projectId=${p.id}`}
-                className={`badge${p.id === selected?.id ? " status-active" : ""}`}
-              >
-                {p.businessName}
-              </Link>
-            ))}
-          </div>
+          <ClientSelect
+            projects={projects.map((p) => ({ id: p.id, businessName: p.businessName }))}
+            selectedId={selected?.id}
+            basePath="/keywords"
+          />
           {selected ? (
-            <KeywordsManager
-              projectId={selected.id}
-              clientId={selected.clientId}
-              keywords={await listKeywords(authz.tenantId, selected.id)}
-            />
+            <>
+              <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>
+                Keywords for <strong>{selected.businessName}</strong>
+                {selected.niche ? ` · ${selected.niche}` : ""}.
+              </p>
+              <KeywordsManager
+                projectId={selected.id}
+                clientId={selected.clientId}
+                keywords={await listKeywords(authz.tenantId, selected.id)}
+              />
+            </>
           ) : null}
         </>
       )}

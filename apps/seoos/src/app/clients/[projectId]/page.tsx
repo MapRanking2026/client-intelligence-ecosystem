@@ -93,14 +93,24 @@ export default async function ProjectSetupPage({
           <FullScanButton projectId={project.id} />
           <ol style={{ listStyle: "none", padding: 0, marginTop: 10 }}>
             <Check done={Boolean(project.niche || project.valueProposition)}>
-              Intake context (niche / value proposition) — <Link href="/clients">edit on create</Link>
+              <strong>1. Intake context</strong> — niche / value proposition{" "}
+              {project.niche ? `(${project.niche})` : ""}
             </Check>
-            <Check done={hasData}>Full scan — pull Rank Tracker grids + Map Check-Ins</Check>
+            <Check done={hasData}>
+              <strong>2. Full scan</strong> — pull Rank Tracker grids + Map Check-Ins ·{" "}
+              <Link href={`/rankings?projectId=${project.id}`}>view rankings →</Link>
+            </Check>
             <Check done={keywords.length > 0}>
-              Keyword selection — <Link href={`/keywords?projectId=${project.id}`}>manage keywords →</Link>
+              <strong>3. Keywords</strong> — {keywords.length} tracked ·{" "}
+              <Link href={`/keywords?projectId=${project.id}`}>manage keywords →</Link>
             </Check>
             <Check done={recs.length > 0}>
-              Phase-1 recommendations — generate below, then approve
+              <strong>4. Phase-1 recommendations</strong> — {recs.length} generated ·{" "}
+              <Link href={`/recommendations?projectId=${project.id}`}>review &amp; approve →</Link>
+            </Check>
+            <Check done={hasData}>
+              <strong>5. Monthly report</strong> —{" "}
+              <Link href={`/reports/${project.id}`}>generate the full report →</Link>
             </Check>
           </ol>
           <GenerateAiRecsButton projectId={project.id} />

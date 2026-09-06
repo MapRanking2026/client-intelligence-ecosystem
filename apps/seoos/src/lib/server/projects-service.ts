@@ -272,6 +272,77 @@ export async function listProjectsForViewer(authz: AuthzContextV1): Promise<SeoP
   });
 }
 
+/**
+ * Recompute a project's setup readiness from what's actually in place, so the
+ * setup wizard reflects real progress (not a hand-set number).
+ */
+export async function recomputeSetupReadiness(
+  tenantId: string,
+  projectId: string,
+): Promise<SeoProjectV1> {
+  const repo = getProjectRepo();
+  const project = await repo.get(tenantId, projectId);
+  if (!project) throw new Error(`Project not found: ${projectId}`);
+
+  const { getPerformanceSnapshotRepo } = await import(
+    "@/src/lib/server/repositories/performance-snapshot-repo"
+  );
+  const { getKeywordRepo } = await import("@/src/lib/server/repositories/keyword-repo");
+  const { getRecommendationRepo } = await import(
+    "@/src/lib/server/repositories/recommendation-repo"
+  );
+
+  const [snapshot, keywords, recs] = await Promise.all([
+    getPerformanceSnapshotRepo().get(tenantId, projectId),
+    getKeywordRepo().listByProject(tenantId, projectId),
+    getRecommendationRepo().listByProject(tenantId, projectId),
+  ]);
+
+  let score = 20; // intake exists
+  if (project.niche || project.valueProposition) score += 10;
+  if (project.externalIds?.pod) score += 10;
+  if (snapshot && (snapshot.grids.length || snapshot.keywords.length)) score += 30;
+  if (keywords.length) score += 20;
+  if (recs.length) score += 10;
+  const setupReadiness = Math.min(100, score);
+
+  return repo.save({ ...project, setupReadiness, updatedAt: nowIso() });
+}
+
+export interface FullScanResult {
+  ok: boolean;
+  sources: Record<string, unknown>;
+  setupReadiness: number;
+  error?: string;
+}
+
+/**
+ * "Generate full scan": pull every connected source for a client, then advance
+ * the project (baseline stage + recomputed readiness). All reads; no external
+ * side effects beyond the same syncs the Clients page already runs.
+ */
+export async function runFullScan(tenantId: string, projectId: string): Promise<FullScanResult> {
+  const repo = getProjectRepo();
+  const project = await repo.get(tenantId, projectId);
+  if (!project) return { ok: false, sources: {}, setupReadiness: 0, error: "Project not found" };
+
+  const { syncProjectSources } = await import("@/src/lib/server/source-sync-service");
+  const sync = await syncProjectSources(tenantId, projectId);
+
+  // Advance draft/intake to baseline_scan once data has been pulled.
+  if (project.stage === "draft" || project.stage === "intake") {
+    await repo.save({ ...project, stage: "baseline_scan", updatedAt: nowIso() });
+  }
+  const advanced = await recomputeSetupReadiness(tenantId, projectId);
+
+  return {
+    ok: sync.ok,
+    sources: sync.sources,
+    setupReadiness: advanced.setupReadiness,
+    error: sync.error,
+  };
+}
+
 /** Merge provider external-id mappings (e.g. clickupListId) into a project. */
 export async function updateProjectExternalIds(
   tenantId: string,

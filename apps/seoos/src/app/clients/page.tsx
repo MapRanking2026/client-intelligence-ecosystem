@@ -71,7 +71,7 @@ export default async function ClientsPage() {
                   <tbody>
                     {projects.map((p) => (
                       <tr key={p.id}>
-                        <td>{p.businessName}</td>
+                        <td><Link href={`/clients/${p.id}`}>{p.businessName}</Link></td>
                         <td className="muted">{p.clientId}</td>
                         {isAdmin ? (
                           <td className="muted">{p.externalIds?.seoSpecialist ?? "—"}</td>

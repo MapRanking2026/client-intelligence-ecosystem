@@ -26,9 +26,13 @@ export function SyncClientsButton() {
       if (!d.ok) {
         setMessage(d.error ?? "Sync error");
       } else {
+        const podLine = d.podNote
+          ? ` Pods: ${d.podNote}`
+          : ` Pods: ${d.podsFound} found, ${d.podsMatched} client(s) matched.`;
         setMessage(
           `Synced ${d.total} active client(s): ${d.created} new, ${d.updated} refreshed` +
-            (d.skipped ? `, ${d.skipped} inactive skipped.` : "."),
+            (d.skipped ? `, ${d.skipped} inactive skipped.` : ".") +
+            podLine,
         );
         router.refresh();
       }

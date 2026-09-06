@@ -80,6 +80,12 @@ export interface SyncClientsResult {
   skipped: number;
   /** Active clients considered. */
   total: number;
+  /** Distinct pods discovered from the SEO Dashboard. */
+  podsFound: number;
+  /** Clients that matched a pod by business name. */
+  podsMatched: number;
+  /** Human note about the pod join (e.g. dashboard list not configured). */
+  podNote?: string;
   error?: string;
 }
 
@@ -93,7 +99,15 @@ export interface SyncClientsResult {
  * Admin-only at the API layer (any admin can pull ALL clients at once).
  */
 export async function syncClientsFromClickUp(tenantId: string): Promise<SyncClientsResult> {
-  const empty = { ok: false as const, created: 0, updated: 0, skipped: 0, total: 0 };
+  const empty = {
+    ok: false as const,
+    created: 0,
+    updated: 0,
+    skipped: 0,
+    total: 0,
+    podsFound: 0,
+    podsMatched: 0,
+  };
 
   const integrations = await listIntegrations(tenantId);
   const clickup = integrations.find((i) => i.id === "clickup" && i.status === "connected");
@@ -123,17 +137,22 @@ export async function syncClientsFromClickUp(tenantId: string): Promise<SyncClie
   }
   const podFor = (name: string): string | undefined =>
     podMap.podByClient[normalizeComparableValue(name)];
+  const podNote = podMap.ok ? undefined : podMap.error;
 
   const repo = getProjectRepo();
   let created = 0;
   let updated = 0;
+  let podsMatched = 0;
   for (const client of roster.clients) {
     const now = nowIso();
     const externalIds: Record<string, string> = { clickupTaskId: client.taskId };
     if (client.seoSpecialist) externalIds.seoSpecialist = client.seoSpecialist;
     if (client.accountManager) externalIds.accountManager = client.accountManager;
     const pod = podFor(client.name);
-    if (pod) externalIds.pod = pod;
+    if (pod) {
+      externalIds.pod = pod;
+      podsMatched += 1;
+    }
 
     const existing = await repo.findByClient(tenantId, client.clientId);
     if (existing) {
@@ -181,6 +200,9 @@ export async function syncClientsFromClickUp(tenantId: string): Promise<SyncClie
     updated,
     skipped: Math.max(0, roster.fetched - roster.clients.length),
     total: roster.clients.length,
+    podsFound: podMap.ok ? podMap.podNames.length : 0,
+    podsMatched,
+    podNote,
   };
 }
 

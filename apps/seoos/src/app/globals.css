@@ -454,3 +454,115 @@ table.data td {
   flex-wrap: wrap;
   margin-bottom: 14px;
 }
+
+/* ---------- Tickets ---------- */
+.ticket-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.ticket {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--panel) 70%, transparent);
+  overflow: hidden;
+}
+.ticket.is-open {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+}
+.ticket-head {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  color: var(--fg);
+  text-align: left;
+  font-size: 14px;
+}
+.ticket-title {
+  font-weight: 600;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ticket-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+  font-size: 12px;
+}
+.ticket-meta .chevron {
+  color: var(--muted);
+}
+.ticket-body {
+  padding: 4px 14px 14px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.ticket-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+.ticket-ask {
+  background: color-mix(in srgb, var(--muted) 8%, transparent);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+.ticket-needs {
+  border: 1px solid color-mix(in srgb, var(--danger) 45%, var(--border));
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+.ticket-needs ul {
+  padding-left: 18px;
+}
+.ticket-draftbox {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px;
+}
+.ticket-draft {
+  width: 100%;
+  margin-top: 6px;
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12.5px;
+  line-height: 1.55;
+  resize: vertical;
+}
+.btn-approve {
+  background: var(--accent);
+  color: var(--accent-fg);
+  border: 1px solid var(--accent);
+}
+.ticket-reject {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+.ticket-reject input {
+  flex: 1;
+  min-width: 220px;
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 13px;
+}

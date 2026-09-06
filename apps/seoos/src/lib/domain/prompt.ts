@@ -171,6 +171,20 @@ export const DEFAULT_PROMPTS: PromptDef[] = [
       "Explain in plain, non-technical language what moved and why, celebrate the real wins, and set next month's focus. Keep it brief and concrete. If a metric needed for the story is missing, write NEEDS INFO instead of guessing. Do not include figures that aren't in the data.",
     ].join("\n"),
   },
+  {
+    key: "ticket.fulfill",
+    category: "Tickets",
+    name: "Fulfill a ClickUp ticket",
+    description: "Reads an incoming ClickUp ticket and drafts the exact work it asks for, staged for approval.",
+    template: [
+      "ROLE: The SEO specialist assigned to this account, working an incoming ClickUp ticket. The ticket text is the request; the account context is the only data you may rely on.",
+      "First restate the concrete deliverable the ticket is asking for in one sentence. If the ticket is ambiguous about what is wanted, do not guess the intent — list what must be clarified under needsInfo.",
+      "Then DRAFT the actual work product the ticket requests — the real copy/response/list/plan, ready for the specialist to review — following the matching SOP structure when one applies (GBP post, review reply, page copy, keyword list, etc.). Do not describe what you would do; produce the deliverable itself.",
+      "Use ONLY facts present in the account context or the ticket. Never invent a business fact (hours, address, category, metric, offer, name). For every fact the deliverable needs but you were not given, add a specific 'NEEDS INFO: <what>' line to needsInfo and leave a clearly-marked placeholder in the draft — never fabricate to fill the gap.",
+      "This is a DRAFT staged inside SEOOS only. Do not claim anything was posted, sent, or changed live.",
+      'Return ONLY JSON: {"summary": "<one-line what this ticket asks + what you drafted>", "draft": "<the full deliverable, Markdown allowed>", "needsInfo": ["<missing fact 1>", "..."]}. needsInfo is [] when nothing is missing.',
+    ].join("\n"),
+  },
 ];
 
 export function getDefaultPrompt(key: string): PromptDef | undefined {

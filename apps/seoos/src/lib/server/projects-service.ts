@@ -334,6 +334,10 @@ export async function runFullScan(tenantId: string, projectId: string): Promise<
   }
   const advanced = await recomputeSetupReadiness(tenantId, projectId);
 
+  // Bring the client's task plan up to date from its current state.
+  const { syncTaskPlan } = await import("@/src/lib/server/task-engine-service");
+  await syncTaskPlan(tenantId, projectId).catch(() => {});
+
   return {
     ok: sync.ok,
     sources: sync.sources,
@@ -355,11 +359,17 @@ export async function assignProjectSpecialist(
   const repo = getProjectRepo();
   const project = await repo.get(tenantId, projectId);
   if (!project) throw new Error(`Project not found: ${projectId}`);
-  if (specialistId) {
-    return repo.save({ ...project, assignedSpecialistId: specialistId, updatedAt: nowIso() });
-  }
-  const { assignedSpecialistId: _drop, ...rest } = project;
-  return repo.save({ ...rest, updatedAt: nowIso() });
+  const saved = specialistId
+    ? await repo.save({ ...project, assignedSpecialistId: specialistId, updatedAt: nowIso() })
+    : await (async () => {
+        const { assignedSpecialistId: _drop, ...rest } = project;
+        return repo.save({ ...rest, updatedAt: nowIso() });
+      })();
+  // Reassignment re-runs the task engine: open tasks move to the new specialist
+  // and the plan continues from the client's current state.
+  const { syncTaskPlan } = await import("@/src/lib/server/task-engine-service");
+  await syncTaskPlan(tenantId, projectId).catch(() => {});
+  return saved;
 }
 
 /** Merge provider external-id mappings (e.g. clickupListId) into a project. */

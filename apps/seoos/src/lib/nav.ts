@@ -12,6 +12,7 @@ export interface NavItem {
 export const NAV: NavItem[] = [
   { href: "/", label: "Dashboard", glyph: "◆" },
   { href: "/clients", label: "Clients", glyph: "▣", permission: "seo.project.manage" },
+  { href: "/tasks", label: "Tasks", glyph: "☑", permission: "seo.package.read" },
   { href: "/requests", label: "Request Inbox", glyph: "✉", permission: "seo.package.read" },
   { href: "/keywords", label: "Keywords", glyph: "⌗", permission: "seo.package.read" },
   { href: "/rankings", label: "Rankings & Grids", glyph: "▚", permission: "seo.package.read" },

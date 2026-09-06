@@ -2,9 +2,10 @@ import { NextResponse } from "next/server";
 
 import { getServerEnv } from "@/src/lib/server/env";
 import { syncClientsFromClickUp } from "@/src/lib/server/projects-service";
+import { syncAllTaskPlans } from "@/src/lib/server/task-engine-service";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 /**
  * Scheduled client sync (Vercel Cron). Pulls the full client roster + SEO data
@@ -23,7 +24,10 @@ export async function GET(request: Request) {
   const tenantId = getServerEnv().pilotTenantId;
   try {
     const result = await syncClientsFromClickUp(tenantId);
-    return NextResponse.json({ tenantId, ...result });
+    // Nothing gets missed: bring every client's task plan up to date (new tasks,
+    // new recurring periods, reassignments), continuing from each client's state.
+    const tasks = await syncAllTaskPlans(tenantId);
+    return NextResponse.json({ tenantId, ...result, tasks });
   } catch (e) {
     return NextResponse.json(
       { tenantId, ok: false, error: e instanceof Error ? e.message : "cron_sync_failed" },

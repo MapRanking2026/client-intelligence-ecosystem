@@ -15,6 +15,7 @@ import type { SpecialistV1 } from "@/src/lib/domain/specialist";
 import type { NicheStudyV1 } from "@/src/lib/domain/niche-study";
 import type { PromptV1 } from "@/src/lib/domain/prompt";
 import type { SpecialistStyleV1 } from "@/src/lib/domain/specialist-style";
+import type { PreparedTaskV1 } from "@/src/lib/domain/prepared-task";
 import type { MonthlyAuditV1 } from "@/src/lib/domain/monthly-audit";
 import type { IntegrationConnectionV1 } from "@/src/lib/domain/integration";
 
@@ -40,6 +41,7 @@ interface SeedStore {
   nicheStudies: NicheStudyV1[];
   prompts: PromptV1[];
   specialistStyles: SpecialistStyleV1[];
+  preparedTasks: PreparedTaskV1[];
   monthlyAudits: MonthlyAuditV1[];
   integrations: IntegrationConnectionV1[];
 }
@@ -61,6 +63,7 @@ function buildSeed(): SeedStore {
     nicheStudies: [],
     prompts: [],
     specialistStyles: [],
+    preparedTasks: [],
     monthlyAudits: [],
     integrations: [],
   };

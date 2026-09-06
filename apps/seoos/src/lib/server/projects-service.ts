@@ -216,13 +216,11 @@ export async function syncClientsFromClickUp(tenantId: string): Promise<SyncClie
   // subtask rows created by an earlier, buggy sync). Manually-created projects
   // (no clickupTaskId) are never touched.
   const currentIds = new Set(roster.clients.map((c) => c.clientId));
-  let pruned = 0;
-  for (const p of await repo.list(tenantId)) {
-    if (p.externalIds?.clickupTaskId && !currentIds.has(p.clientId)) {
-      await repo.remove(tenantId, p.id);
-      pruned += 1;
-    }
-  }
+  const staleIds = (await repo.list(tenantId))
+    .filter((p) => p.externalIds?.clickupTaskId && !currentIds.has(p.clientId))
+    .map((p) => p.id);
+  if (staleIds.length) await repo.removeMany(tenantId, staleIds);
+  const pruned = staleIds.length;
 
   return {
     ok: true,

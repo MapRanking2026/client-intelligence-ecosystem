@@ -12,6 +12,7 @@ export interface ProjectRepo {
   ): Promise<SeoProjectV1 | null>;
   save(project: SeoProjectV1): Promise<SeoProjectV1>;
   remove(tenantId: string, projectId: string): Promise<void>;
+  removeMany(tenantId: string, projectIds: string[]): Promise<void>;
 }
 
 class InMemoryProjectRepo implements ProjectRepo {
@@ -45,6 +46,12 @@ class InMemoryProjectRepo implements ProjectRepo {
   async remove(tenantId: string, projectId: string) {
     seedStore.projects = seedStore.projects.filter(
       (p) => !(p.tenantId === tenantId && p.id === projectId),
+    );
+  }
+  async removeMany(tenantId: string, projectIds: string[]) {
+    const drop = new Set(projectIds);
+    seedStore.projects = seedStore.projects.filter(
+      (p) => !(p.tenantId === tenantId && drop.has(p.id)),
     );
   }
 }
@@ -95,6 +102,17 @@ class FirestoreProjectRepo implements ProjectRepo {
     const db = getFirebaseAdminDb();
     if (!db) throw new Error("Firestore unavailable");
     await tenantCollection(db, tenantId, COLLECTIONS.projects).doc(projectId).delete();
+  }
+  async removeMany(tenantId: string, projectIds: string[]) {
+    const db = getFirebaseAdminDb();
+    if (!db) throw new Error("Firestore unavailable");
+    const col = tenantCollection(db, tenantId, COLLECTIONS.projects);
+    // Firestore batches cap at 500 writes.
+    for (let i = 0; i < projectIds.length; i += 450) {
+      const batch = db.batch();
+      for (const id of projectIds.slice(i, i + 450)) batch.delete(col.doc(id));
+      await batch.commit();
+    }
   }
 }
 

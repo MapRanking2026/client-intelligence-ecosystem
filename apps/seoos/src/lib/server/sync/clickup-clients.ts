@@ -34,11 +34,43 @@ export interface RosterClient {
   name: string;
   website?: string;
   location?: string;
+  niche?: string;
+  /** Pod name from the SEO Dashboard "⭐ Pod" field. */
+  pod?: string;
+  /** Services (⭐ Services labels), joined. */
+  serviceTier?: string;
+  /** Health indicator (Health Score / ⭐ Health). */
+  health?: string;
+  status?: string;
   /** Raw, normalized value of the SEO Specialist field (for read-time matching). */
   seoSpecialist?: string;
   accountManager?: string;
+  /** Curated non-secret SEO metrics for display (label -> value). */
+  metrics?: Record<string, string>;
   taskId: string;
   updatedAt?: string;
+}
+
+/** Curated SEO Dashboard fields surfaced on the client (label -> field-name candidates). */
+const METRIC_FIELDS: Array<[string, string[]]> = [
+  ["Avg ranking", ["Ave Ranking", "Average Ranking", "Avg Ranking"]],
+  ["R.R.S %", ["R.R.S %", "RRS %", "RRS"]],
+  ["Health score", ["Health Score", "Health"]],
+  ["Grid size", ["Grid Size"]],
+  ["Aug check-ins", ["Aug Check-ins", "August Check-ins"]],
+  ["Jul check-ins", ["July Check-ins", "Jul Check-ins"]],
+  ["Aug GBP views", ["Aug GBP Views", "August GBP Views"]],
+  ["Satisfaction", ["Satisfaction Rating"]],
+  ["Main category", ["Main Category"]],
+];
+
+function extractMetrics(task: ClickUpTask): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [label, names] of METRIC_FIELDS) {
+    const v = firstField(task, names);
+    if (v) out[label] = v;
+  }
+  return out;
 }
 
 export interface RosterResult {
@@ -321,18 +353,33 @@ export async function fetchClickUpClientRoster(input: {
 
     const active = raw.filter(isActiveTask);
     const clients: RosterClient[] = active.map((task) => {
-      const name = task.name?.trim() || "Unnamed Client";
+      const name =
+        firstField(task, ["Business Name", "⭐️ Business Name", "Client Name", "⭐️ Client Name", "Name"]) ||
+        task.name?.trim() ||
+        "Unnamed Client";
       const website = firstField(task, ["Website", "URL", "Domain", "Site"]) || undefined;
-      const location = firstField(task, ["Location", "Market", "City"]) || undefined;
+      const location = firstField(task, ["City, ST", "Location", "Market", "City", "State"]) || undefined;
+      const niche = firstField(task, ["Niche", "Main Category", "Industry", "Vertical"]) || undefined;
+      const pod = firstField(task, podFieldNames()) || undefined;
+      const serviceTier = firstField(task, ["Services", "⭐ Services", "Service", "Package"]) || undefined;
+      const health = firstField(task, ["Health Score", "Health", "⭐ Health"]) || undefined;
+      const status = firstField(task, statusFieldNames()) || undefined;
       const seoSpecialist = normalizeComparableValue(firstField(task, specialistFieldNames())) || undefined;
       const accountManager = firstField(task, managerFieldNames()) || undefined;
+      const metrics = extractMetrics(task);
       return {
         clientId: task.id,
         name,
         website,
         location,
+        niche,
+        pod,
+        serviceTier,
+        health,
+        status,
         seoSpecialist,
         accountManager,
+        metrics: Object.keys(metrics).length ? metrics : undefined,
         taskId: task.id,
         updatedAt: task.date_updated || undefined,
       };

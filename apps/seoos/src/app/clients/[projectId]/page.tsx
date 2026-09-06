@@ -67,9 +67,20 @@ export default async function ProjectSetupPage({
         <p className="muted" style={{ fontSize: 13, marginTop: 0 }}>
           {project.website ? <>🔗 {project.website} · </> : null}
           {project.niche ? <>Niche: {project.niche} · </> : null}
+          {project.serviceTier ? <>Services: {project.serviceTier} · </> : null}
           {project.valueProposition ? <>“{project.valueProposition}”</> : null}
         </p>
       </Panel>
+
+      {Object.keys(project.dashboardMetrics ?? {}).length ? (
+        <Panel title="SEO Dashboard (from ClickUp)">
+          <div className="grid-cards">
+            {Object.entries(project.dashboardMetrics).map(([label, value]) => (
+              <StatCard key={label} label={label} value={value} />
+            ))}
+          </div>
+        </Panel>
+      ) : null}
 
       {canManage ? (
         <Panel title="Setup wizard">

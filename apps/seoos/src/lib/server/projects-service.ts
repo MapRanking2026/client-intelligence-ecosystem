@@ -16,7 +16,6 @@ import {
 } from "@/src/lib/server/integrations-service";
 import {
   fetchClickUpClientRoster,
-  fetchClickUpPodMap,
   normalizeComparableValue,
 } from "@/src/lib/server/sync/clickup-clients";
 import { podKeysForUser, upsertDiscoveredPods } from "@/src/lib/server/pods-service";
@@ -121,26 +120,26 @@ export async function syncClientsFromClickUp(tenantId: string): Promise<SyncClie
     return { ...empty, error: "ClickUp credentials are missing. Reconnect ClickUp under Integrations." };
   }
 
+  // The SEO Dashboard is the roster source of truth: one row per client with the
+  // full SEO field set (pod, niche, account manager, services, metrics). Prefer
+  // it; fall back to a plain roster list only if no dashboard list is set.
+  const rosterListId =
+    creds.dashboardListId ||
+    process.env.CLICKUP_SEO_DASHBOARD_LIST_ID ||
+    creds.listId ||
+    creds.healthTrackerListId;
   const roster = await fetchClickUpClientRoster({
     token: creds.apiToken,
-    listId: creds.listId || creds.healthTrackerListId,
+    listId: rosterListId,
     teamId: creds.teamId,
   });
   if (!roster.ok) return { ...empty, error: roster.error ?? "clickup_roster_failed" };
 
-  // Read-only: map each client to its Pod from the SEO Dashboard (best-effort;
-  // a missing/unconfigured dashboard list just leaves pods unset).
-  const podMap = await fetchClickUpPodMap({
-    token: creds.apiToken,
-    dashboardListId: creds.dashboardListId,
-  });
-  if (podMap.ok && podMap.podNames.length) {
-    await upsertDiscoveredPods(tenantId, podMap.podNames);
-  }
-  const podFor = (name: string): string | undefined =>
-    podMap.podByClient[normalizeComparableValue(name)];
-  const infoFor = (name: string) => podMap.infoByClient[normalizeComparableValue(name)];
-  const podNote = podMap.ok ? undefined : podMap.error;
+  // Pods come straight off the roster rows now (no separate join).
+  const discoveredPods = Array.from(
+    new Set(roster.clients.map((c) => c.pod).filter((p): p is string => Boolean(p))),
+  );
+  if (discoveredPods.length) await upsertDiscoveredPods(tenantId, discoveredPods);
 
   const repo = getProjectRepo();
   let created = 0;
@@ -151,13 +150,11 @@ export async function syncClientsFromClickUp(tenantId: string): Promise<SyncClie
     const externalIds: Record<string, string> = { clickupTaskId: client.taskId };
     if (client.seoSpecialist) externalIds.seoSpecialist = client.seoSpecialist;
     if (client.accountManager) externalIds.accountManager = client.accountManager;
-    const pod = podFor(client.name);
-    if (pod) {
-      externalIds.pod = pod;
+    if (client.pod) {
+      externalIds.pod = client.pod;
       podsMatched += 1;
     }
-    const info = infoFor(client.name);
-    const website = client.website ?? info?.website;
+    const metrics = client.metrics ?? {};
 
     const existing = await repo.findByClient(tenantId, client.clientId);
     if (existing) {
@@ -167,11 +164,13 @@ export async function syncClientsFromClickUp(tenantId: string): Promise<SyncClie
       await repo.save({
         ...existing,
         businessName: client.name || existing.businessName,
-        website: existing.website ?? website,
+        website: existing.website ?? client.website,
         // Fill AI-context fields only when empty — never clobber manual edits.
-        niche: existing.niche ?? info?.niche,
+        niche: existing.niche ?? client.niche,
+        serviceTier: existing.serviceTier ?? client.serviceTier,
         targetLocations: mergedLocations,
         externalIds: { ...existing.externalIds, ...externalIds },
+        dashboardMetrics: { ...existing.dashboardMetrics, ...metrics },
         updatedAt: now,
       });
       updated += 1;
@@ -185,8 +184,9 @@ export async function syncClientsFromClickUp(tenantId: string): Promise<SyncClie
         tenantId,
         clientId: client.clientId,
         businessName: client.name,
-        website,
-        niche: info?.niche,
+        website: client.website,
+        niche: client.niche,
+        serviceTier: client.serviceTier,
         stage: "intake",
         health: "healthy",
         assignments: { supportingUserIds: [] },
@@ -194,6 +194,7 @@ export async function syncClientsFromClickUp(tenantId: string): Promise<SyncClie
         targetLocations: client.location ? [client.location] : [],
         goals: [],
         externalIds,
+        dashboardMetrics: metrics,
         setupReadiness: 10,
         createdAt: now,
         updatedAt: now,
@@ -208,9 +209,9 @@ export async function syncClientsFromClickUp(tenantId: string): Promise<SyncClie
     updated,
     skipped: Math.max(0, roster.fetched - roster.clients.length),
     total: roster.clients.length,
-    podsFound: podMap.ok ? podMap.podNames.length : 0,
+    podsFound: discoveredPods.length,
     podsMatched,
-    podNote,
+    podNote: undefined,
   };
 }
 

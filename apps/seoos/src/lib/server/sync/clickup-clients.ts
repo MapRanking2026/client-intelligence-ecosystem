@@ -18,7 +18,10 @@ type ClickUpTask = {
   description?: string;
   due_date?: string | null;
   date_updated?: string | null;
+  parent?: string | null;
   status?: { status?: string; type?: string };
+  /** Native ClickUp assignees — the SEO specialist(s) the client is assigned to. */
+  assignees?: Array<{ id?: number; username?: string; email?: string }>;
   custom_fields?: Array<{
     name?: string;
     value?: unknown;
@@ -42,8 +45,10 @@ export interface RosterClient {
   /** Health indicator (Health Score / ⭐ Health). */
   health?: string;
   status?: string;
-  /** Raw, normalized value of the SEO Specialist field (for read-time matching). */
+  /** Normalized specialist identity for matching (native assignee, else ⭐ Responsable). */
   seoSpecialist?: string;
+  /** The specialist's display name (native ClickUp assignee), for showing raw. */
+  assignedTo?: string;
   accountManager?: string;
   /** Curated non-secret SEO metrics for display (label -> value). */
   metrics?: Record<string, string>;
@@ -208,7 +213,7 @@ async function fetchTasksFromList(token: string, listId: string): Promise<ClickU
   for (let page = 0; page < 10; page += 1) {
     const body = await clickupGet(
       token,
-      `/list/${listId}/task?include_closed=true&subtasks=true&page=${page}`,
+      `/list/${listId}/task?include_closed=true&page=${page}`,
     );
     const pageTasks = Array.isArray(body.tasks) ? (body.tasks as ClickUpTask[]) : [];
     tasks.push(...pageTasks);
@@ -222,7 +227,7 @@ async function fetchTasksFromTeam(token: string, teamId: string): Promise<ClickU
   for (let page = 0; page < 10; page += 1) {
     const body = await clickupGet(
       token,
-      `/team/${teamId}/task?include_closed=true&subtasks=true&order_by=updated&page=${page}`,
+      `/team/${teamId}/task?include_closed=true&order_by=updated&page=${page}`,
     );
     const pageTasks = Array.isArray(body.tasks) ? (body.tasks as ClickUpTask[]) : [];
     tasks.push(...pageTasks);
@@ -351,11 +356,13 @@ export async function fetchClickUpClientRoster(input: {
       raw = await fetchTasksFromTeam(token, teamId);
     }
 
-    const active = raw.filter(isActiveTask);
+    // Clients are the top-level tasks; the checklist items are subtasks — skip them.
+    const active = raw.filter((t) => !t.parent && isActiveTask(t));
     const clients: RosterClient[] = active.map((task) => {
+      // On the SEO Dashboard the task name IS the client/business name.
       const name =
-        firstField(task, ["Business Name", "⭐️ Business Name", "Client Name", "⭐️ Client Name", "Name"]) ||
         task.name?.trim() ||
+        firstField(task, ["Business Name", "⭐️ Business Name", "Client Name", "⭐️ Client Name"]) ||
         "Unnamed Client";
       const website = firstField(task, ["Website", "URL", "Domain", "Site"]) || undefined;
       const location = firstField(task, ["City, ST", "Location", "Market", "City", "State"]) || undefined;
@@ -364,7 +371,11 @@ export async function fetchClickUpClientRoster(input: {
       const serviceTier = firstField(task, ["Services", "⭐ Services", "Service", "Package"]) || undefined;
       const health = firstField(task, ["Health Score", "Health", "⭐ Health"]) || undefined;
       const status = firstField(task, statusFieldNames()) || undefined;
-      const seoSpecialist = normalizeComparableValue(firstField(task, specialistFieldNames())) || undefined;
+      // The SEO specialist is the task's native assignee (full name); fall back to
+      // the ⭐ Responsable custom field if there's no assignee.
+      const assignedTo = task.assignees?.find((a) => a.username)?.username;
+      const seoSpecialist =
+        normalizeComparableValue(assignedTo || firstField(task, specialistFieldNames())) || undefined;
       const accountManager = firstField(task, managerFieldNames()) || undefined;
       const metrics = extractMetrics(task);
       return {
@@ -378,6 +389,7 @@ export async function fetchClickUpClientRoster(input: {
         health,
         status,
         seoSpecialist,
+        assignedTo: assignedTo || undefined,
         accountManager,
         metrics: Object.keys(metrics).length ? metrics : undefined,
         taskId: task.id,

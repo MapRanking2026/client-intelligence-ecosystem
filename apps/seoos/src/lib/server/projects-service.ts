@@ -84,6 +84,8 @@ export interface SyncClientsResult {
   podsFound: number;
   /** Clients that matched a pod by business name. */
   podsMatched: number;
+  /** Stale ClickUp-sourced clients removed (e.g. old subtask rows). */
+  pruned: number;
   /** Human note about the pod join (e.g. dashboard list not configured). */
   podNote?: string;
   error?: string;
@@ -107,6 +109,7 @@ export async function syncClientsFromClickUp(tenantId: string): Promise<SyncClie
     total: 0,
     podsFound: 0,
     podsMatched: 0,
+    pruned: 0,
   };
 
   const integrations = await listIntegrations(tenantId);
@@ -209,6 +212,18 @@ export async function syncClientsFromClickUp(tenantId: string): Promise<SyncClie
     created += 1;
   }
 
+  // Prune stale ClickUp-sourced clients no longer in the roster (e.g. checklist
+  // subtask rows created by an earlier, buggy sync). Manually-created projects
+  // (no clickupTaskId) are never touched.
+  const currentIds = new Set(roster.clients.map((c) => c.clientId));
+  let pruned = 0;
+  for (const p of await repo.list(tenantId)) {
+    if (p.externalIds?.clickupTaskId && !currentIds.has(p.clientId)) {
+      await repo.remove(tenantId, p.id);
+      pruned += 1;
+    }
+  }
+
   return {
     ok: true,
     created,
@@ -217,6 +232,7 @@ export async function syncClientsFromClickUp(tenantId: string): Promise<SyncClie
     total: roster.clients.length,
     podsFound: discoveredPods.length,
     podsMatched,
+    pruned,
     podNote: undefined,
   };
 }

@@ -11,6 +11,7 @@ export interface ProjectRepo {
     clientId: string,
   ): Promise<SeoProjectV1 | null>;
   save(project: SeoProjectV1): Promise<SeoProjectV1>;
+  remove(tenantId: string, projectId: string): Promise<void>;
 }
 
 class InMemoryProjectRepo implements ProjectRepo {
@@ -40,6 +41,11 @@ class InMemoryProjectRepo implements ProjectRepo {
     if (idx >= 0) seedStore.projects[idx] = project;
     else seedStore.projects.push(project);
     return project;
+  }
+  async remove(tenantId: string, projectId: string) {
+    seedStore.projects = seedStore.projects.filter(
+      (p) => !(p.tenantId === tenantId && p.id === projectId),
+    );
   }
 }
 
@@ -84,6 +90,11 @@ class FirestoreProjectRepo implements ProjectRepo {
       .doc(project.id)
       .set(project);
     return project;
+  }
+  async remove(tenantId: string, projectId: string) {
+    const db = getFirebaseAdminDb();
+    if (!db) throw new Error("Firestore unavailable");
+    await tenantCollection(db, tenantId, COLLECTIONS.projects).doc(projectId).delete();
   }
 }
 

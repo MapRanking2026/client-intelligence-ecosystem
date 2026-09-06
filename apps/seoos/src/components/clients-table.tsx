@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 
 export interface ClientRow {
@@ -14,20 +15,35 @@ export interface ClientRow {
   services: number;
   avgRanking: string;
   stage: string;
+  /** Direct assignment (assignments.seoSpecialistUserId) or "" when following pod. */
+  specialistUserId: string;
+  /** Effective specialist display name (direct override, else pod, else Unassigned). */
+  specialistName: string;
+  /** The pod's specialist name, for the "Auto (pod)" option label. */
+  podSpecialistName: string;
+}
+
+export interface SpecialistOption {
+  userId: string;
+  name: string;
 }
 
 type Col = { key: keyof ClientRow; label: string; numeric?: boolean };
 
-const COLUMNS: Col[] = [
-  { key: "businessName", label: "Business" },
-  { key: "pod", label: "Pod" },
-  { key: "status", label: "Status" },
-  { key: "health", label: "Health" },
-  { key: "setup", label: "Setup %", numeric: true },
-  { key: "services", label: "Projects", numeric: true },
-  { key: "avgRanking", label: "Avg rank" },
-  { key: "stage", label: "Stage" },
-];
+function columns(admin: boolean): Col[] {
+  const base: Col[] = [{ key: "businessName", label: "Business" }];
+  if (admin) base.push({ key: "specialistName", label: "Specialist" });
+  return [
+    ...base,
+    { key: "pod", label: "Pod" },
+    { key: "status", label: "Status" },
+    { key: "health", label: "Health" },
+    { key: "setup", label: "Setup %", numeric: true },
+    { key: "services", label: "Projects", numeric: true },
+    { key: "avgRanking", label: "Avg rank" },
+    { key: "stage", label: "Stage" },
+  ];
+}
 
 function compare(a: ClientRow, b: ClientRow, key: keyof ClientRow, numeric: boolean): number {
   const av = a[key];
@@ -41,10 +57,22 @@ function compare(a: ClientRow, b: ClientRow, key: keyof ClientRow, numeric: bool
   return String(av).localeCompare(String(bv), undefined, { sensitivity: "base" });
 }
 
-export function ClientsTable({ rows }: { rows: ClientRow[] }) {
+export function ClientsTable({
+  rows,
+  admin = false,
+  specialists = [],
+}: {
+  rows: ClientRow[];
+  admin?: boolean;
+  specialists?: SpecialistOption[];
+}) {
+  const router = useRouter();
   const [query, setQuery] = useState("");
   const [sortKey, setSortKey] = useState<keyof ClientRow>("businessName");
   const [dir, setDir] = useState<"asc" | "desc">("asc");
+  const [busyId, setBusyId] = useState<string | null>(null);
+
+  const cols = columns(admin);
 
   function onSort(key: keyof ClientRow) {
     if (key === sortKey) setDir((d) => (d === "asc" ? "desc" : "asc"));
@@ -54,20 +82,34 @@ export function ClientsTable({ rows }: { rows: ClientRow[] }) {
     }
   }
 
+  async function assign(projectId: string, specialistUserId: string) {
+    setBusyId(projectId);
+    try {
+      await fetch(`/api/seo/projects/${projectId}/assign`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ specialistUserId: specialistUserId || null }),
+      });
+      router.refresh();
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   const view = useMemo(() => {
     const q = query.trim().toLowerCase();
     const filtered = q
       ? rows.filter((r) =>
-          [r.businessName, r.pod, r.status, r.health, r.stage, r.avgRanking]
+          [r.businessName, r.pod, r.status, r.health, r.stage, r.avgRanking, r.specialistName]
             .join(" ")
             .toLowerCase()
             .includes(q),
         )
       : rows;
-    const col = COLUMNS.find((c) => c.key === sortKey);
+    const col = cols.find((c) => c.key === sortKey);
     const sorted = [...filtered].sort((a, b) => compare(a, b, sortKey, Boolean(col?.numeric)));
     return dir === "asc" ? sorted : sorted.reverse();
-  }, [rows, query, sortKey, dir]);
+  }, [rows, query, sortKey, dir, cols]);
 
   return (
     <div>
@@ -87,7 +129,7 @@ export function ClientsTable({ rows }: { rows: ClientRow[] }) {
         <table className="data">
           <thead>
             <tr>
-              {COLUMNS.map((c) => (
+              {cols.map((c) => (
                 <th
                   key={c.key}
                   onClick={() => onSort(c.key)}
@@ -104,6 +146,23 @@ export function ClientsTable({ rows }: { rows: ClientRow[] }) {
             {view.map((r) => (
               <tr key={r.id}>
                 <td><Link href={`/clients/${r.id}`}>{r.businessName}</Link></td>
+                {admin ? (
+                  <td>
+                    <select
+                      value={r.specialistUserId}
+                      disabled={busyId === r.id}
+                      onChange={(e) => assign(r.id, e.target.value)}
+                      style={{ maxWidth: 200 }}
+                    >
+                      <option value="">
+                        Auto — pod: {r.podSpecialistName || "unassigned"}
+                      </option>
+                      {specialists.map((s) => (
+                        <option key={s.userId} value={s.userId}>{s.name}</option>
+                      ))}
+                    </select>
+                  </td>
+                ) : null}
                 <td className="muted">{r.pod || "—"}</td>
                 <td>{r.status || "—"}</td>
                 <td>{r.health || "—"}</td>

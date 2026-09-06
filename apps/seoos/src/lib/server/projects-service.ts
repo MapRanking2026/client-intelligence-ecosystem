@@ -351,6 +351,25 @@ export async function runFullScan(tenantId: string, projectId: string): Promise<
   };
 }
 
+/**
+ * Admin action: directly assign (or clear) a client's SEO specialist. A direct
+ * assignment overrides the pod — the client shows up for that specialist
+ * regardless of its ClickUp pod. Clearing lets the client follow its pod again.
+ */
+export async function assignProjectSpecialist(
+  tenantId: string,
+  projectId: string,
+  specialistUserId: string | null,
+): Promise<SeoProjectV1> {
+  const repo = getProjectRepo();
+  const project = await repo.get(tenantId, projectId);
+  if (!project) throw new Error(`Project not found: ${projectId}`);
+  const assignments = { ...project.assignments };
+  if (specialistUserId) assignments.seoSpecialistUserId = specialistUserId;
+  else delete assignments.seoSpecialistUserId;
+  return repo.save({ ...project, assignments, updatedAt: nowIso() });
+}
+
 /** Merge provider external-id mappings (e.g. clickupListId) into a project. */
 export async function updateProjectExternalIds(
   tenantId: string,

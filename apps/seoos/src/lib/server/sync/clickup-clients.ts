@@ -25,7 +25,7 @@ type ClickUpTask = {
   custom_fields?: Array<{
     name?: string;
     value?: unknown;
-    type_config?: { options?: Array<{ id?: string; name?: string; orderindex?: number }> };
+    type_config?: { options?: Array<{ id?: string; name?: string; label?: string; orderindex?: number }> };
   }>;
 };
 
@@ -126,7 +126,16 @@ function stringifyField(task: ClickUpTask, fieldName: string): string {
     );
     return opt?.name || String(value);
   }
-  if (Array.isArray(value)) return value.map((v) => String(v)).join(", ");
+  if (Array.isArray(value)) {
+    // Labels/multi-select: values are option ids — resolve to their names.
+    const opts = field.type_config?.options ?? [];
+    return value
+      .map((v) => {
+        const opt = opts.find((o) => o.id === v || o.id === String(v));
+        return opt?.name || opt?.label || String(v);
+      })
+      .join(", ");
+  }
   if (value && typeof value === "object") return "";
   return "";
 }

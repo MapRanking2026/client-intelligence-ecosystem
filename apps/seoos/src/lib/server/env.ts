@@ -45,6 +45,8 @@ export function getServerEnv() {
     anthropicModel: process.env.ANTHROPIC_MODEL || "claude-3-5-sonnet-latest",
     openaiApiKey: process.env.OPENAI_API_KEY || "",
     openaiModel: process.env.OPENAI_MODEL || "gpt-4o",
+    geminiApiKey: process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "",
+    geminiModel: process.env.GEMINI_MODEL || "gemini-1.5-pro",
     // Google OAuth (for Google Business Profile + Search Console). One OAuth app
     // covers both; the redirect URI is {appUrl}/api/seo/integrations/google/callback.
     googleOAuthClientId: process.env.GOOGLE_OAUTH_CLIENT_ID || "",
@@ -78,7 +80,7 @@ export function hasFirebaseAdminConfig() {
 /** True when at least one LLM provider key is configured. */
 export function hasAiConfig() {
   const env = getServerEnv();
-  return Boolean(env.anthropicApiKey || env.openaiApiKey);
+  return Boolean(env.anthropicApiKey || env.openaiApiKey || env.geminiApiKey);
 }
 
 /** True when the Google OAuth app (GBP + Search Console) is configured. */

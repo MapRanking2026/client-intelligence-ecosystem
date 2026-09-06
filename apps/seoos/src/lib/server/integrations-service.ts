@@ -7,6 +7,7 @@ import {
 import { decryptJson, encryptJson } from "@/src/lib/server/crypto";
 import { nowIso } from "@/src/lib/ids";
 import { getIntegrationRepo } from "@/src/lib/server/repositories/integration-repo";
+import { validateIntegration } from "@/src/lib/server/integrations-validate";
 
 /** Secret-free view for the Integrations UI. */
 export interface IntegrationView {
@@ -87,6 +88,13 @@ export async function connectIntegration(
     credentials[field.key] = raw;
     metadata[field.key] = field.secret ? "•••• set" : raw;
   }
+
+  // Verify the credential before saving — a definitive auth rejection blocks it.
+  const validation = await validateIntegration(providerId, credentials);
+  if (validation.blocked) {
+    throw new ConnectError(validation.message ?? `${def.name} rejected the credentials.`);
+  }
+  if (validation.message) metadata.validation = validation.message;
 
   const now = nowIso();
   const conn = IntegrationConnectionV1.parse({

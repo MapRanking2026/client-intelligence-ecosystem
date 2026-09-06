@@ -22,7 +22,12 @@ export async function POST(
     const conn = await connectIntegration(authz.tenantId, providerId, values, authz.userId);
     // Never return credential material.
     return NextResponse.json({
-      data: { providerId: conn.providerId, status: conn.status, connectedAt: conn.connectedAt },
+      data: {
+        providerId: conn.providerId,
+        status: conn.status,
+        connectedAt: conn.connectedAt,
+        note: conn.metadata?.validation,
+      },
     });
   } catch (e) {
     if (e instanceof AuthzError) return NextResponse.json({ error: e.message, code: e.code }, { status: 403 });

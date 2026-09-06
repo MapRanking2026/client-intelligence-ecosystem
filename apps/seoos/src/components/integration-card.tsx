@@ -38,7 +38,7 @@ export function IntegrationCard({ view }: { view: View }) {
       const body = await res.json().catch(() => null);
       if (!res.ok) setMessage((body && body.error) || "Connect failed");
       else {
-        setMessage("Connected.");
+        setMessage(body?.data?.note || "Connected.");
         setValues({});
         router.refresh();
       }

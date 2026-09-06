@@ -7,6 +7,7 @@ import { Sidebar } from "@/src/components/sidebar";
 import { ThemeToggle } from "@/src/components/theme-toggle";
 import { AnnotationsToggle } from "@/src/components/annotations-toggle";
 import { Annotator } from "@/src/components/annotator";
+import { GlobalSearch } from "@/src/components/global-search";
 
 export interface Breadcrumb {
   label: string;
@@ -35,6 +36,14 @@ export function AppShell({
     (item) => !item.permission || authz.permissions.includes(item.permission),
   );
   const role = authz.roles[0] ?? "member";
+  // Friendly role: admins → "Admin", everyone else → "SEO Specialist".
+  const roleLabel = /admin|owner/i.test(role) ? "Admin" : "SEO Specialist";
+  // Show the person's name with each word capitalized (e.g. "francisco" → "Francisco").
+  const displayName = authz.userId
+    .split(/[\s._-]+/)
+    .filter(Boolean)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(" ");
 
   return (
     <div className="app-grid">
@@ -63,14 +72,17 @@ export function AppShell({
             <h1 className="page-title">{title}</h1>
             {subtitle ? <p className="page-sub muted">{subtitle}</p> : null}
           </div>
+          <div className="topbar-center">
+            <GlobalSearch />
+          </div>
           <div className="topbar-right">
             {actions}
             <span className="muted" style={{ fontSize: 12, fontWeight: 600 }}>{getServerEnv().tenantDisplayName}</span>
             <AnnotationsToggle />
             <ThemeToggle />
             <span className="user-badge" title={authz.userId}>
-              <span className="role-pill">{role}</span>
-              <span className="user-id">{authz.userId}</span>
+              <span className="role-pill">{roleLabel}</span>
+              <span className="user-id">{displayName}</span>
             </span>
           </div>
         </header>

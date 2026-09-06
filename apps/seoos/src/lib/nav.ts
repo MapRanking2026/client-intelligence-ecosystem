@@ -24,5 +24,6 @@ export const NAV: NavItem[] = [
   { href: "/reports", label: "Reports & Packages", glyph: "▧", permission: "seo.package.read" },
   { href: "/knowledge", label: "Knowledge / Niche Studies", glyph: "❖", permission: "seo.package.read" },
   { href: "/integrations", label: "Integrations & Data Health", glyph: "⇄", permission: "integrations.manage" },
+  { href: "/prompts", label: "Prompt Engine", glyph: "❯", permission: "settings.manage" },
   { href: "/team", label: "Team / Settings", glyph: "⚑", permission: "settings.manage" },
 ];

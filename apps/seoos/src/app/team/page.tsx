@@ -42,7 +42,7 @@ export default async function TeamPage() {
           <StatCard label="Clients" value={projects.length} />
           <StatCard label="SEO specialists" value={specialists.length} hint="manage on Clients" />
           <StatCard label="You" value={authz.userId} hint={authz.roles.join(", ")} />
-          <StatCard label="Tenant" value={authz.tenantId} />
+          <StatCard label="Organization" value={env.tenantDisplayName} hint={authz.tenantId} />
         </div>
       </Panel>
 

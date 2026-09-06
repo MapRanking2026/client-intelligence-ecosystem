@@ -33,6 +33,9 @@ export function getServerEnv() {
       process.env.SESSION_COOKIE_SECRET ||
       "",
     pilotTenantId: process.env.MTOS_PILOT_TENANT_ID || "map-ranking",
+    // Friendly tenant/organization name shown in the UI (the tenant id stays the
+    // data key). Defaults to Map Ranking SEO.
+    tenantDisplayName: process.env.TENANT_DISPLAY_NAME || "Map Ranking SEO",
     // Optional gate for self-service sign-up. When set, sign-up requires this
     // code. The first user in a tenant always becomes tenant_admin.
     signupCode: process.env.SEOOS_SIGNUP_CODE || "",

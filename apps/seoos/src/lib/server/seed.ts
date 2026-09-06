@@ -13,6 +13,8 @@ import type { SeoUserV1 } from "@/src/lib/domain/user";
 import type { SeoPodV1 } from "@/src/lib/domain/pod";
 import type { SpecialistV1 } from "@/src/lib/domain/specialist";
 import type { NicheStudyV1 } from "@/src/lib/domain/niche-study";
+import type { PromptV1 } from "@/src/lib/domain/prompt";
+import type { SpecialistStyleV1 } from "@/src/lib/domain/specialist-style";
 import type { MonthlyAuditV1 } from "@/src/lib/domain/monthly-audit";
 import type { IntegrationConnectionV1 } from "@/src/lib/domain/integration";
 
@@ -36,6 +38,8 @@ interface SeedStore {
   pods: SeoPodV1[];
   specialists: SpecialistV1[];
   nicheStudies: NicheStudyV1[];
+  prompts: PromptV1[];
+  specialistStyles: SpecialistStyleV1[];
   monthlyAudits: MonthlyAuditV1[];
   integrations: IntegrationConnectionV1[];
 }
@@ -55,6 +59,8 @@ function buildSeed(): SeedStore {
     pods: [],
     specialists: [],
     nicheStudies: [],
+    prompts: [],
+    specialistStyles: [],
     monthlyAudits: [],
     integrations: [],
   };

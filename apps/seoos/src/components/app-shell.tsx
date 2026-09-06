@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import type { AuthzContextV1 } from "@cie/contracts";
 
 import { NAV } from "@/src/lib/nav";
+import { getServerEnv } from "@/src/lib/server/env";
 import { Sidebar } from "@/src/components/sidebar";
 import { ThemeToggle } from "@/src/components/theme-toggle";
 import { AnnotationsToggle } from "@/src/components/annotations-toggle";
@@ -64,6 +65,7 @@ export function AppShell({
           </div>
           <div className="topbar-right">
             {actions}
+            <span className="muted" style={{ fontSize: 12, fontWeight: 600 }}>{getServerEnv().tenantDisplayName}</span>
             <AnnotationsToggle />
             <ThemeToggle />
             <span className="user-badge" title={authz.userId}>

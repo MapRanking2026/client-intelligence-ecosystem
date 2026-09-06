@@ -6,6 +6,10 @@ import { getRecommendationRepo } from "@/src/lib/server/repositories/recommendat
 import { AiNotConfiguredError, extractJson, generateText } from "@/src/lib/server/ai/llm";
 import { hasAiConfig } from "@/src/lib/server/env";
 import { findForNiche } from "@/src/lib/server/niche-studies-service";
+import { getEffectivePrompt } from "@/src/lib/server/prompts-service";
+import { buildStyleDirective } from "@/src/lib/server/specialist-style-service";
+import { listSpecialists } from "@/src/lib/server/specialists-service";
+import { effectiveSpecialistId } from "@/src/lib/server/projects-service";
 
 const TYPES = RecommendationType.options;
 
@@ -20,18 +24,6 @@ interface AiRec {
   estimatedEffort?: string;
   risks?: string[];
 }
-
-const SYSTEM = [
-  "You are a senior local-SEO strategist for a Google Business Profile / map-pack agency.",
-  "You propose specific, tactical, defensible actions grounded ONLY in the data provided.",
-  "Never invent metrics. If the data is thin, propose fewer, higher-confidence actions.",
-  "Favor concrete, executable actions of these kinds, tied to the weakest grid keywords:",
-  "(1) a GBP post to write (give a title/angle), (2) an image to add or RENAME to a keyword-rich",
-  "file name (state the suggested file name), (3) a per-keyword move (which keyword, why, what to change),",
-  "(4) category/service changes, on-page content, schema, or review operations.",
-  "When niche playbooks are provided, apply their proven tactics.",
-  "Return STRICT JSON only — no prose, no code fences.",
-].join(" ");
 
 function buildUserPrompt(input: {
   businessName: string;
@@ -141,9 +133,18 @@ export async function generateAiRecommendations(
     nichePlaybooks,
   });
 
+  // System instruction = the admin-editable prompt for this action + the
+  // account specialist's style directive (always applied).
+  const promptTemplate = await getEffectivePrompt(tenantId, "recommendations.generate");
+  const specialists = await listSpecialists(tenantId);
+  const specialistId = effectiveSpecialistId(project, specialists);
+  const specialistName = specialists.find((s) => s.id === specialistId)?.name;
+  const styleDirective = await buildStyleDirective(tenantId, specialistId, specialistName);
+  const system = `${promptTemplate}\n\n${styleDirective}`;
+
   let parsed: { recommendations?: AiRec[] };
   try {
-    const text = await generateText(SYSTEM, user);
+    const text = await generateText(system, user);
     parsed = extractJson<{ recommendations?: AiRec[] }>(text);
   } catch (e) {
     if (e instanceof AiNotConfiguredError) return { ok: false, created: 0, error: e.message };

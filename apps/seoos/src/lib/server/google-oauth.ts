@@ -69,6 +69,31 @@ export interface GoogleTokens {
   expiresAt?: string;
 }
 
+/** Exchange a stored refresh token for a fresh access token. */
+export async function refreshAccessToken(refreshToken: string): Promise<string> {
+  const env = getServerEnv();
+  const res = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      refresh_token: refreshToken,
+      client_id: env.googleOAuthClientId,
+      client_secret: env.googleOAuthClientSecret,
+      grant_type: "refresh_token",
+    }),
+    cache: "no-store",
+  });
+  const body = (await res.json().catch(() => ({}))) as {
+    access_token?: string;
+    error?: string;
+    error_description?: string;
+  };
+  if (!res.ok || !body.access_token) {
+    throw new Error(body.error_description || body.error || `refresh_failed_${res.status}`);
+  }
+  return body.access_token;
+}
+
 export async function exchangeCode(code: string): Promise<GoogleTokens> {
   const env = getServerEnv();
   const res = await fetch("https://oauth2.googleapis.com/token", {

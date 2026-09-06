@@ -4,6 +4,7 @@ import { resolveSeoAuthz, authzHas } from "@/src/lib/auth/context";
 import { AppShell } from "@/src/components/app-shell";
 import { EmptyState, Panel, StatCard, UnauthorizedPage } from "@/src/components/states";
 import { ClientSelect } from "@/src/components/client-select";
+import { GbpLivePanel } from "@/src/components/gbp-live-panel";
 import { listProjectsForViewer } from "@/src/lib/server/projects-service";
 import { getPerformanceSnapshotRepo } from "@/src/lib/server/repositories/performance-snapshot-repo";
 import { listIntegrations } from "@/src/lib/server/integrations-service";
@@ -76,11 +77,16 @@ export default async function GbpPage({
           </Panel>
 
           <Panel title="GBP performance & reviews">
-            <p className="muted" style={{ marginTop: 0, fontSize: 12 }}>
-              {gbpConnected
-                ? "Google Business Profile is connected. Live GBP insights/reviews pull is being wired; the figures below are from the ClickUp SEO Dashboard."
-                : "Connect Google Business Profile under Integrations for live insights & reviews. The figures below are from the ClickUp SEO Dashboard."}
-            </p>
+            {gbpConnected && selected ? (
+              <GbpLivePanel projectId={selected.id} />
+            ) : (
+              <p className="muted" style={{ marginTop: 0, fontSize: 12 }}>
+                Connect Google Business Profile under <Link href="/integrations">Integrations</Link> for live
+                insights &amp; reviews.
+              </p>
+            )}
+
+            <h4 style={{ margin: "14px 0 8px" }}>From the ClickUp SEO Dashboard</h4>
             {gbpEntries.length ? (
               <div className="grid-cards">
                 {gbpEntries.map(([label, value]) => (

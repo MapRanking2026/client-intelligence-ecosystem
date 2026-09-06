@@ -1,11 +1,11 @@
 import Link from "next/link";
-import { canAccessClient } from "@cie/core";
 
 import { resolveSeoAuthz, authzHas } from "@/src/lib/auth/context";
 import { AppShell } from "@/src/components/app-shell";
 import { EmptyState, UnauthorizedPage } from "@/src/components/states";
 import { MonthlyAuditManager } from "@/src/components/monthly-audit-manager";
-import { listProjects } from "@/src/lib/server/projects-service";
+import { ClientSelect } from "@/src/components/client-select";
+import { listProjectsForViewer } from "@/src/lib/server/projects-service";
 import { listMonthlyAudits } from "@/src/lib/server/monthly-audits-service";
 
 export const dynamic = "force-dynamic";
@@ -25,9 +25,7 @@ export default async function MonthlyAuditsPage({
     );
   }
 
-  const projects = (await listProjects(authz.tenantId)).filter((p) =>
-    canAccessClient(authz.clientVisibility, p.clientId),
-  );
+  const projects = await listProjectsForViewer(authz);
   const { projectId, auditId } = await searchParams;
   const selectedProject = projects.find((p) => p.id === projectId) ?? projects[0];
   const audits = selectedProject ? await listMonthlyAudits(authz.tenantId, selectedProject.id) : [];
@@ -44,14 +42,11 @@ export default async function MonthlyAuditsPage({
         <EmptyState title="No projects" message="Create a project to run monthly audits." action={<Link href="/clients">Clients →</Link>} />
       ) : (
         <>
-          <div className="toolbar">
-            <span className="muted" style={{ fontSize: 12 }}>Project:</span>
-            {projects.map((p) => (
-              <Link key={p.id} href={`/monthly-audits?projectId=${p.id}`} className={`badge${p.id === selectedProject?.id ? " status-active" : ""}`}>
-                {p.businessName}
-              </Link>
-            ))}
-          </div>
+          <ClientSelect
+            projects={projects.map((p) => ({ id: p.id, businessName: p.businessName }))}
+            selectedId={selectedProject?.id}
+            basePath="/monthly-audits"
+          />
           {audits.length > 0 && selectedProject ? (
             <div className="toolbar">
               <span className="muted" style={{ fontSize: 12 }}>Period:</span>

@@ -5,7 +5,8 @@ import { resolveSeoAuthz, authzHas } from "@/src/lib/auth/context";
 import { AppShell } from "@/src/components/app-shell";
 import { EmptyState, StatCard, UnauthorizedPage } from "@/src/components/states";
 import { WorkOrdersBoard } from "@/src/components/work-orders-board";
-import { listProjects } from "@/src/lib/server/projects-service";
+import { ClientSelect } from "@/src/components/client-select";
+import { listProjectsForViewer } from "@/src/lib/server/projects-service";
 import { listWorkOrders } from "@/src/lib/server/workorders-service";
 
 export const dynamic = "force-dynamic";
@@ -25,9 +26,7 @@ export default async function WorkOrdersPage({
     );
   }
 
-  const projects = (await listProjects(authz.tenantId)).filter((p) =>
-    canAccessClient(authz.clientVisibility, p.clientId),
-  );
+  const projects = await listProjectsForViewer(authz);
   const { projectId } = await searchParams;
   const selected = projects.find((p) => p.id === projectId) ?? projects[0];
   const workOrders = selected
@@ -50,14 +49,11 @@ export default async function WorkOrdersPage({
         <EmptyState title="No projects" message="Create a project to manage work." action={<Link href="/clients">Clients →</Link>} />
       ) : (
         <>
-          <div className="toolbar">
-            <span className="muted" style={{ fontSize: 12 }}>Project:</span>
-            {projects.map((p) => (
-              <Link key={p.id} href={`/work-orders?projectId=${p.id}`} className={`badge${p.id === selected?.id ? " status-active" : ""}`}>
-                {p.businessName}
-              </Link>
-            ))}
-          </div>
+          <ClientSelect
+            projects={projects.map((p) => ({ id: p.id, businessName: p.businessName }))}
+            selectedId={selected?.id}
+            basePath="/work-orders"
+          />
           <div className="grid-cards" style={{ marginBottom: 14 }}>
             <StatCard label="Open work" value={open} />
             <StatCard label="Awaiting QA" value={qaQueue} />

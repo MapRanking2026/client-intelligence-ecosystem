@@ -3,6 +3,9 @@ import type { AuthzContextV1 } from "@cie/contracts";
 
 import { NAV } from "@/src/lib/nav";
 import { Sidebar } from "@/src/components/sidebar";
+import { ThemeToggle } from "@/src/components/theme-toggle";
+import { AnnotationsToggle } from "@/src/components/annotations-toggle";
+import { Annotator } from "@/src/components/annotator";
 
 export interface Breadcrumb {
   label: string;
@@ -61,6 +64,8 @@ export function AppShell({
           </div>
           <div className="topbar-right">
             {actions}
+            <AnnotationsToggle />
+            <ThemeToggle />
             <span className="user-badge" title={authz.userId}>
               <span className="role-pill">{role}</span>
               <span className="user-id">{authz.userId}</span>
@@ -68,6 +73,7 @@ export function AppShell({
           </div>
         </header>
         <main className="content">{children}</main>
+        <Annotator />
       </div>
     </div>
   );

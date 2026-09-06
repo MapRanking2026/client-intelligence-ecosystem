@@ -7,8 +7,46 @@
   --accent: #4fd1b0;
   --accent-fg: #052018;
   --danger: #ff8f8f;
+  --ok: #4fd1b0;
   color-scheme: dark;
 }
+
+:root[data-theme="light"] {
+  --bg: #f4f7f6;
+  --panel: #ffffff;
+  --border: #dde5e1;
+  --fg: #16201c;
+  --muted: #566a61;
+  --accent: #0b7a5b;
+  --accent-fg: #ffffff;
+  --danger: #b4232a;
+  --ok: #0b7a5b;
+  color-scheme: light;
+}
+
+/* Toolbar toggle buttons (theme + highlighter) */
+.icon-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  display: inline-grid;
+  place-items: center;
+  cursor: pointer;
+  padding: 0;
+}
+.icon-btn:hover { color: var(--fg); border-color: var(--accent); }
+.icon-btn.on { color: var(--accent-fg); background: var(--accent); border-color: var(--accent); }
+.icon-btn svg { width: 17px; height: 17px; }
+
+/* Highlighter marks — only added to the DOM while annotations are ON */
+mark.hl { border-radius: 3px; padding: 0 2px; color: inherit; background: transparent; }
+mark.hl.important { background: rgba(230, 165, 35, 0.30); }
+mark.hl.critical { background: rgba(224, 78, 78, 0.32); }
+mark.hl.positive { background: rgba(47, 190, 150, 0.30); }
+mark.hl.info { background: rgba(96, 156, 232, 0.28); }
 
 * {
   box-sizing: border-box;

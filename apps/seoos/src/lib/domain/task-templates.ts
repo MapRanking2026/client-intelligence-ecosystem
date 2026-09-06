@@ -35,7 +35,7 @@ export const TASK_TEMPLATES: TaskTemplate[] = [
   { key: "p2.keyword_research", phase: "phase2", order: 130, title: "Keyword research", cadence: "once", scope: "website", promptKey: "keywords.selection" },
   { key: "p2.sitemap", phase: "phase2", order: 140, title: "Sitemap in Miro + add to Client's Book", cadence: "once", scope: "website" },
   { key: "p2.technical", phase: "phase2", order: 150, title: "Technical optimization & Core Web Vitals", cadence: "once", scope: "website" },
-  { key: "p2.home", phase: "phase2", order: 160, title: "Home page content", cadence: "once", scope: "website", promptKey: "content.service_page" },
+  { key: "p2.home", phase: "phase2", order: 160, title: "Home page content", cadence: "once", scope: "website", promptKey: "content.home" },
   { key: "p2.about", phase: "phase2", order: 170, title: "About Us page", cadence: "once", scope: "website", promptKey: "content.service_page" },
   { key: "p2.service_pages", phase: "phase2", order: 180, title: "Service / city pages (1–5)", cadence: "once", scope: "website", promptKey: "content.service_page" },
   { key: "p2.blog", phase: "phase2", order: 190, title: "Authority blog post", cadence: "once", scope: "ai", promptKey: "content.blog" },

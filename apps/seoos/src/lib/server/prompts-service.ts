@@ -1,6 +1,7 @@
-import { DEFAULT_PROMPTS, PromptV1, getDefaultPrompt } from "@/src/lib/domain/prompt";
+import { DEFAULT_PROMPTS, GLOBAL_GUARDRAILS, PromptV1, getDefaultPrompt } from "@/src/lib/domain/prompt";
 import { nowIso } from "@/src/lib/ids";
 import { getPromptRepo } from "@/src/lib/server/repositories/prompt-repo";
+import { buildStyleDirective } from "@/src/lib/server/specialist-style-service";
 
 export interface PromptView {
   key: string;
@@ -34,6 +35,24 @@ export async function getEffectivePrompt(tenantId: string, key: string): Promise
   const o = await getPromptRepo().get(tenantId, key);
   if (o?.template) return o.template;
   return getDefaultPrompt(key)?.template ?? "";
+}
+
+/**
+ * Compose the full system instruction for ANY AI action:
+ * global guardrails (always) + the action's effective prompt + the account
+ * specialist's style directive. This is the one place every AI call goes through.
+ */
+export async function composeAiSystem(
+  tenantId: string,
+  promptKey: string,
+  specialistId: string | undefined,
+  specialistName?: string,
+): Promise<string> {
+  const [prompt, style] = await Promise.all([
+    getEffectivePrompt(tenantId, promptKey),
+    buildStyleDirective(tenantId, specialistId, specialistName),
+  ]);
+  return `${GLOBAL_GUARDRAILS}\n\n${prompt}\n\n${style}`;
 }
 
 /** Admin: save an override; takes effect immediately. */

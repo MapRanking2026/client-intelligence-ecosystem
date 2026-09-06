@@ -6,8 +6,7 @@ import { getRecommendationRepo } from "@/src/lib/server/repositories/recommendat
 import { AiNotConfiguredError, extractJson, generateText } from "@/src/lib/server/ai/llm";
 import { hasAiConfig } from "@/src/lib/server/env";
 import { findForNiche } from "@/src/lib/server/niche-studies-service";
-import { getEffectivePrompt } from "@/src/lib/server/prompts-service";
-import { buildStyleDirective } from "@/src/lib/server/specialist-style-service";
+import { composeAiSystem } from "@/src/lib/server/prompts-service";
 import { listSpecialists } from "@/src/lib/server/specialists-service";
 import { effectiveSpecialistId } from "@/src/lib/server/projects-service";
 
@@ -133,14 +132,12 @@ export async function generateAiRecommendations(
     nichePlaybooks,
   });
 
-  // System instruction = the admin-editable prompt for this action + the
-  // account specialist's style directive (always applied).
-  const promptTemplate = await getEffectivePrompt(tenantId, "recommendations.generate");
+  // System = global guardrails + the editable action prompt + the account
+  // specialist's style directive (always applied, via the shared composer).
   const specialists = await listSpecialists(tenantId);
   const specialistId = effectiveSpecialistId(project, specialists);
   const specialistName = specialists.find((s) => s.id === specialistId)?.name;
-  const styleDirective = await buildStyleDirective(tenantId, specialistId, specialistName);
-  const system = `${promptTemplate}\n\n${styleDirective}`;
+  const system = await composeAiSystem(tenantId, "recommendations.generate", specialistId, specialistName);
 
   let parsed: { recommendations?: AiRec[] };
   try {

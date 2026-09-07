@@ -3,14 +3,17 @@ import { NextResponse } from "next/server";
 import { getServerEnv } from "@/src/lib/server/env";
 import { syncClientsFromClickUp } from "@/src/lib/server/projects-service";
 import { syncAllTaskPlans } from "@/src/lib/server/task-engine-service";
+import { syncTickets } from "@/src/lib/server/tickets-service";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
 /**
- * Scheduled client sync (Vercel Cron). Pulls the full client roster + SEO data
- * from ClickUp for the pilot tenant so the app stays current. Read-only against
- * ClickUp. Protected by CRON_SECRET when set; Vercel Cron sends it as a Bearer.
+ * Scheduled sync (Vercel Cron, every 2 hours). Keeps the app current on its own
+ * so no one has to click a refresh/sync button: pulls the client roster + SEO
+ * data, brings every client's task plan up to date, and ingests new ClickUp
+ * tickets (auto-drafting the new ones). All READ-ONLY against ClickUp — nothing
+ * is written back or published. Protected by CRON_SECRET when set (Bearer).
  */
 export async function GET(request: Request) {
   const secret = process.env.CRON_SECRET;
@@ -27,7 +30,15 @@ export async function GET(request: Request) {
     // Nothing gets missed: bring every client's task plan up to date (new tasks,
     // new recurring periods, reassignments), continuing from each client's state.
     const tasks = await syncAllTaskPlans(tenantId);
-    return NextResponse.json({ tenantId, ...result, tasks });
+    // Pull in any new/updated tickets and auto-draft the new ones (staged only).
+    // Don't let a ticket hiccup fail the whole sync — report it instead.
+    let tickets: unknown;
+    try {
+      tickets = await syncTickets(tenantId, { autoDraft: true });
+    } catch (e) {
+      tickets = { ok: false, error: e instanceof Error ? e.message : "ticket_sync_failed" };
+    }
+    return NextResponse.json({ tenantId, ...result, tasks, tickets });
   } catch (e) {
     return NextResponse.json(
       { tenantId, ok: false, error: e instanceof Error ? e.message : "cron_sync_failed" },

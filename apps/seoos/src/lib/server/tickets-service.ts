@@ -31,6 +31,22 @@ const AUTO_DRAFT_CAP = 12;
  */
 const DEFAULT_TICKETS_LIST_ID = "901107234392";
 
+/**
+ * Turn whatever was configured into usable numeric list ids. Accepts a pasted
+ * ClickUp URL (…/v/l/8chvq4p-1151) or a raw value. A ClickUp *view* id like
+ * "8chvq4p-1151" is NOT a valid list id for the task API, so non-numeric tokens
+ * are dropped — the caller then falls back to DEFAULT_TICKETS_LIST_ID.
+ */
+function resolveTicketListIds(raw: string): string {
+  const nums: string[] = [];
+  for (const tok of raw.split(",").map((s) => s.trim()).filter(Boolean)) {
+    const fromUrl = tok.match(/\/l(?:i)?\/([^/?#]+)/); // extract from a pasted URL
+    const candidate = (fromUrl ? fromUrl[1] : tok).trim();
+    if (/^\d+$/.test(candidate)) nums.push(candidate);
+  }
+  return nums.join(",");
+}
+
 export interface SyncTicketsResult {
   ok: boolean;
   error?: string;
@@ -112,8 +128,10 @@ export async function syncTickets(
   if (!creds?.apiToken) {
     return { ...base, error: "ClickUp credentials are missing. Reconnect ClickUp under Integrations." };
   }
-  const listIds =
-    creds.ticketsListId || process.env.CLICKUP_TICKETS_LIST_ID || DEFAULT_TICKETS_LIST_ID;
+  const configured = resolveTicketListIds(
+    creds.ticketsListId || process.env.CLICKUP_TICKETS_LIST_ID || "",
+  );
+  const listIds = configured || DEFAULT_TICKETS_LIST_ID;
   const fetched = await fetchClickUpTickets({ token: creds.apiToken, listIds });
   if (!fetched.ok) return { ...base, error: fetched.error };
 

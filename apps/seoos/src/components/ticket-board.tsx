@@ -110,9 +110,10 @@ export function TicketBoard({
       <div className="toolbar" style={{ marginBottom: 12 }}>
         {isAdmin ? (
           <button type="button" onClick={sync} disabled={busy !== null}>
-            {busy === "sync" ? "Syncing from ClickUp…" : "Sync tickets from ClickUp"}
+            {busy === "sync" ? "Syncing from ClickUp…" : "Sync tickets now"}
           </button>
         ) : null}
+        <span className="muted" style={{ fontSize: 12 }}>Auto-syncs from ClickUp every 2 hours.</span>
         {msg ? <span className="muted" style={{ fontSize: 12 }}>{msg}</span> : null}
       </div>
 

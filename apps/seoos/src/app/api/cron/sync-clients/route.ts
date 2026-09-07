@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
 /**
- * Scheduled sync (Vercel Cron, every 2 hours). Keeps the app current on its own
+ * Scheduled sync (Vercel Cron, daily). Keeps the app current on its own
  * so no one has to click a refresh/sync button: pulls the client roster + SEO
  * data, brings every client's task plan up to date, and ingests new ClickUp
  * tickets (auto-drafting the new ones). All READ-ONLY against ClickUp — nothing

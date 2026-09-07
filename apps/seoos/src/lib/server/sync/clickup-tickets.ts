@@ -94,11 +94,16 @@ export interface RawTicket {
   parentId?: string;
   /** The ticket's Business Name custom field — the primary link to a client. */
   businessName?: string;
+  /** The Department field (SEO / Web Development / Ads / …) — context only. */
+  department?: string;
   clickupStatus?: string;
   isClosed: boolean;
   dueDate?: string;
+  /** First assignee (for display) + every assignee (for specialist matching). */
   assigneeRaw?: string;
   assigneeEmail?: string;
+  assignees: string[];
+  assigneeEmails: string[];
 }
 
 export interface FetchTicketsResult {
@@ -134,17 +139,13 @@ async function fetchTasksFromList(token: string, listId: string): Promise<ClickU
   return out;
 }
 
-function firstAssignee(task: ClickUpTask): { name?: string; email?: string } {
-  const a = task.assignees?.find((x) => x.username || x.email);
-  return { name: a?.username, email: a?.email };
-}
-
 function toRaw(task: ClickUpTask): RawTicket {
   const statusName = task.status?.status;
   const isClosed =
     task.status?.type === "closed" ||
     (statusName ? CLOSED_TOKENS.some((t) => statusName.toLowerCase().includes(t)) : false);
-  const { name, email } = firstAssignee(task);
+  const names = (task.assignees ?? []).map((a) => a.username).filter((n): n is string => !!n);
+  const emails = (task.assignees ?? []).map((a) => a.email).filter((e): e is string => !!e);
   return {
     externalId: task.id,
     title: (task.name ?? "").trim() || "(untitled ticket)",
@@ -152,11 +153,14 @@ function toRaw(task: ClickUpTask): RawTicket {
     url: task.url,
     parentId: task.parent ?? undefined,
     businessName: firstField(task, businessFieldNames()) || undefined,
+    department: firstField(task, ["Department", "Team", "Dept"]) || undefined,
     clickupStatus: statusName,
     isClosed,
     dueDate: task.due_date ?? undefined,
-    assigneeRaw: name,
-    assigneeEmail: email,
+    assigneeRaw: names[0],
+    assigneeEmail: emails[0],
+    assignees: names,
+    assigneeEmails: emails,
   };
 }
 

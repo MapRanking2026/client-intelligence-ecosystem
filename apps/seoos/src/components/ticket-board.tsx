@@ -10,6 +10,7 @@ interface Ticket {
   title: string;
   body?: string;
   category: string;
+  department?: string;
   clientName?: string;
   specialistName?: string;
   clickupStatus?: string;
@@ -75,7 +76,11 @@ export function TicketBoard({
       if (!res.ok) setMsg((body && body.error) || "Sync failed");
       else {
         const d = body.data;
-        setMsg(`Synced ${d.fetched} from ClickUp: +${d.created} new, ${d.updated} updated, ${d.drafted} drafted.`);
+        setMsg(
+          `Synced from ClickUp: +${d.created} new, ${d.updated} updated, ${d.drafted} drafted` +
+            (d.skipped ? ` · ${d.skipped} skipped (assignee not a specialist)` : "") +
+            ".",
+        );
         router.refresh();
       }
     } finally {
@@ -141,6 +146,7 @@ export function TicketBoard({
                     >
                       <span className="ticket-title">{t.title}</span>
                       <span className="ticket-meta">
+                        {t.department ? <span className="gs-kind">{t.department}</span> : null}
                         <span className={`gs-kind gs-kind--client`}>{t.category.replace(/_/g, " ")}</span>
                         {t.clientName ? <span className="muted">{t.clientName}</span> : null}
                         {t.specialistName ? <span className="muted">· {t.specialistName}</span> : null}

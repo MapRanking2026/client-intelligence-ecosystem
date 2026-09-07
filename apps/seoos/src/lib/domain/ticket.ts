@@ -63,6 +63,8 @@ export const TicketV1 = z.object({
   /** Routed specialist (roster id) + the raw ClickUp assignee for reference. */
   specialistId: z.string().optional(),
   assigneeRaw: z.string().optional(),
+  /** The ticket's Department (SEO / Web Development / Ads / …) — context only. */
+  department: z.string().optional(),
   clickupStatus: z.string().optional(),
   dueDate: z.string().optional(),
   status: TicketStatus.default("new"),

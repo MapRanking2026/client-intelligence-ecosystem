@@ -34,6 +34,7 @@ export default async function TicketsPage() {
     title: t.title,
     body: t.body,
     category: t.category,
+    department: t.department,
     clientName: t.clientName,
     specialistName: specName(t.specialistId),
     clickupStatus: t.clickupStatus,

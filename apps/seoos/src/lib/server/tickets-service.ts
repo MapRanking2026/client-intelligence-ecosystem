@@ -6,7 +6,6 @@ import { newId, nowIso } from "@/src/lib/ids";
 import { getTicketRepo } from "@/src/lib/server/repositories/ticket-repo";
 import { getIntegrationCredentials } from "@/src/lib/server/integrations-service";
 import {
-  effectiveSpecialistId,
   getProject,
   listProjects,
   listProjectsForViewer,
@@ -38,6 +37,8 @@ export interface SyncTicketsResult {
   fetched: number;
   created: number;
   updated: number;
+  /** Tickets skipped because their assignee is not one of our SEO specialists. */
+  skipped: number;
   drafted: number;
 }
 
@@ -105,7 +106,7 @@ export async function syncTickets(
   tenantId: string,
   opts: { autoDraft?: boolean } = {},
 ): Promise<SyncTicketsResult> {
-  const base: SyncTicketsResult = { ok: false, fetched: 0, created: 0, updated: 0, drafted: 0 };
+  const base: SyncTicketsResult = { ok: false, fetched: 0, created: 0, updated: 0, skipped: 0, drafted: 0 };
 
   const creds = await getIntegrationCredentials(tenantId, "clickup");
   if (!creds?.apiToken) {
@@ -123,16 +124,29 @@ export async function syncTickets(
 
   let created = 0;
   let updated = 0;
+  let skipped = 0;
   const toDraft: string[] = [];
 
   for (const raw of fetched.tickets) {
-    const project = resolveProject(raw, projects);
-    // The account's specialist owns the ticket; fall back to the ClickUp assignee.
-    const specialistId =
-      (project ? effectiveSpecialistId(project, specialists) : undefined) ??
-      matchSpecialistId(raw.assigneeRaw, specialists) ??
-      matchSpecialistId(raw.assigneeEmail?.split("@")[0], specialists);
+    // FILTER: only ingest tickets whose ASSIGNEE is one of our SEO specialists.
+    // A ticket can have several assignees — match the first that is a specialist.
+    let specialistId: string | undefined;
+    for (const name of raw.assignees) {
+      specialistId = matchSpecialistId(name, specialists);
+      if (specialistId) break;
+    }
+    if (!specialistId) {
+      for (const email of raw.assigneeEmails) {
+        specialistId = matchSpecialistId(email.split("@")[0], specialists);
+        if (specialistId) break;
+      }
+    }
+    if (!specialistId) {
+      skipped += 1;
+      continue; // assignee isn't a specialist → not our ticket
+    }
 
+    const project = resolveProject(raw, projects);
     const existing = await getTicketRepo().getByExternalId(tenantId, raw.externalId);
     const now = nowIso();
 
@@ -150,6 +164,7 @@ export async function syncTickets(
         clientName: project?.businessName ?? raw.businessName ?? existing.clientName,
         specialistId: specialistId ?? existing.specialistId,
         assigneeRaw: raw.assigneeRaw ?? existing.assigneeRaw,
+        department: raw.department ?? existing.department,
         updatedAt: now,
       };
       await getTicketRepo().save(TicketV1.parse(next));
@@ -173,6 +188,7 @@ export async function syncTickets(
       clientName: project?.businessName ?? raw.businessName,
       specialistId,
       assigneeRaw: raw.assigneeRaw,
+      department: raw.department,
       clickupStatus: raw.clickupStatus,
       dueDate: raw.dueDate,
       status: "new",
@@ -194,7 +210,7 @@ export async function syncTickets(
     }
   }
 
-  return { ok: true, error: undefined, fetched: fetched.fetched, created, updated, drafted };
+  return { ok: true, error: undefined, fetched: fetched.fetched, created, updated, skipped, drafted };
 }
 
 function buildAccountContext(project: SeoProjectV1 | null): string {

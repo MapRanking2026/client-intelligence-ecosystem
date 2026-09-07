@@ -25,6 +25,13 @@ import { fetchClickUpTickets, type RawTicket } from "@/src/lib/server/sync/click
 /** How many brand-new tickets to auto-draft per sync run (rest draft on demand). */
 const AUTO_DRAFT_CAP = 12;
 
+/**
+ * The Map Ranking "TICKETS" list (🗺️ Map Ranking → 0.1. Ticketing & Recurrents),
+ * used when no id is set on the ClickUp connection or via CLICKUP_TICKETS_LIST_ID.
+ * The workspace URL /v/l/8chvq4p-1151 is a *view*; this is its numeric list id.
+ */
+const DEFAULT_TICKETS_LIST_ID = "901107234392";
+
 export interface SyncTicketsResult {
   ok: boolean;
   error?: string;
@@ -104,7 +111,8 @@ export async function syncTickets(
   if (!creds?.apiToken) {
     return { ...base, error: "ClickUp credentials are missing. Reconnect ClickUp under Integrations." };
   }
-  const listIds = creds.ticketsListId || process.env.CLICKUP_TICKETS_LIST_ID || "";
+  const listIds =
+    creds.ticketsListId || process.env.CLICKUP_TICKETS_LIST_ID || DEFAULT_TICKETS_LIST_ID;
   const fetched = await fetchClickUpTickets({ token: creds.apiToken, listIds });
   if (!fetched.ok) return { ...base, error: fetched.error };
 

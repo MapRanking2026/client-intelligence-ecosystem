@@ -1,4 +1,4 @@
-import type { AuthzContextV1 } from "@cie/contracts";
+import type { AuthzContextV1, ClientV1 } from "@cie/contracts";
 
 import {
   CreateSeoProjectInput,
@@ -12,7 +12,64 @@ import {
   getIntegrationCredentials,
   listIntegrations,
 } from "@/src/lib/server/integrations-service";
-import { fetchClickUpClientRoster } from "@/src/lib/server/sync/clickup-clients";
+import { fetchClickUpClientRoster, type RosterClient } from "@/src/lib/server/sync/clickup-clients";
+import { getClientBrain, rosterToInputs } from "@/src/lib/server/brain/client-brain";
+
+/**
+ * The client-identity fields SEOOS needs to build a project, sourced from either
+ * the brain's canonical record (default) or, for rollback, the ClickUp roster.
+ */
+interface ClientRow {
+  clientId: string;
+  taskId: string;
+  name: string;
+  website?: string;
+  niche?: string;
+  serviceTier?: string;
+  locations: string[];
+  metrics: Record<string, string>;
+  seoSpecialist?: string;
+  accountManager?: string;
+  pod?: string;
+  status?: string;
+}
+
+function rosterToRow(c: RosterClient): ClientRow {
+  return {
+    clientId: c.clientId,
+    taskId: c.taskId,
+    name: c.name,
+    website: c.website,
+    niche: c.niche,
+    serviceTier: c.serviceTier,
+    locations: c.location ? [c.location] : [],
+    metrics: c.metrics ?? {},
+    seoSpecialist: c.assignedTo || c.seoSpecialist,
+    accountManager: c.accountManager,
+    pod: c.pod,
+    status: c.status,
+  };
+}
+
+/** Canonical brain client → project row. Requires a ClickUp task id to key on. */
+function canonicalToRow(c: ClientV1): ClientRow | null {
+  const taskId = c.externalIds?.clickupTaskId;
+  if (!taskId) return null;
+  return {
+    clientId: taskId,
+    taskId,
+    name: c.businessName,
+    website: c.website,
+    niche: c.niche,
+    serviceTier: c.packageName,
+    locations: c.locations ?? [],
+    metrics: c.metrics ?? {},
+    seoSpecialist: c.seoSpecialist,
+    accountManager: c.accountManager,
+    pod: c.pod,
+    status: c.status,
+  };
+}
 import {
   listSpecialists,
   matchSpecialistId,
@@ -137,17 +194,42 @@ export async function syncClientsFromClickUp(tenantId: string): Promise<SyncClie
   });
   if (!roster.ok) return { ...empty, error: roster.error ?? "clickup_roster_failed" };
 
-  // ClickUp pod values are kept on the client for reference only (informational);
-  // client → specialist grouping is driven by the ⭐ Responsable field + the roster.
+  // Feed the Client Brain FIRST — it is the source of truth. The brain does the
+  // ClickUp read; SEOOS then builds its projects from the brain's canonical
+  // clients (default). ClickUp is no longer read directly for client truth here.
+  let brainClients: ClientV1[] = [];
+  try {
+    const brain = getClientBrain();
+    await brain.ingestAndReconcile(tenantId, rosterToInputs(roster.clients), { now: nowIso() });
+    brainClients = await brain.listClients(tenantId);
+  } catch {
+    brainClients = [];
+  }
+
+  // Read client truth from the brain by default; the legacy direct-from-ClickUp
+  // path stays available for rollback via SEOOS_CLIENT_SOURCE=clickup.
+  const source = (process.env.SEOOS_CLIENT_SOURCE || "brain").toLowerCase();
+  let rows: ClientRow[];
+  if (source === "clickup") {
+    rows = roster.clients.map(rosterToRow);
+  } else {
+    rows = brainClients.map(canonicalToRow).filter((r): r is ClientRow => r !== null);
+    // Safety: if the brain came back empty (e.g. a transient read), fall back to
+    // the roster so we never prune the entire client list to zero.
+    if (rows.length === 0 && roster.clients.length > 0) rows = roster.clients.map(rosterToRow);
+  }
+
+  // Pod values are informational; client → specialist grouping is driven by the
+  // seoSpecialist field carried on each row.
   const discoveredPods = Array.from(
-    new Set(roster.clients.map((c) => c.pod).filter((p): p is string => Boolean(p))),
+    new Set(rows.map((r) => r.pod).filter((p): p is string => Boolean(p))),
   );
 
   const repo = getProjectRepo();
   let created = 0;
   let updated = 0;
   let podsMatched = 0;
-  for (const client of roster.clients) {
+  for (const client of rows) {
     const now = nowIso();
     const externalIds: Record<string, string> = { clickupTaskId: client.taskId };
     if (client.seoSpecialist) externalIds.seoSpecialist = client.seoSpecialist;
@@ -165,8 +247,8 @@ export async function syncClientsFromClickUp(tenantId: string): Promise<SyncClie
 
     const existing = await repo.findByClient(tenantId, client.clientId);
     if (existing) {
-      const mergedLocations = client.location
-        ? Array.from(new Set([...(existing.targetLocations ?? []), client.location]))
+      const mergedLocations = client.locations.length
+        ? Array.from(new Set([...(existing.targetLocations ?? []), ...client.locations]))
         : existing.targetLocations;
       await repo.save({
         ...existing,
@@ -200,7 +282,7 @@ export async function syncClientsFromClickUp(tenantId: string): Promise<SyncClie
         health: "healthy",
         assignments: { supportingUserIds: [] },
         priority: "normal",
-        targetLocations: client.location ? [client.location] : [],
+        targetLocations: client.locations,
         goals: [],
         externalIds,
         dashboardMetrics: metrics,
@@ -212,22 +294,25 @@ export async function syncClientsFromClickUp(tenantId: string): Promise<SyncClie
     created += 1;
   }
 
-  // Prune stale ClickUp-sourced clients no longer in the roster (e.g. checklist
-  // subtask rows created by an earlier, buggy sync). Manually-created projects
-  // (no clickupTaskId) are never touched.
-  const currentIds = new Set(roster.clients.map((c) => c.clientId));
-  const staleIds = (await repo.list(tenantId))
-    .filter((p) => p.externalIds?.clickupTaskId && !currentIds.has(p.clientId))
-    .map((p) => p.id);
-  if (staleIds.length) await repo.removeMany(tenantId, staleIds);
-  const pruned = staleIds.length;
+  // Prune stale ClickUp-sourced clients no longer present. Only prune when we
+  // actually have rows (guarded above), and never touch manually-created
+  // projects (no clickupTaskId).
+  let pruned = 0;
+  if (rows.length) {
+    const currentIds = new Set(rows.map((r) => r.clientId));
+    const staleIds = (await repo.list(tenantId))
+      .filter((p) => p.externalIds?.clickupTaskId && !currentIds.has(p.clientId))
+      .map((p) => p.id);
+    if (staleIds.length) await repo.removeMany(tenantId, staleIds);
+    pruned = staleIds.length;
+  }
 
   return {
     ok: true,
     created,
     updated,
     skipped: Math.max(0, roster.fetched - roster.clients.length),
-    total: roster.clients.length,
+    total: rows.length,
     podsFound: discoveredPods.length,
     podsMatched,
     pruned,

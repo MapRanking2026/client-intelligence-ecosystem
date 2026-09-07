@@ -7,7 +7,8 @@ import type { WorkOrderType } from "@/src/lib/domain/work-order";
 export interface ServiceOffering {
   id: string;
   name: string;
-  priceUsd: number;
+  /** Button text for starting the service. */
+  ctaLabel: string;
   cadence: "one_time" | "monthly";
   description: string;
   workOrderType: WorkOrderType;
@@ -16,8 +17,8 @@ export interface ServiceOffering {
 export const SERVICE_OFFERINGS: ServiceOffering[] = [
   {
     id: "one_time_optimization_499",
-    name: "One-Time GBP Optimization",
-    priceUsd: 499,
+    name: "GBP Optimization",
+    ctaLabel: "Optimize GBP Now",
     cadence: "one_time",
     description:
       "A single, thorough Google Business Profile optimization pass: categories, services, description, products, and posts — with the changes explained for the client.",

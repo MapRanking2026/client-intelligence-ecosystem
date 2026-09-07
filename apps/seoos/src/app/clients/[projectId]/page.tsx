@@ -161,9 +161,9 @@ export default async function ProjectSetupPage({
         <Panel title="Services">
           {SERVICE_OFFERINGS.map((o) => (
             <div key={o.id} style={{ marginBottom: 12 }}>
-              <strong>{o.name}</strong> — ${o.priceUsd} {o.cadence === "one_time" ? "one-time" : "/mo"}
+              <strong>{o.name}</strong>
               <div className="muted" style={{ fontSize: 13 }}>{o.description}</div>
-              <StartServiceButton projectId={project.id} offeringId={o.id} label={`Start ${o.name}`} />
+              <StartServiceButton projectId={project.id} offeringId={o.id} label={o.ctaLabel} />
             </div>
           ))}
           <p className="muted" style={{ fontSize: 12 }}>

@@ -29,7 +29,7 @@ export async function POST(
         projectId,
         clientId: project.clientId,
         type: offering.workOrderType,
-        title: `${offering.name} ($${offering.priceUsd})`,
+        title: offering.name,
         scope: offering.description,
         priority: "normal",
         requiresApproval: true,

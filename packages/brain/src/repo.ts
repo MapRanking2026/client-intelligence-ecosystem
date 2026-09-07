@@ -15,7 +15,9 @@ export interface ClientBrainStore {
   getLatestReport(tenantId: string): Promise<ClientReconciliationReportV1 | null>;
 }
 
-const CLIENTS = "clients";
+// Distinct from MTOS's own `clients` collection — the brain owns its own
+// namespace so the two never commingle in a shared Firebase project.
+const CLIENTS = "canonicalClients";
 const META = "brainMeta";
 const LAST_REPORT = "lastReconciliation";
 

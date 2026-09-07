@@ -46,8 +46,8 @@ export default async function BrainPage() {
           <StatCard label="Last reconciled" value={report ? new Date(report.generatedAt).toLocaleString() : "—"} />
         </div>
         <p className="muted" style={{ fontSize: 12, marginBottom: 0 }}>
-          Phase 1: SEOOS reads the ClickUp SEO Dashboard into the brain. MTOS&apos;s Health Tracker joins as a
-          second source next — the engine already merges multiple sources and flags any disagreements below.
+          Two sources feed the brain: the ClickUp SEO Dashboard (SEOOS) and the Client Health Tracker (MTOS).
+          The engine merges them into one canonical record per client and flags any field where they disagree below.
         </p>
       </Panel>
 

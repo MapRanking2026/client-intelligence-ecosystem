@@ -8,12 +8,9 @@ import {
 } from "@/src/lib/domain/project";
 import { newId, nowIso } from "@/src/lib/ids";
 import { getProjectRepo } from "@/src/lib/server/repositories/project-repo";
-import {
-  getIntegrationCredentials,
-  listIntegrations,
-} from "@/src/lib/server/integrations-service";
-import { fetchClickUpClientRoster, type RosterClient } from "@/src/lib/server/sync/clickup-clients";
-import { getClientBrain, rosterToInputs } from "@/src/lib/server/brain/client-brain";
+import { listIntegrations } from "@/src/lib/server/integrations-service";
+import type { RosterClient } from "@/src/lib/server/sync/clickup-clients";
+import { getClientBrain, ingestClickUpIntoBrain } from "@/src/lib/server/brain/client-brain";
 
 /**
  * The client-identity fields SEOOS needs to build a project, sourced from either
@@ -174,34 +171,18 @@ export async function syncClientsFromClickUp(tenantId: string): Promise<SyncClie
   if (!clickup) {
     return { ...empty, error: "ClickUp is not connected. Connect it under Integrations first." };
   }
-  const creds = await getIntegrationCredentials(tenantId, "clickup");
-  if (!creds?.apiToken) {
-    return { ...empty, error: "ClickUp credentials are missing. Reconnect ClickUp under Integrations." };
-  }
-
-  // The SEO Dashboard is the roster source of truth: one row per client with the
-  // full SEO field set (pod, niche, account manager, services, metrics). Prefer
-  // it; fall back to a plain roster list only if no dashboard list is set.
-  const rosterListId =
-    creds.dashboardListId ||
-    process.env.CLICKUP_SEO_DASHBOARD_LIST_ID ||
-    creds.listId ||
-    creds.healthTrackerListId;
-  const roster = await fetchClickUpClientRoster({
-    token: creds.apiToken,
-    listId: rosterListId,
-    teamId: creds.teamId,
-  });
-  if (!roster.ok) return { ...empty, error: roster.error ?? "clickup_roster_failed" };
 
   // Feed the Client Brain FIRST — it is the source of truth. The brain does the
-  // ClickUp read; SEOOS then builds its projects from the brain's canonical
-  // clients (default). ClickUp is no longer read directly for client truth here.
+  // ClickUp reads (SEO Dashboard + MTOS Health Tracker) and reconciles; SEOOS
+  // then builds its projects from the brain's canonical clients (default).
+  const ingest = await ingestClickUpIntoBrain(tenantId);
+  if (!ingest.ok) return { ...empty, error: ingest.error ?? "clickup_roster_failed" };
+  const dashboardRoster = ingest.dashboardRoster ?? [];
+  const dashboardFetched = ingest.dashboardFetched ?? dashboardRoster.length;
+
   let brainClients: ClientV1[] = [];
   try {
-    const brain = getClientBrain();
-    await brain.ingestAndReconcile(tenantId, rosterToInputs(roster.clients), { now: nowIso() });
-    brainClients = await brain.listClients(tenantId);
+    brainClients = await getClientBrain().listClients(tenantId);
   } catch {
     brainClients = [];
   }
@@ -211,12 +192,12 @@ export async function syncClientsFromClickUp(tenantId: string): Promise<SyncClie
   const source = (process.env.SEOOS_CLIENT_SOURCE || "brain").toLowerCase();
   let rows: ClientRow[];
   if (source === "clickup") {
-    rows = roster.clients.map(rosterToRow);
+    rows = dashboardRoster.map(rosterToRow);
   } else {
     rows = brainClients.map(canonicalToRow).filter((r): r is ClientRow => r !== null);
     // Safety: if the brain came back empty (e.g. a transient read), fall back to
     // the roster so we never prune the entire client list to zero.
-    if (rows.length === 0 && roster.clients.length > 0) rows = roster.clients.map(rosterToRow);
+    if (rows.length === 0 && dashboardRoster.length > 0) rows = dashboardRoster.map(rosterToRow);
   }
 
   // Pod values are informational; client → specialist grouping is driven by the
@@ -311,7 +292,7 @@ export async function syncClientsFromClickUp(tenantId: string): Promise<SyncClie
     ok: true,
     created,
     updated,
-    skipped: Math.max(0, roster.fetched - roster.clients.length),
+    skipped: Math.max(0, dashboardFetched - dashboardRoster.length),
     total: rows.length,
     podsFound: discoveredPods.length,
     podsMatched,

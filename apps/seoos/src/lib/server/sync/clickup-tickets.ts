@@ -20,7 +20,71 @@ type ClickUpTask = {
   parent?: string | null;
   status?: { status?: string; type?: string };
   assignees?: Array<{ id?: number; username?: string; email?: string }>;
+  custom_fields?: Array<{
+    name?: string;
+    value?: unknown;
+    type_config?: { options?: Array<{ id?: string; name?: string; label?: string; orderindex?: number }> };
+  }>;
 };
+
+/** Candidate names for the "Business Name" custom field on a ticket. */
+function businessFieldNames(): string[] {
+  const configured = process.env.CLICKUP_TICKET_BUSINESS_FIELD;
+  return [
+    ...(configured ? [configured] : []),
+    "Business Name",
+    "⭐️ Business Name",
+    "Business",
+    "Client Name",
+    "⭐️ Client Name",
+    "Client",
+    "Account Name",
+    "Account",
+  ];
+}
+
+function normalizeFieldName(value: string): string {
+  return value
+    .normalize("NFKD")
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ");
+}
+
+function stringifyField(task: ClickUpTask, fieldName: string): string {
+  const target = normalizeFieldName(fieldName);
+  const field = task.custom_fields?.find((f) => normalizeFieldName(f.name || "") === target);
+  if (!field) return "";
+  const { value } = field;
+  if (typeof value === "string") {
+    const opt = field.type_config?.options?.find(
+      (o) => o.id === value || String(o.orderindex ?? "") === value,
+    );
+    return opt?.name || value;
+  }
+  if (typeof value === "number") {
+    const opt = field.type_config?.options?.find(
+      (o) => Number(o.orderindex) === value || o.id === String(value),
+    );
+    return opt?.name || String(value);
+  }
+  if (Array.isArray(value)) {
+    const opts = field.type_config?.options ?? [];
+    return value
+      .map((v) => opts.find((o) => o.id === v || o.id === String(v))?.name || String(v))
+      .join(", ");
+  }
+  return "";
+}
+
+function firstField(task: ClickUpTask, names: string[]): string {
+  for (const n of names) {
+    const v = stringifyField(task, n).trim();
+    if (v) return v;
+  }
+  return "";
+}
 
 export interface RawTicket {
   externalId: string;
@@ -28,6 +92,8 @@ export interface RawTicket {
   body: string;
   url?: string;
   parentId?: string;
+  /** The ticket's Business Name custom field — the primary link to a client. */
+  businessName?: string;
   clickupStatus?: string;
   isClosed: boolean;
   dueDate?: string;
@@ -85,6 +151,7 @@ function toRaw(task: ClickUpTask): RawTicket {
     body: (task.text_content ?? task.description ?? "").trim(),
     url: task.url,
     parentId: task.parent ?? undefined,
+    businessName: firstField(task, businessFieldNames()) || undefined,
     clickupStatus: statusName,
     isClosed,
     dueDate: task.due_date ?? undefined,

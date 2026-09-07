@@ -46,17 +46,43 @@ function inferCategory(title: string, body: string): TicketCategory {
   return "general";
 }
 
-/** Link a ticket to a known client: by ClickUp parent id, else by name mention. */
+const normName = (s: string) => s.normalize("NFKD").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+
+/**
+ * Link a ticket to a known client. Tickets are always created with a Business
+ * Name field, so that is the primary key: exact normalized match first, then a
+ * contains match. Falls back to the ClickUp parent task, then a name mention.
+ */
 function resolveProject(raw: RawTicket, projects: SeoProjectV1[]): SeoProjectV1 | undefined {
+  // 1) The ticket's Business Name field → the client (primary, most reliable).
+  if (raw.businessName) {
+    const target = normName(raw.businessName);
+    if (target) {
+      const exact = projects.find((p) => normName(p.businessName) === target);
+      if (exact) return exact;
+      // Contains either way (handles "StoneBase Masonry" vs "StoneBase Masonry - Boston").
+      let best: SeoProjectV1 | undefined;
+      for (const p of projects) {
+        const name = normName(p.businessName);
+        if (name.length >= 4 && (name.includes(target) || target.includes(name))) {
+          if (!best || p.businessName.length > best.businessName.length) best = p;
+        }
+      }
+      if (best) return best;
+    }
+  }
+
+  // 2) ClickUp parent task id maps to a client roster task.
   if (raw.parentId) {
     const byParent = projects.find((p) => p.externalIds?.clickupTaskId === raw.parentId);
     if (byParent) return byParent;
   }
-  const hay = `${raw.title} ${raw.body}`.toLowerCase();
-  // Prefer the longest business-name match to avoid short-name false positives.
+
+  // 3) Last resort: the client name appears in the ticket title/body.
+  const hay = normName(`${raw.title} ${raw.body}`);
   let best: SeoProjectV1 | undefined;
   for (const p of projects) {
-    const name = p.businessName.toLowerCase();
+    const name = normName(p.businessName);
     if (name.length >= 4 && hay.includes(name)) {
       if (!best || p.businessName.length > best.businessName.length) best = p;
     }
@@ -113,7 +139,7 @@ export async function syncTickets(
         dueDate: raw.dueDate ?? existing.dueDate,
         projectId: project?.id ?? existing.projectId,
         clientId: project?.clientId ?? existing.clientId,
-        clientName: project?.businessName ?? existing.clientName,
+        clientName: project?.businessName ?? raw.businessName ?? existing.clientName,
         specialistId: specialistId ?? existing.specialistId,
         assigneeRaw: raw.assigneeRaw ?? existing.assigneeRaw,
         updatedAt: now,
@@ -136,7 +162,7 @@ export async function syncTickets(
       category: inferCategory(raw.title, raw.body),
       projectId: project?.id,
       clientId: project?.clientId,
-      clientName: project?.businessName,
+      clientName: project?.businessName ?? raw.businessName,
       specialistId,
       assigneeRaw: raw.assigneeRaw,
       clickupStatus: raw.clickupStatus,

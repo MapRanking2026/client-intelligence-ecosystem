@@ -1,6 +1,7 @@
 import type { NormalizedClientInput } from "@cie/contracts";
 
 import { clientKey, reconcileClients } from "../reconcile";
+import { runPlatformChecks } from "./platform";
 
 /** Minimal, dependency-free checks for the reconcile engine. Run: npm test -w @cie/engine */
 let failures = 0;
@@ -65,8 +66,12 @@ assert(
 );
 assert((ma?.sources.length ?? 0) === 2, "both sources recorded on the client");
 
-if (failures) {
-  console.error(`\n${failures} check(s) failed`);
+console.log("\n-- platform (tenant isolation + app registry) --");
+const platformFailures = await runPlatformChecks();
+
+const total = failures + platformFailures;
+if (total) {
+  console.error(`\n${total} check(s) failed`);
   process.exit(1);
 }
-console.log("\nAll engine reconcile checks passed.");
+console.log("\nAll engine + platform checks passed.");

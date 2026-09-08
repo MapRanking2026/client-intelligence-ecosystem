@@ -12,3 +12,9 @@ export {
 } from "./repo";
 export { SupabaseClientStore } from "./supabase-repo";
 export { reconcileClients, clientKey, type ReconcileResult } from "./reconcile";
+export {
+  type PlatformStore,
+  InMemoryPlatformStore,
+  SupabasePlatformStore,
+} from "./platform-repo";
+export { PlatformService, type TenantAccess } from "./platform-service";

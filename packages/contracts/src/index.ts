@@ -5,6 +5,7 @@
  */
 export * from "./common";
 export * from "./identity";
+export * from "./tenant";
 export * from "./client";
 export * from "./evidence";
 export * from "./lead-call";

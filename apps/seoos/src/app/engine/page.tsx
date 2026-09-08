@@ -3,7 +3,7 @@ import { AppShell } from "@/src/components/app-shell";
 import { EmptyState, Panel, StatCard, UnauthorizedPage } from "@/src/components/states";
 import { EngineReconcileButton } from "@/src/components/engine-panel";
 import { getClientEngine } from "@/src/lib/server/engine/client-engine";
-import { getEngineProjectId } from "@/src/lib/server/firebase/engine-admin";
+import { getEngineStoreLabel } from "@/src/lib/server/engine/engine-store";
 
 export const dynamic = "force-dynamic";
 
@@ -47,7 +47,7 @@ export default async function EnginePage() {
           <StatCard label="Last reconciled" value={report ? new Date(report.generatedAt).toLocaleString() : "—"} />
           <StatCard
             label="Data store"
-            value={getEngineProjectId() || "in-memory (no Firestore)"}
+            value={getEngineStoreLabel()}
             hint={`tenant ${authz.tenantId} · must match MTOS to share the engine`}
           />
         </div>

@@ -1,8 +1,8 @@
-import { FirestoreClientStore, clientKey } from "@cie/engine";
+import { clientKey } from "@cie/engine";
 import type { ClientV1 } from "@cie/contracts";
 
 import { getFirebaseAdminDb } from "@/src/lib/server/firebase/admin";
-import { getEngineFirebaseDb, getEngineProjectId } from "@/src/lib/server/firebase/engine-admin";
+import { getEngineStore, getEngineStoreLabel } from "@/src/lib/server/engine/engine-store";
 import { clientsCollectionPath, tenantPath } from "@/src/lib/server/firebase/collections";
 import { getServerEnv } from "@/src/lib/server/env";
 
@@ -28,8 +28,8 @@ export interface MtosShadowReport {
   tenantId: string;
   /** MTOS's own Firebase project. */
   mtosProjectId: string;
-  /** The engine store's Firebase project — compare with SEOOS's to confirm they match. */
-  engineProjectId: string;
+  /** The engine store MTOS read (e.g. "supabase:xxx" or "firebase:project") — compare with SEOOS's. */
+  engineStore: string;
   /** Whether MTOS could read any canonical clients from the shared engine store. */
   canSeeEngine: boolean;
   mtosClients: number;
@@ -47,16 +47,15 @@ const CAP = 100;
 
 export async function runMtosEngineShadow(tenantId: string): Promise<MtosShadowReport> {
   const db = getFirebaseAdminDb();
-  const engineDb = getEngineFirebaseDb();
   const generatedAt = new Date().toISOString();
   const mtosProjectId = getServerEnv().firebaseProjectId;
-  const engineProjectId = getEngineProjectId();
+  const engineStore = getEngineStoreLabel();
   if (!db) {
     return {
       generatedAt,
       tenantId,
       mtosProjectId,
-      engineProjectId,
+      engineStore,
       canSeeEngine: false,
       mtosClients: 0,
       engineClients: 0,
@@ -82,10 +81,10 @@ export async function runMtosEngineShadow(tenantId: string): Promise<MtosShadowR
     };
   });
 
-  // Engine canonical clients (shared store — a dedicated project when configured).
+  // Engine canonical clients (shared store — Supabase or a dedicated Firebase project).
   let canonical: ClientV1[] = [];
   try {
-    if (engineDb) canonical = await new FirestoreClientStore(engineDb).listClients(tenantId);
+    canonical = await getEngineStore().listClients(tenantId);
   } catch {
     canonical = [];
   }
@@ -147,7 +146,7 @@ export async function runMtosEngineShadow(tenantId: string): Promise<MtosShadowR
     generatedAt,
     tenantId,
     mtosProjectId,
-    engineProjectId,
+    engineStore,
     canSeeEngine: canonical.length > 0,
     mtosClients: mtosClients.length,
     engineClients: canonical.length,

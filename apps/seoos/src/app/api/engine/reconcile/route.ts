@@ -3,7 +3,7 @@ import { AuthzError, requirePermission } from "@cie/core";
 
 import { resolveSeoAuthz } from "@/src/lib/auth/context";
 import { getClientEngine, ingestClickUpIntoEngine } from "@/src/lib/server/engine/client-engine";
-import { getEngineProjectId } from "@/src/lib/server/firebase/engine-admin";
+import { getEngineStoreLabel } from "@/src/lib/server/engine/engine-store";
 
 export const maxDuration = 300;
 
@@ -18,11 +18,11 @@ export async function GET(request: Request) {
       engine.listClients(authz.tenantId),
       engine.getLatestReport(authz.tenantId),
     ]);
-    // projectId + tenantId let us confirm SEOOS writes where MTOS reads.
+    // store label + tenantId let us confirm SEOOS writes where MTOS reads.
     return NextResponse.json({
       data: {
         tenantId: authz.tenantId,
-        engineProjectId: getEngineProjectId(),
+        engineStore: getEngineStoreLabel(),
         canonicalClients: clients.length,
         report,
       },

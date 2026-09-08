@@ -17,6 +17,7 @@
     "@cie/engine": "*",
     "@cie/contracts": "*",
     "@cie/core": "*",
+    "@supabase/supabase-js": "^2.58.0",
     "@opentelemetry/api": "^1.9.1",
     "docx": "^9.7.1",
     "firebase": "^12.2.1",

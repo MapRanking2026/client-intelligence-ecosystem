@@ -1,7 +1,7 @@
-import { ClientEngine, FirestoreClientStore, InMemoryClientStore } from "@cie/engine";
+import { ClientEngine } from "@cie/engine";
 import type { ClientReconciliationReportV1, NormalizedClientInput } from "@cie/contracts";
 
-import { getEngineFirebaseDb } from "@/src/lib/server/firebase/engine-admin";
+import { getEngineStore } from "@/src/lib/server/engine/engine-store";
 import { getIntegrationCredentials } from "@/src/lib/server/integrations-service";
 import { fetchClickUpClientRoster, type RosterClient } from "@/src/lib/server/sync/clickup-clients";
 import { nowIso } from "@/src/lib/ids";
@@ -12,15 +12,13 @@ const DEFAULT_HEALTH_TRACKER_LIST_ID = "901105243881"; // Client Health Tracker 
 
 /**
  * SEOOS's handle on the shared Client Intelligence Engine. The engine is a shared
- * in-monorepo module (@cie/engine); we inject the engine's Firestore (a dedicated
- * project when ENGINE_FIREBASE_* is set, else SEOOS's own). Falls back to
- * in-memory when no Firestore is configured at all.
+ * in-monorepo module (@cie/engine); the store backend (Supabase, a dedicated
+ * Firebase project, else in-memory) is selected by getEngineStore().
  */
 let engine: ClientEngine | null = null;
 export function getClientEngine(): ClientEngine {
   if (engine) return engine;
-  const db = getEngineFirebaseDb();
-  engine = new ClientEngine(db ? new FirestoreClientStore(db) : new InMemoryClientStore());
+  engine = new ClientEngine(getEngineStore());
   return engine;
 }
 

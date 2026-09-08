@@ -10,4 +10,5 @@ export {
   InMemoryClientStore,
   FirestoreClientStore,
 } from "./repo";
+export { SupabaseClientStore } from "./supabase-repo";
 export { reconcileClients, clientKey, type ReconcileResult } from "./reconcile";

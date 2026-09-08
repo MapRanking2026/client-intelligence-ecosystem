@@ -19,12 +19,15 @@
     "zod": "^4.1.5"
   },
   "peerDependencies": {
+    "@supabase/supabase-js": "^2.0.0",
     "firebase-admin": "^13.0.0"
   },
   "peerDependenciesMeta": {
+    "@supabase/supabase-js": { "optional": true },
     "firebase-admin": { "optional": true }
   },
   "devDependencies": {
+    "@supabase/supabase-js": "^2.58.0",
     "firebase-admin": "^13.5.0",
     "tsx": "^4.20.5",
     "typescript": "^5"

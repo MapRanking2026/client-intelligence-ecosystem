@@ -14,6 +14,7 @@
     "@cie/engine": "*",
     "@cie/contracts": "*",
     "@cie/core": "*",
+    "@supabase/supabase-js": "^2.58.0",
     "firebase-admin": "^13.5.0",
     "jose": "^6.1.0",
     "next": "16.2.9",

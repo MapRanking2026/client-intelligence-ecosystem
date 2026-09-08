@@ -10,11 +10,11 @@ import { newId, nowIso } from "@/src/lib/ids";
 import { getProjectRepo } from "@/src/lib/server/repositories/project-repo";
 import { listIntegrations } from "@/src/lib/server/integrations-service";
 import type { RosterClient } from "@/src/lib/server/sync/clickup-clients";
-import { getClientBrain, ingestClickUpIntoBrain } from "@/src/lib/server/brain/client-brain";
+import { getClientEngine, ingestClickUpIntoEngine } from "@/src/lib/server/engine/client-engine";
 
 /**
  * The client-identity fields SEOOS needs to build a project, sourced from either
- * the brain's canonical record (default) or, for rollback, the ClickUp roster.
+ * the engine's canonical record (default) or, for rollback, the ClickUp roster.
  */
 interface ClientRow {
   clientId: string;
@@ -48,7 +48,7 @@ function rosterToRow(c: RosterClient): ClientRow {
   };
 }
 
-/** Canonical brain client → project row. Requires a ClickUp task id to key on. */
+/** Canonical engine client → project row. Requires a ClickUp task id to key on. */
 function canonicalToRow(c: ClientV1): ClientRow | null {
   const taskId = c.externalIds?.clickupTaskId;
   if (!taskId) return null;
@@ -172,30 +172,30 @@ export async function syncClientsFromClickUp(tenantId: string): Promise<SyncClie
     return { ...empty, error: "ClickUp is not connected. Connect it under Integrations first." };
   }
 
-  // Feed the Client Brain FIRST — it is the source of truth. The brain does the
-  // ClickUp reads (SEO Dashboard + MTOS Health Tracker) and reconciles; SEOOS
-  // then builds its projects from the brain's canonical clients (default).
-  const ingest = await ingestClickUpIntoBrain(tenantId);
+  // Feed the Client Intelligence Engine FIRST — it is the source of truth. The
+  // engine does the ClickUp reads (SEO Dashboard + MTOS Health Tracker) and
+  // reconciles; SEOOS then builds its projects from the engine's canonical clients.
+  const ingest = await ingestClickUpIntoEngine(tenantId);
   if (!ingest.ok) return { ...empty, error: ingest.error ?? "clickup_roster_failed" };
   const dashboardRoster = ingest.dashboardRoster ?? [];
   const dashboardFetched = ingest.dashboardFetched ?? dashboardRoster.length;
 
-  let brainClients: ClientV1[] = [];
+  let engineClients: ClientV1[] = [];
   try {
-    brainClients = await getClientBrain().listClients(tenantId);
+    engineClients = await getClientEngine().listClients(tenantId);
   } catch {
-    brainClients = [];
+    engineClients = [];
   }
 
-  // Read client truth from the brain by default; the legacy direct-from-ClickUp
+  // Read client truth from the engine by default; the legacy direct-from-ClickUp
   // path stays available for rollback via SEOOS_CLIENT_SOURCE=clickup.
-  const source = (process.env.SEOOS_CLIENT_SOURCE || "brain").toLowerCase();
+  const source = (process.env.SEOOS_CLIENT_SOURCE || "engine").toLowerCase();
   let rows: ClientRow[];
   if (source === "clickup") {
     rows = dashboardRoster.map(rosterToRow);
   } else {
-    rows = brainClients.map(canonicalToRow).filter((r): r is ClientRow => r !== null);
-    // Safety: if the brain came back empty (e.g. a transient read), fall back to
+    rows = engineClients.map(canonicalToRow).filter((r): r is ClientRow => r !== null);
+    // Safety: if the engine came back empty (e.g. a transient read), fall back to
     // the roster so we never prune the entire client list to zero.
     if (rows.length === 0 && dashboardRoster.length > 0) rows = dashboardRoster.map(rosterToRow);
   }

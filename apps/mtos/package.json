@@ -14,7 +14,7 @@
     "check:prompt-store": "tsx scripts/check-prompt-store.ts"
   },
   "dependencies": {
-    "@cie/brain": "*",
+    "@cie/engine": "*",
     "@cie/contracts": "*",
     "@cie/core": "*",
     "@opentelemetry/api": "^1.9.1",

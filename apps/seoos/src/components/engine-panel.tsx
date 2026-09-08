@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
-export function BrainReconcileButton() {
+export function EngineReconcileButton() {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
@@ -12,7 +12,7 @@ export function BrainReconcileButton() {
     setBusy(true);
     setMsg(null);
     try {
-      const res = await fetch("/api/brain/reconcile", { method: "POST" });
+      const res = await fetch("/api/engine/reconcile", { method: "POST" });
       const body = await res.json().catch(() => null);
       if (!res.ok) setMsg((body && body.error) || "Failed");
       else {

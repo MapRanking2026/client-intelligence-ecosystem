@@ -5,18 +5,18 @@ import {
 } from "@cie/contracts";
 
 import { reconcileClients } from "./reconcile";
-import type { ClientBrainStore } from "./repo";
+import type { ClientEngineStore } from "./repo";
 
 /**
- * The Client Brain service — the ONE way apps read/refresh client truth.
- * Construct it with a store (Firestore-backed in prod, in-memory in dev/tests).
- * Phase 1 is read + ingest-reconcile; write-back to external systems arrives in
- * a later phase and always stays approval-gated.
+ * The Client Intelligence Engine service — the ONE way apps read/refresh client
+ * truth. Construct it with a store (Firestore-backed in prod, in-memory in
+ * dev/tests). Phase 1 is read + ingest-reconcile; write-back to external systems
+ * arrives in a later phase and always stays approval-gated.
  */
-export class ClientBrain {
-  constructor(private readonly store: ClientBrainStore) {}
+export class ClientEngine {
+  constructor(private readonly store: ClientEngineStore) {}
 
-  /** One canonical client (null if unknown to the brain). */
+  /** One canonical client (null if unknown to the engine). */
   getClient(tenantId: string, id: string): Promise<ClientV1 | null> {
     return this.store.getClient(tenantId, id);
   }

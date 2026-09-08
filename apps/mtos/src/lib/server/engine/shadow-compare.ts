@@ -1,15 +1,18 @@
-import { FirestoreClientStore, clientKey } from "@cie/brain";
+import { FirestoreClientStore, clientKey } from "@cie/engine";
 import type { ClientV1 } from "@cie/contracts";
 
 import { getFirebaseAdminDb } from "@/src/lib/server/firebase/admin";
+import { getEngineFirebaseDb, getEngineProjectId } from "@/src/lib/server/firebase/engine-admin";
 import { clientsCollectionPath, tenantPath } from "@/src/lib/server/firebase/collections";
 import { getServerEnv } from "@/src/lib/server/env";
 
 /**
- * Phase 3b shadow: compare MTOS's own client records against the Client Brain's
- * canonical clients WITHOUT changing any read path or what users see. Purely
- * observational — it reads both sides, records how well they line up, and stores
- * a report. Nothing here feeds the live UI. Rollback is simply not running it.
+ * Phase 3b shadow: compare MTOS's own client records against the Client
+ * Intelligence Engine's canonical clients WITHOUT changing any read path or what
+ * users see. Purely observational — it reads both sides, records how well they
+ * line up, and stores a report. Nothing here feeds the live UI. Rollback is
+ * simply not running it. MTOS clients come from MTOS's own Firestore; the engine
+ * canonical clients come from the (possibly dedicated) engine store.
  */
 
 interface MtosClientLite {
@@ -23,39 +26,44 @@ interface MtosClientLite {
 export interface MtosShadowReport {
   generatedAt: string;
   tenantId: string;
-  /** The Firebase project MTOS is reading — compare with SEOOS's to confirm they match. */
-  firebaseProjectId: string;
-  /** Whether MTOS could read any canonical clients from the shared brain store. */
-  canSeeBrain: boolean;
+  /** MTOS's own Firebase project. */
+  mtosProjectId: string;
+  /** The engine store's Firebase project — compare with SEOOS's to confirm they match. */
+  engineProjectId: string;
+  /** Whether MTOS could read any canonical clients from the shared engine store. */
+  canSeeEngine: boolean;
   mtosClients: number;
-  brainClients: number;
-  brainClientsFromHealthTracker: number;
+  engineClients: number;
+  engineClientsFromHealthTracker: number;
   matched: number;
   onlyInMtos: Array<{ id: string; name: string }>;
-  onlyInBrain: Array<{ id: string; businessName: string }>;
-  fieldDiffs: Array<{ clientId: string; name: string; field: string; mtos: string; brain: string }>;
+  onlyInEngine: Array<{ id: string; businessName: string }>;
+  fieldDiffs: Array<{ clientId: string; name: string; field: string; mtos: string; engine: string }>;
 }
 
 const norm = (v?: string) => (v ?? "").toString().trim();
 const eqi = (a?: string, b?: string) => norm(a).toLowerCase() === norm(b).toLowerCase();
 const CAP = 100;
 
-export async function runMtosBrainShadow(tenantId: string): Promise<MtosShadowReport> {
+export async function runMtosEngineShadow(tenantId: string): Promise<MtosShadowReport> {
   const db = getFirebaseAdminDb();
+  const engineDb = getEngineFirebaseDb();
   const generatedAt = new Date().toISOString();
-  const firebaseProjectId = getServerEnv().firebaseProjectId;
+  const mtosProjectId = getServerEnv().firebaseProjectId;
+  const engineProjectId = getEngineProjectId();
   if (!db) {
     return {
       generatedAt,
       tenantId,
-      firebaseProjectId,
-      canSeeBrain: false,
+      mtosProjectId,
+      engineProjectId,
+      canSeeEngine: false,
       mtosClients: 0,
-      brainClients: 0,
-      brainClientsFromHealthTracker: 0,
+      engineClients: 0,
+      engineClientsFromHealthTracker: 0,
       matched: 0,
       onlyInMtos: [],
-      onlyInBrain: [],
+      onlyInEngine: [],
       fieldDiffs: [],
     };
   }
@@ -74,10 +82,10 @@ export async function runMtosBrainShadow(tenantId: string): Promise<MtosShadowRe
     };
   });
 
-  // Brain canonical clients (shared store, injected Firestore).
+  // Engine canonical clients (shared store — a dedicated project when configured).
   let canonical: ClientV1[] = [];
   try {
-    canonical = await new FirestoreClientStore(db).listClients(tenantId);
+    if (engineDb) canonical = await new FirestoreClientStore(engineDb).listClients(tenantId);
   } catch {
     canonical = [];
   }
@@ -110,53 +118,54 @@ export async function runMtosBrainShadow(tenantId: string): Promise<MtosShadowRe
     // non-empty value that differs — a gap on one side isn't a conflict.
     if (norm(m.name) && norm(hit.businessName) && !eqi(m.name, hit.businessName)) {
       if (fieldDiffs.length < CAP)
-        fieldDiffs.push({ clientId: m.id, name: norm(m.name), field: "businessName", mtos: norm(m.name), brain: norm(hit.businessName) });
+        fieldDiffs.push({ clientId: m.id, name: norm(m.name), field: "businessName", mtos: norm(m.name), engine: norm(hit.businessName) });
     }
     if (norm(m.accountManager) && norm(hit.accountManager) && !eqi(m.accountManager, hit.accountManager)) {
       if (fieldDiffs.length < CAP)
-        fieldDiffs.push({ clientId: m.id, name: norm(m.name), field: "accountManager", mtos: norm(m.accountManager), brain: norm(hit.accountManager) });
+        fieldDiffs.push({ clientId: m.id, name: norm(m.name), field: "accountManager", mtos: norm(m.accountManager), engine: norm(hit.accountManager) });
     }
-    const brainLocs = (hit.locations ?? []).map((l) => l.toLowerCase());
-    if (norm(m.location) && brainLocs.length && !brainLocs.includes(norm(m.location).toLowerCase())) {
+    const engineLocs = (hit.locations ?? []).map((l) => l.toLowerCase());
+    if (norm(m.location) && engineLocs.length && !engineLocs.includes(norm(m.location).toLowerCase())) {
       if (fieldDiffs.length < CAP)
-        fieldDiffs.push({ clientId: m.id, name: norm(m.name), field: "location", mtos: norm(m.location), brain: (hit.locations ?? []).join(", ") });
+        fieldDiffs.push({ clientId: m.id, name: norm(m.name), field: "location", mtos: norm(m.location), engine: (hit.locations ?? []).join(", ") });
     }
   }
 
   // Canonical clients that MTOS's list should contain (they came from the Health
   // Tracker) but didn't match any MTOS client.
-  const onlyInBrain: MtosShadowReport["onlyInBrain"] = [];
-  let brainClientsFromHealthTracker = 0;
+  const onlyInEngine: MtosShadowReport["onlyInEngine"] = [];
+  let engineClientsFromHealthTracker = 0;
   for (const c of canonical) {
     const fromHealth = c.sources?.includes("clickup:health-tracker");
-    if (fromHealth) brainClientsFromHealthTracker += 1;
-    if (fromHealth && !matchedCanonical.has(c.id) && onlyInBrain.length < CAP) {
-      onlyInBrain.push({ id: c.id, businessName: c.businessName });
+    if (fromHealth) engineClientsFromHealthTracker += 1;
+    if (fromHealth && !matchedCanonical.has(c.id) && onlyInEngine.length < CAP) {
+      onlyInEngine.push({ id: c.id, businessName: c.businessName });
     }
   }
 
   const report: MtosShadowReport = {
     generatedAt,
     tenantId,
-    firebaseProjectId,
-    canSeeBrain: canonical.length > 0,
+    mtosProjectId,
+    engineProjectId,
+    canSeeEngine: canonical.length > 0,
     mtosClients: mtosClients.length,
-    brainClients: canonical.length,
-    brainClientsFromHealthTracker,
+    engineClients: canonical.length,
+    engineClientsFromHealthTracker,
     matched,
     onlyInMtos,
-    onlyInBrain,
+    onlyInEngine,
     fieldDiffs,
   };
 
-  // Store the latest report (brain's meta namespace — not MTOS's client data).
-  await db.doc(`${tenantPath(tenantId)}/brainMeta/mtosShadow`).set(report);
+  // Store the latest report in MTOS's own meta namespace (not client data).
+  await db.doc(`${tenantPath(tenantId)}/engineMeta/mtosShadow`).set(report);
   return report;
 }
 
-export async function getLatestMtosBrainShadow(tenantId: string): Promise<MtosShadowReport | null> {
+export async function getLatestMtosEngineShadow(tenantId: string): Promise<MtosShadowReport | null> {
   const db = getFirebaseAdminDb();
   if (!db) return null;
-  const snap = await db.doc(`${tenantPath(tenantId)}/brainMeta/mtosShadow`).get();
+  const snap = await db.doc(`${tenantPath(tenantId)}/engineMeta/mtosShadow`).get();
   return snap.exists ? (snap.data() as MtosShadowReport) : null;
 }

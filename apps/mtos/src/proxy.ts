@@ -30,9 +30,9 @@ export async function proxy(request: NextRequest) {
     path.startsWith("/api/cron/") ||
     // Integration gateway authenticates with a signed S2S HMAC, not a cookie.
     path.startsWith("/api/gateway/") ||
-    // Client Brain endpoints self-authenticate (tenant_admin session OR a
-    // CRON_SECRET bearer), so they bypass the cookie gate here.
-    path.startsWith("/api/brain/") ||
+    // Client Intelligence Engine endpoints self-authenticate (tenant_admin
+    // session OR a CRON_SECRET bearer), so they bypass the cookie gate here.
+    path.startsWith("/api/engine/") ||
     path.startsWith("/_next") ||
     path.startsWith("/favicon");
 

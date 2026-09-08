@@ -42,9 +42,9 @@ export function getServerEnv() {
     seoosEnabled: process.env.SEOOS_ENABLED === "true",
     seoosRequestsEnabled: process.env.SEOOS_REQUESTS_ENABLED !== "false",
     // Where MTOS reads client identity from. "legacy" = today's behavior
-    // (Firestore/ClickUp only). "shadow" = still legacy, but the Client Brain is
-    // compared in the background. "brain" = overlay canonical identity (Phase 3b-2).
-    seoosReadMode: (process.env.SEOOS_READ_MODE || "legacy") as "legacy" | "shadow" | "brain",
+    // (Firestore/ClickUp only). "shadow" = still legacy, but the Client Intelligence
+    // Engine is compared in the background. "engine" = overlay canonical identity (Phase 3b-2).
+    seoosReadMode: (process.env.SEOOS_READ_MODE || "legacy") as "legacy" | "shadow" | "engine",
   };
 }
 

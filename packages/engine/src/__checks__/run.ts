@@ -2,7 +2,7 @@ import type { NormalizedClientInput } from "@cie/contracts";
 
 import { clientKey, reconcileClients } from "../reconcile";
 
-/** Minimal, dependency-free checks for the reconcile engine. Run: npm test -w @cie/brain */
+/** Minimal, dependency-free checks for the reconcile engine. Run: npm test -w @cie/engine */
 let failures = 0;
 function assert(cond: boolean, msg: string) {
   if (!cond) {
@@ -69,4 +69,4 @@ if (failures) {
   console.error(`\n${failures} check(s) failed`);
   process.exit(1);
 }
-console.log("\nAll brain reconcile checks passed.");
+console.log("\nAll engine reconcile checks passed.");

@@ -1,8 +1,8 @@
 {
-  "name": "@cie/brain",
+  "name": "@cie/engine",
   "version": "0.0.0",
   "private": true,
-  "description": "Client Intelligence Ecosystem — the Client Brain: canonical client store, ingest+reconcile engine, and the single service apps read client truth through.",
+  "description": "Client Intelligence Ecosystem — the Client Intelligence Engine: canonical client store, ingest+reconcile engine, and the single service apps read client truth through.",
   "type": "module",
   "main": "./src/index.ts",
   "types": "./src/index.ts",

@@ -11,7 +11,7 @@
     "bootstrap:admin": "tsx scripts/bootstrap-seoos-admin.ts"
   },
   "dependencies": {
-    "@cie/brain": "*",
+    "@cie/engine": "*",
     "@cie/contracts": "*",
     "@cie/core": "*",
     "firebase-admin": "^13.5.0",

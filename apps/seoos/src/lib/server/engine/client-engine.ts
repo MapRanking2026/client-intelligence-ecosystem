@@ -1,7 +1,7 @@
-import { ClientBrain, FirestoreClientStore, InMemoryClientStore } from "@cie/brain";
+import { ClientEngine, FirestoreClientStore, InMemoryClientStore } from "@cie/engine";
 import type { ClientReconciliationReportV1, NormalizedClientInput } from "@cie/contracts";
 
-import { getFirebaseAdminDb } from "@/src/lib/server/firebase/admin";
+import { getEngineFirebaseDb } from "@/src/lib/server/firebase/engine-admin";
 import { getIntegrationCredentials } from "@/src/lib/server/integrations-service";
 import { fetchClickUpClientRoster, type RosterClient } from "@/src/lib/server/sync/clickup-clients";
 import { nowIso } from "@/src/lib/ids";
@@ -11,19 +11,20 @@ const DEFAULT_SEO_DASHBOARD_LIST_ID = "901112026952"; // SEO Dashboard (SEOOS)
 const DEFAULT_HEALTH_TRACKER_LIST_ID = "901105243881"; // Client Health Tracker (MTOS)
 
 /**
- * SEOOS's handle on the shared Client Brain. The brain is a shared in-monorepo
- * module (@cie/brain); we inject SEOOS's Firestore so the brain never owns
- * Firebase init. Falls back to in-memory when Firestore isn't configured.
+ * SEOOS's handle on the shared Client Intelligence Engine. The engine is a shared
+ * in-monorepo module (@cie/engine); we inject the engine's Firestore (a dedicated
+ * project when ENGINE_FIREBASE_* is set, else SEOOS's own). Falls back to
+ * in-memory when no Firestore is configured at all.
  */
-let brain: ClientBrain | null = null;
-export function getClientBrain(): ClientBrain {
-  if (brain) return brain;
-  const db = getFirebaseAdminDb();
-  brain = new ClientBrain(db ? new FirestoreClientStore(db) : new InMemoryClientStore());
-  return brain;
+let engine: ClientEngine | null = null;
+export function getClientEngine(): ClientEngine {
+  if (engine) return engine;
+  const db = getEngineFirebaseDb();
+  engine = new ClientEngine(db ? new FirestoreClientStore(db) : new InMemoryClientStore());
+  return engine;
 }
 
-/** Map a ClickUp roster into canonical brain inputs, tagged with their source. */
+/** Map a ClickUp roster into canonical engine inputs, tagged with their source. */
 export function rosterToInputs(
   clients: RosterClient[],
   source = "clickup:seo-dashboard",
@@ -47,7 +48,7 @@ export function rosterToInputs(
   }));
 }
 
-export interface BrainIngestResult {
+export interface EngineIngestResult {
   ok: boolean;
   error?: string;
   report?: ClientReconciliationReportV1;
@@ -57,12 +58,12 @@ export interface BrainIngestResult {
 }
 
 /**
- * Read the ClickUp client lists (READ-ONLY) and reconcile them into the brain.
+ * Read the ClickUp client lists (READ-ONLY) and reconcile them into the engine.
  * Two sources: the SEO Dashboard (SEOOS's list) and MTOS's Client Health Tracker
  * — so the reconciliation report reflects both departments' view of each client.
  * The Health Tracker is best-effort: a failure there never fails the whole pass.
  */
-export async function ingestClickUpIntoBrain(tenantId: string): Promise<BrainIngestResult> {
+export async function ingestClickUpIntoEngine(tenantId: string): Promise<EngineIngestResult> {
   const creds = await getIntegrationCredentials(tenantId, "clickup");
   if (!creds?.apiToken) {
     return { ok: false, error: "ClickUp credentials are missing. Reconnect ClickUp under Integrations." };
@@ -101,6 +102,6 @@ export async function ingestClickUpIntoBrain(tenantId: string): Promise<BrainIng
     }
   }
 
-  const report = await getClientBrain().ingestAndReconcile(tenantId, inputs, { now: nowIso() });
+  const report = await getClientEngine().ingestAndReconcile(tenantId, inputs, { now: nowIso() });
   return { ok: true, report, dashboardRoster: dash.clients, dashboardFetched: dash.fetched };
 }

@@ -3,11 +3,12 @@ import type { Firestore } from "firebase-admin/firestore";
 import { ClientReconciliationReportV1, ClientV1 } from "@cie/contracts";
 
 /**
- * The Client Brain's system-of-record store. The brain owns these collections;
- * apps never touch them directly — they go through ClientBrain (service.ts).
- * Path: tenants/{tenantId}/clients/{id}; last report at tenants/{tenantId}/brainMeta.
+ * The Client Intelligence Engine's system-of-record store. The engine owns these
+ * collections; apps never touch them directly — they go through ClientEngine
+ * (service.ts). Path: tenants/{tenantId}/canonicalClients/{id}; last report at
+ * tenants/{tenantId}/engineMeta.
  */
-export interface ClientBrainStore {
+export interface ClientEngineStore {
   getClient(tenantId: string, id: string): Promise<ClientV1 | null>;
   listClients(tenantId: string): Promise<ClientV1[]>;
   saveClients(clients: ClientV1[]): Promise<void>;
@@ -15,14 +16,14 @@ export interface ClientBrainStore {
   getLatestReport(tenantId: string): Promise<ClientReconciliationReportV1 | null>;
 }
 
-// Distinct from MTOS's own `clients` collection — the brain owns its own
+// Distinct from MTOS's own `clients` collection — the engine owns its own
 // namespace so the two never commingle in a shared Firebase project.
 const CLIENTS = "canonicalClients";
-const META = "brainMeta";
+const META = "engineMeta";
 const LAST_REPORT = "lastReconciliation";
 
 /** In-memory store for local dev / tests (no Firestore). */
-export class InMemoryClientStore implements ClientBrainStore {
+export class InMemoryClientStore implements ClientEngineStore {
   private clients = new Map<string, ClientV1>();
   private reports = new Map<string, ClientReconciliationReportV1>();
   private ck(t: string, id: string) {
@@ -47,11 +48,11 @@ export class InMemoryClientStore implements ClientBrainStore {
 
 /**
  * Firestore-backed store. The Firestore instance is INJECTED by the app (the
- * brain never initializes Firebase itself), keeping it a shared module with the
+ * engine never initializes Firebase itself), keeping it a shared module with the
  * boundary enforced in code. The injected db should have
  * `ignoreUndefinedProperties` enabled (both apps do).
  */
-export class FirestoreClientStore implements ClientBrainStore {
+export class FirestoreClientStore implements ClientEngineStore {
   constructor(private readonly db: Firestore) {}
 
   private clientsCol(tenantId: string) {

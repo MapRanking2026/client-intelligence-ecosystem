@@ -1,18 +1,18 @@
 import { resolveSeoAuthz, authzHas } from "@/src/lib/auth/context";
 import { AppShell } from "@/src/components/app-shell";
 import { EmptyState, Panel, StatCard, UnauthorizedPage } from "@/src/components/states";
-import { BrainReconcileButton } from "@/src/components/brain-panel";
-import { getClientBrain } from "@/src/lib/server/brain/client-brain";
-import { getServerEnv } from "@/src/lib/server/env";
+import { EngineReconcileButton } from "@/src/components/engine-panel";
+import { getClientEngine } from "@/src/lib/server/engine/client-engine";
+import { getEngineProjectId } from "@/src/lib/server/firebase/engine-admin";
 
 export const dynamic = "force-dynamic";
 
-export default async function BrainPage() {
+export default async function EnginePage() {
   const authz = await resolveSeoAuthz();
   if (!authz) return <UnauthorizedPage />;
   if (!authzHas(authz, "settings.manage")) {
     return (
-      <AppShell authz={authz} title="Client Brain" breadcrumbs={[{ label: "SEOOS" }, { label: "Client Brain" }]}>
+      <AppShell authz={authz} title="Client Intelligence Engine" breadcrumbs={[{ label: "SEOOS" }, { label: "Client Intelligence Engine" }]}>
         <div className="state state--blocked">
           <span className="badge badge--warn">Admin only</span>
         </div>
@@ -20,20 +20,20 @@ export default async function BrainPage() {
     );
   }
 
-  const brain = getClientBrain();
+  const engine = getClientEngine();
   const [clients, report] = await Promise.all([
-    brain.listClients(authz.tenantId),
-    brain.getLatestReport(authz.tenantId),
+    engine.listClients(authz.tenantId),
+    engine.getLatestReport(authz.tenantId),
   ]);
 
   return (
     <AppShell
       authz={authz}
-      title="Client Brain"
+      title="Client Intelligence Engine"
       subtitle="The canonical source of truth for every client — reconciled from ClickUp, read by every app"
-      breadcrumbs={[{ label: "SEOOS" }, { label: "Client Brain" }]}
+      breadcrumbs={[{ label: "SEOOS" }, { label: "Client Intelligence Engine" }]}
     >
-      <BrainReconcileButton />
+      <EngineReconcileButton />
 
       <Panel title="Canonical store">
         <div className="grid-cards">
@@ -47,13 +47,13 @@ export default async function BrainPage() {
           <StatCard label="Last reconciled" value={report ? new Date(report.generatedAt).toLocaleString() : "—"} />
           <StatCard
             label="Data store"
-            value={getServerEnv().firebaseProjectId || "in-memory (no Firestore)"}
-            hint={`tenant ${authz.tenantId} · must match MTOS to share the brain`}
+            value={getEngineProjectId() || "in-memory (no Firestore)"}
+            hint={`tenant ${authz.tenantId} · must match MTOS to share the engine`}
           />
         </div>
         <p className="muted" style={{ fontSize: 12, marginBottom: 0 }}>
-          Two sources feed the brain: the ClickUp SEO Dashboard (SEOOS) and the Client Health Tracker (MTOS).
-          The engine merges them into one canonical record per client and flags any field where they disagree below.
+          Two sources feed the engine: the ClickUp SEO Dashboard (SEOOS) and the Client Health Tracker (MTOS).
+          It merges them into one canonical record per client and flags any field where they disagree below.
         </p>
       </Panel>
 

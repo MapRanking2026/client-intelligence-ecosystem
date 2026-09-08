@@ -4,13 +4,13 @@ import { zClientId, zIsoTimestamp, zTenantId, zUserId } from "./common";
 
 /**
  * The canonical Client — the single definition of a client for the whole
- * ecosystem. It lives in ONE system-of-record store owned by the brain
- * (@cie/brain); MTOS and SEOOS read client truth through the brain's service,
- * never from ClickUp or a local copy. See docs/architecture (The Client Brain).
+ * ecosystem. It lives in ONE system-of-record store owned by the engine
+ * (@cie/engine); MTOS and SEOOS read client truth through the engine's service,
+ * never from ClickUp or a local copy. See docs/architecture (Client Intelligence Engine).
  *
- * Every field carries provenance so the brain knows which system is currently
+ * Every field carries provenance so the engine knows which system is currently
  * authoritative for it. During the transition ClickUp originates most fields;
- * ownership flips to `cie` field-by-field as the brain becomes the front-door.
+ * ownership flips to `cie` field-by-field as the engine becomes the front-door.
  */
 
 export const ClientLifecycleStage = z.enum([
@@ -37,7 +37,7 @@ export type FieldProvenanceV1 = z.infer<typeof FieldProvenanceV1>;
 
 export const ClientV1 = z.object({
   schemaVersion: z.literal(1),
-  /** Canonical id (brain's own namespace). Source ids live in externalIds. */
+  /** Canonical id (engine's own namespace). Source ids live in externalIds. */
   id: zClientId,
   tenantId: zTenantId,
 
@@ -73,7 +73,7 @@ export type ClientV1 = z.infer<typeof ClientV1>;
 
 /**
  * What an ingestion adapter emits per source record (one ClickUp task, one CRM
- * row, …). The brain reconciles many of these into canonical ClientV1 records.
+ * row, …). The engine reconciles many of these into canonical ClientV1 records.
  */
 export const NormalizedClientInput = z.object({
   /** Stable source label, e.g. "clickup:seo-dashboard" or "clickup:health-tracker". */

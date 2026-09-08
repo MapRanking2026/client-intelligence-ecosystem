@@ -3,6 +3,7 @@ import type { ClientV1 } from "@cie/contracts";
 
 import { getFirebaseAdminDb } from "@/src/lib/server/firebase/admin";
 import { clientsCollectionPath, tenantPath } from "@/src/lib/server/firebase/collections";
+import { getServerEnv } from "@/src/lib/server/env";
 
 /**
  * Phase 3b shadow: compare MTOS's own client records against the Client Brain's
@@ -22,6 +23,8 @@ interface MtosClientLite {
 export interface MtosShadowReport {
   generatedAt: string;
   tenantId: string;
+  /** The Firebase project MTOS is reading — compare with SEOOS's to confirm they match. */
+  firebaseProjectId: string;
   /** Whether MTOS could read any canonical clients from the shared brain store. */
   canSeeBrain: boolean;
   mtosClients: number;
@@ -40,10 +43,12 @@ const CAP = 100;
 export async function runMtosBrainShadow(tenantId: string): Promise<MtosShadowReport> {
   const db = getFirebaseAdminDb();
   const generatedAt = new Date().toISOString();
+  const firebaseProjectId = getServerEnv().firebaseProjectId;
   if (!db) {
     return {
       generatedAt,
       tenantId,
+      firebaseProjectId,
       canSeeBrain: false,
       mtosClients: 0,
       brainClients: 0,
@@ -133,6 +138,7 @@ export async function runMtosBrainShadow(tenantId: string): Promise<MtosShadowRe
   const report: MtosShadowReport = {
     generatedAt,
     tenantId,
+    firebaseProjectId,
     canSeeBrain: canonical.length > 0,
     mtosClients: mtosClients.length,
     brainClients: canonical.length,

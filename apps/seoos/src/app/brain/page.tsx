@@ -3,6 +3,7 @@ import { AppShell } from "@/src/components/app-shell";
 import { EmptyState, Panel, StatCard, UnauthorizedPage } from "@/src/components/states";
 import { BrainReconcileButton } from "@/src/components/brain-panel";
 import { getClientBrain } from "@/src/lib/server/brain/client-brain";
+import { getServerEnv } from "@/src/lib/server/env";
 
 export const dynamic = "force-dynamic";
 
@@ -44,6 +45,11 @@ export default async function BrainPage() {
           />
           <StatCard label="Conflicts" value={report ? report.conflicts.length : 0} hint="fields where sources disagree" />
           <StatCard label="Last reconciled" value={report ? new Date(report.generatedAt).toLocaleString() : "—"} />
+          <StatCard
+            label="Data store"
+            value={getServerEnv().firebaseProjectId || "in-memory (no Firestore)"}
+            hint={`tenant ${authz.tenantId} · must match MTOS to share the brain`}
+          />
         </div>
         <p className="muted" style={{ fontSize: 12, marginBottom: 0 }}>
           Two sources feed the brain: the ClickUp SEO Dashboard (SEOOS) and the Client Health Tracker (MTOS).

@@ -3,6 +3,7 @@ import { AuthzError, requirePermission } from "@cie/core";
 
 import { resolveSeoAuthz } from "@/src/lib/auth/context";
 import { getClientBrain, ingestClickUpIntoBrain } from "@/src/lib/server/brain/client-brain";
+import { getServerEnv } from "@/src/lib/server/env";
 
 export const maxDuration = 300;
 
@@ -17,7 +18,15 @@ export async function GET(request: Request) {
       brain.listClients(authz.tenantId),
       brain.getLatestReport(authz.tenantId),
     ]);
-    return NextResponse.json({ data: { canonicalClients: clients.length, report } });
+    // firebaseProjectId + tenantId let us confirm SEOOS writes where MTOS reads.
+    return NextResponse.json({
+      data: {
+        tenantId: authz.tenantId,
+        firebaseProjectId: getServerEnv().firebaseProjectId,
+        canonicalClients: clients.length,
+        report,
+      },
+    });
   } catch (e) {
     if (e instanceof AuthzError) return NextResponse.json({ error: e.message }, { status: 403 });
     return NextResponse.json({ error: "Failed" }, { status: 400 });

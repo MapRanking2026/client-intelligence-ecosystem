@@ -32,6 +32,10 @@ export interface MtosShadowReport {
   engineStore: string;
   /** Whether MTOS could read any canonical clients from the shared engine store. */
   canSeeEngine: boolean;
+  /** Diagnostic: which tenant_id partitions actually hold canonical clients in the store. */
+  engineTenantsPresent: string[];
+  /** The shared engine tenant key MTOS is reading under. */
+  engineTenantKey: string;
   mtosClients: number;
   engineClients: number;
   engineClientsFromHealthTracker: number;
@@ -50,6 +54,7 @@ export async function runMtosEngineShadow(tenantId: string): Promise<MtosShadowR
   const generatedAt = new Date().toISOString();
   const mtosProjectId = getServerEnv().firebaseProjectId;
   const engineStore = getEngineStoreLabel();
+  const engineTenantKey = engineTenantId();
   if (!db) {
     return {
       generatedAt,
@@ -57,6 +62,8 @@ export async function runMtosEngineShadow(tenantId: string): Promise<MtosShadowR
       mtosProjectId,
       engineStore,
       canSeeEngine: false,
+      engineTenantsPresent: [],
+      engineTenantKey,
       mtosClients: 0,
       engineClients: 0,
       engineClientsFromHealthTracker: 0,
@@ -83,9 +90,16 @@ export async function runMtosEngineShadow(tenantId: string): Promise<MtosShadowR
 
   // Engine canonical clients (shared store — Supabase or a dedicated Firebase
   // project — under the shared engine tenant key, which both apps agree on).
+  const engineStoreRef = getEngineStore();
+  let engineTenantsPresent: string[] = [];
+  try {
+    engineTenantsPresent = (await engineStoreRef.listTenantIds?.()) ?? [];
+  } catch {
+    engineTenantsPresent = [];
+  }
   let canonical: ClientV1[] = [];
   try {
-    canonical = await getEngineStore().listClients(engineTenantId());
+    canonical = await engineStoreRef.listClients(engineTenantKey);
   } catch {
     canonical = [];
   }
@@ -149,6 +163,8 @@ export async function runMtosEngineShadow(tenantId: string): Promise<MtosShadowR
     mtosProjectId,
     engineStore,
     canSeeEngine: canonical.length > 0,
+    engineTenantsPresent,
+    engineTenantKey,
     mtosClients: mtosClients.length,
     engineClients: canonical.length,
     engineClientsFromHealthTracker,

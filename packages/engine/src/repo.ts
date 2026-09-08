@@ -14,6 +14,8 @@ export interface ClientEngineStore {
   saveClients(clients: ClientV1[]): Promise<void>;
   saveReport(report: ClientReconciliationReportV1): Promise<void>;
   getLatestReport(tenantId: string): Promise<ClientReconciliationReportV1 | null>;
+  /** Diagnostic: distinct tenant ids present in the store (optional). */
+  listTenantIds?(): Promise<string[]>;
 }
 
 // Distinct from MTOS's own `clients` collection — the engine owns its own
@@ -37,6 +39,9 @@ export class InMemoryClientStore implements ClientEngineStore {
   }
   async saveClients(clients: ClientV1[]) {
     for (const c of clients) this.clients.set(this.ck(c.tenantId, c.id), c);
+  }
+  async listTenantIds() {
+    return [...new Set([...this.clients.values()].map((c) => c.tenantId))];
   }
   async saveReport(report: ClientReconciliationReportV1) {
     this.reports.set(report.tenantId, report);

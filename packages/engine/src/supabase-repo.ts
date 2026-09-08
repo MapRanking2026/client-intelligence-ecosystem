@@ -75,6 +75,13 @@ export class SupabaseClientStore implements ClientEngineStore {
     if (error) throw new Error(`engine store saveReport: ${error.message}`);
   }
 
+  /** Diagnostic: which tenant_id partitions actually hold canonical clients. */
+  async listTenantIds(): Promise<string[]> {
+    const { data, error } = await this.db.from(CLIENTS).select("tenant_id").limit(5000);
+    if (error) throw new Error(`engine store listTenantIds: ${error.message}`);
+    return [...new Set((data ?? []).map((r) => (r as { tenant_id: string }).tenant_id))].sort();
+  }
+
   async getLatestReport(tenantId: string): Promise<ClientReconciliationReportV1 | null> {
     const { data, error } = await this.db
       .from(REPORTS)

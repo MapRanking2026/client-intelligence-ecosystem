@@ -2,7 +2,7 @@ import { clientKey } from "@cie/engine";
 import type { ClientV1 } from "@cie/contracts";
 
 import { getFirebaseAdminDb } from "@/src/lib/server/firebase/admin";
-import { getEngineStore, getEngineStoreLabel } from "@/src/lib/server/engine/engine-store";
+import { engineTenantId, getEngineStore, getEngineStoreLabel } from "@/src/lib/server/engine/engine-store";
 import { clientsCollectionPath, tenantPath } from "@/src/lib/server/firebase/collections";
 import { getServerEnv } from "@/src/lib/server/env";
 
@@ -81,10 +81,11 @@ export async function runMtosEngineShadow(tenantId: string): Promise<MtosShadowR
     };
   });
 
-  // Engine canonical clients (shared store — Supabase or a dedicated Firebase project).
+  // Engine canonical clients (shared store — Supabase or a dedicated Firebase
+  // project — under the shared engine tenant key, which both apps agree on).
   let canonical: ClientV1[] = [];
   try {
-    canonical = await getEngineStore().listClients(tenantId);
+    canonical = await getEngineStore().listClients(engineTenantId());
   } catch {
     canonical = [];
   }

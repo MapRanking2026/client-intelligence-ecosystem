@@ -3,7 +3,7 @@ import { AppShell } from "@/src/components/app-shell";
 import { EmptyState, Panel, StatCard, UnauthorizedPage } from "@/src/components/states";
 import { EngineReconcileButton } from "@/src/components/engine-panel";
 import { getClientEngine } from "@/src/lib/server/engine/client-engine";
-import { getEngineStoreLabel } from "@/src/lib/server/engine/engine-store";
+import { engineTenantId, getEngineStoreLabel } from "@/src/lib/server/engine/engine-store";
 
 export const dynamic = "force-dynamic";
 
@@ -22,8 +22,8 @@ export default async function EnginePage() {
 
   const engine = getClientEngine();
   const [clients, report] = await Promise.all([
-    engine.listClients(authz.tenantId),
-    engine.getLatestReport(authz.tenantId),
+    engine.listClients(engineTenantId()),
+    engine.getLatestReport(engineTenantId()),
   ]);
 
   return (
@@ -48,7 +48,7 @@ export default async function EnginePage() {
           <StatCard
             label="Data store"
             value={getEngineStoreLabel()}
-            hint={`tenant ${authz.tenantId} · must match MTOS to share the engine`}
+            hint={`tenant ${engineTenantId()} · shared key both apps use`}
           />
         </div>
         <p className="muted" style={{ fontSize: 12, marginBottom: 0 }}>

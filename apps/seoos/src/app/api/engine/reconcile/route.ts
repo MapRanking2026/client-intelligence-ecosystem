@@ -3,7 +3,7 @@ import { AuthzError, requirePermission } from "@cie/core";
 
 import { resolveSeoAuthz } from "@/src/lib/auth/context";
 import { getClientEngine, ingestClickUpIntoEngine } from "@/src/lib/server/engine/client-engine";
-import { getEngineStoreLabel } from "@/src/lib/server/engine/engine-store";
+import { engineTenantId, getEngineStoreLabel } from "@/src/lib/server/engine/engine-store";
 
 export const maxDuration = 300;
 
@@ -15,8 +15,8 @@ export async function GET(request: Request) {
     requirePermission(authz.permissions, "settings.manage");
     const engine = getClientEngine();
     const [clients, report] = await Promise.all([
-      engine.listClients(authz.tenantId),
-      engine.getLatestReport(authz.tenantId),
+      engine.listClients(engineTenantId()),
+      engine.getLatestReport(engineTenantId()),
     ]);
     // store label + tenantId let us confirm SEOOS writes where MTOS reads.
     return NextResponse.json({

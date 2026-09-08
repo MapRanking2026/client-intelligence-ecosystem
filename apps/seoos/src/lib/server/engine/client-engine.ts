@@ -1,7 +1,7 @@
 import { ClientEngine } from "@cie/engine";
 import type { ClientReconciliationReportV1, NormalizedClientInput } from "@cie/contracts";
 
-import { getEngineStore } from "@/src/lib/server/engine/engine-store";
+import { engineTenantId, getEngineStore } from "@/src/lib/server/engine/engine-store";
 import { getIntegrationCredentials } from "@/src/lib/server/integrations-service";
 import { fetchClickUpClientRoster, type RosterClient } from "@/src/lib/server/sync/clickup-clients";
 import { nowIso } from "@/src/lib/ids";
@@ -60,6 +60,9 @@ export interface EngineIngestResult {
  * Two sources: the SEO Dashboard (SEOOS's list) and MTOS's Client Health Tracker
  * — so the reconciliation report reflects both departments' view of each client.
  * The Health Tracker is best-effort: a failure there never fails the whole pass.
+ *
+ * `tenantId` scopes the ClickUp credentials (SEOOS's own tenant); the canonical
+ * records are written under the SHARED engine tenant so MTOS reads the same data.
  */
 export async function ingestClickUpIntoEngine(tenantId: string): Promise<EngineIngestResult> {
   const creds = await getIntegrationCredentials(tenantId, "clickup");
@@ -100,6 +103,6 @@ export async function ingestClickUpIntoEngine(tenantId: string): Promise<EngineI
     }
   }
 
-  const report = await getClientEngine().ingestAndReconcile(tenantId, inputs, { now: nowIso() });
+  const report = await getClientEngine().ingestAndReconcile(engineTenantId(), inputs, { now: nowIso() });
   return { ok: true, report, dashboardRoster: dash.clients, dashboardFetched: dash.fetched };
 }

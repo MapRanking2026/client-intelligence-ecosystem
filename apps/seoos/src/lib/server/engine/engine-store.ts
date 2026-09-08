@@ -9,6 +9,16 @@ import {
 import { getEngineFirebaseDb, getEngineProjectId } from "@/src/lib/server/firebase/engine-admin";
 
 /**
+ * The canonical tenant key for the SHARED engine store. Both apps agree on this
+ * one org key (default "map-ranking") so they read/write the same partition,
+ * regardless of each app's own internal tenant id. This is why the Supabase
+ * `tenant_id` is clean (no "-demo") and MTOS ↔ SEOOS line up.
+ */
+export function engineTenantId(): string {
+  return process.env.ENGINE_TENANT_ID || "map-ranking";
+}
+
+/**
  * Select the shared Client Intelligence Engine store. Preference order:
  *   1. Supabase (Postgres) — the neutral shared home — when ENGINE_SUPABASE_* is set.
  *   2. A dedicated Firebase project (ENGINE_FIREBASE_*), else this app's own Firestore.

@@ -9,6 +9,15 @@ import {
 import { getEngineFirebaseDb, getEngineProjectId } from "@/src/lib/server/firebase/engine-admin";
 
 /**
+ * The canonical tenant key for the SHARED engine store. Both apps agree on this
+ * one org key (default "map-ranking") so MTOS reads the same partition SEOOS
+ * writes, regardless of each app's own internal tenant id.
+ */
+export function engineTenantId(): string {
+  return process.env.ENGINE_TENANT_ID || "map-ranking";
+}
+
+/**
  * Select the shared Client Intelligence Engine store (must match SEOOS's choice
  * so both read the same canonical data). Preference order:
  *   1. Supabase (Postgres) when ENGINE_SUPABASE_* is set.

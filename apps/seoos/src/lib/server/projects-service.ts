@@ -11,6 +11,7 @@ import { getProjectRepo } from "@/src/lib/server/repositories/project-repo";
 import { listIntegrations } from "@/src/lib/server/integrations-service";
 import type { RosterClient } from "@/src/lib/server/sync/clickup-clients";
 import { getClientEngine, ingestClickUpIntoEngine } from "@/src/lib/server/engine/client-engine";
+import { engineTenantId } from "@/src/lib/server/engine/engine-store";
 
 /**
  * The client-identity fields SEOOS needs to build a project, sourced from either
@@ -182,7 +183,7 @@ export async function syncClientsFromClickUp(tenantId: string): Promise<SyncClie
 
   let engineClients: ClientV1[] = [];
   try {
-    engineClients = await getClientEngine().listClients(tenantId);
+    engineClients = await getClientEngine().listClients(engineTenantId());
   } catch {
     engineClients = [];
   }

@@ -17,6 +17,7 @@ export const TaskStatus = z.enum([
   "pending", // created, not yet drafted
   "drafting", // AI is drafting
   "awaiting_approval", // drafted, waiting on the specialist
+  "needs_info", // drafted but blocked on missing facts
   "approved", // specialist approved (ready to publish)
   "published", // pushed to production / delivered
   "rejected", // specialist rejected
@@ -49,6 +50,8 @@ export const PreparedTaskV1 = z.object({
   draft: z.string().optional(),
   /** "What I did" detail for the drill-down. */
   detail: z.string().optional(),
+  /** Facts the AI needs but wasn't given — surfaced instead of fabricated. */
+  needsInfo: z.array(z.string()).default([]),
   decidedByUserId: zUserId.optional(),
   decidedAt: zIsoTimestamp.optional(),
   decisionNote: z.string().optional(),
@@ -58,4 +61,4 @@ export const PreparedTaskV1 = z.object({
 export type PreparedTaskV1 = z.infer<typeof PreparedTaskV1>;
 
 export const TERMINAL_STATUSES: TaskStatus[] = ["approved", "published", "rejected", "skipped"];
-export const OPEN_STATUSES: TaskStatus[] = ["pending", "drafting", "awaiting_approval"];
+export const OPEN_STATUSES: TaskStatus[] = ["pending", "drafting", "awaiting_approval", "needs_info"];

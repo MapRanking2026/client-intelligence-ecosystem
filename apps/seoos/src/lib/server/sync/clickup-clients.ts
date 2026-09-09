@@ -19,6 +19,10 @@ type ClickUpTask = {
   due_date?: string | null;
   date_updated?: string | null;
   parent?: string | null;
+  /** ClickUp custom task-type id. Client records are the "Project" type (1007);
+   *  plain checklist subtasks are the default type. Used to tell real white-label
+   *  sub-account clients apart from checklist items when subtasks are included. */
+  custom_item_id?: number | null;
   status?: { status?: string; type?: string };
   /** Native ClickUp assignees — the SEO specialist(s) the client is assigned to. */
   assignees?: Array<{ id?: number; username?: string; email?: string }>;
@@ -30,6 +34,19 @@ type ClickUpTask = {
 };
 
 const CLOSED_TOKENS = ["closed", "complete", "completed", "done", "cancelled", "archived"];
+
+/**
+ * ClickUp custom task-type id that marks a real client record ("Project"). Real
+ * white-label / sub-account clients live as SUBTASKS of this type under a
+ * reseller parent; plain checklist subtasks are the default type and are junk.
+ * Overridable per-workspace via env.
+ */
+const CLIENT_TASK_TYPE_ID = Number(process.env.CLICKUP_CLIENT_TASK_TYPE_ID ?? 1007);
+
+/** A task counts as a client if it's top-level OR a "Project"-typed subtask. */
+function isClientTask(t: ClickUpTask): boolean {
+  return !t.parent || t.custom_item_id === CLIENT_TASK_TYPE_ID;
+}
 
 export interface RosterClient {
   /** Canonical client id = the ClickUp task id (stable, never duplicated). */
@@ -219,10 +236,12 @@ function resolveListId(listId?: string): string | undefined {
 
 async function fetchTasksFromList(token: string, listId: string): Promise<ClickUpTask[]> {
   const tasks: ClickUpTask[] = [];
-  for (let page = 0; page < 10; page += 1) {
+  // subtasks=true so white-label sub-account clients are returned; they are kept
+  // or dropped later by isClientTask (Project-typed = client, checklist = junk).
+  for (let page = 0; page < 25; page += 1) {
     const body = await clickupGet(
       token,
-      `/list/${listId}/task?include_closed=true&page=${page}`,
+      `/list/${listId}/task?include_closed=true&subtasks=true&page=${page}`,
     );
     const pageTasks = Array.isArray(body.tasks) ? (body.tasks as ClickUpTask[]) : [];
     tasks.push(...pageTasks);
@@ -233,10 +252,10 @@ async function fetchTasksFromList(token: string, listId: string): Promise<ClickU
 
 async function fetchTasksFromTeam(token: string, teamId: string): Promise<ClickUpTask[]> {
   const tasks: ClickUpTask[] = [];
-  for (let page = 0; page < 10; page += 1) {
+  for (let page = 0; page < 25; page += 1) {
     const body = await clickupGet(
       token,
-      `/team/${teamId}/task?include_closed=true&order_by=updated&page=${page}`,
+      `/team/${teamId}/task?include_closed=true&subtasks=true&order_by=updated&page=${page}`,
     );
     const pageTasks = Array.isArray(body.tasks) ? (body.tasks as ClickUpTask[]) : [];
     tasks.push(...pageTasks);
@@ -365,8 +384,9 @@ export async function fetchClickUpClientRoster(input: {
       raw = await fetchTasksFromTeam(token, teamId);
     }
 
-    // Clients are the top-level tasks; the checklist items are subtasks — skip them.
-    const active = raw.filter((t) => !t.parent && isActiveTask(t));
+    // Clients = top-level tasks + real "Project"-typed subtasks (white-label /
+    // sub-account clients). Plain checklist subtasks (default type) are skipped.
+    const active = raw.filter((t) => isClientTask(t) && isActiveTask(t));
     const clients: RosterClient[] = active.map((task) => {
       // On the SEO Dashboard the task name IS the client/business name.
       const name =

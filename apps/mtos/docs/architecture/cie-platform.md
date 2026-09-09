@@ -92,6 +92,22 @@ never override authenticated resolution in production. Deprecate `MTOS_PILOT_TEN
 
 Each step is flag-gated and reversible; do NOT run against production auth without a go-ahead.
 
+### Non-negotiable invariant — per-user client visibility
+
+The Engine is the source of truth for a client's **facts**, NOT for **who may see which
+clients**. Visibility stays owned and enforced by each app, exactly as today:
+- **MTOS:** each account manager sees ONLY their own clients. `FirestoreMtosDataSource.getClients()`
+  reads the tenant collection then intersects with the logged-in user's `syncedClients` set
+  (`getVisibleClientIds` → `visibleSet.has(client.id)`). This filter MUST remain. Francisco
+  seeing only his clients is correct behavior, not a bug.
+- **SEOOS:** `clientVisibility` (`"all"` | client-id list) + specialist scoping.
+
+When MTOS reads client identity from the Engine (Phase 3), it fetches canonical FACTS for the
+clients the user can already see — it must NOT replace the visibility filter with the Engine's
+full tenant client list. Resolve visibility first (per-user), then hydrate those clients'
+canonical fields from the Engine. Never widen the visible set via the Engine. The tenant-wide
+read in `/api/engine/shadow` is an admin/cron diagnostic only and must never back a user view.
+
 ## Adding another department app (future)
 
 Register an `AppDefinition` (key/name/status), create a `TenantAppInstallation` for the tenant,

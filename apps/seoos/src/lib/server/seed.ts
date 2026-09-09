@@ -1,6 +1,5 @@
 import type {
   AppMembershipV1,
-  LeadCallRecordV1,
   OutboxEventV1,
   SeoIntelligencePackageV1,
   SeoIntelligenceRequestV1,
@@ -31,7 +30,6 @@ interface SeedStore {
   projects: SeoProjectV1[];
   requests: SeoIntelligenceRequestV1[];
   packages: SeoIntelligencePackageV1[];
-  leadCalls: LeadCallRecordV1[];
   keywords: KeywordV1[];
   recommendations: RecommendationV1[];
   workOrders: WorkOrderV1[];
@@ -54,7 +52,6 @@ function buildSeed(): SeedStore {
     projects: [],
     requests: [],
     packages: [],
-    leadCalls: [],
     keywords: [],
     recommendations: [],
     workOrders: [],

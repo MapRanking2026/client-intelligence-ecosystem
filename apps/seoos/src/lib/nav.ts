@@ -22,7 +22,6 @@ export const NAV: NavItem[] = [
   { href: "/audits", label: "Website Audits", glyph: "⚙", permission: "seo.package.read" },
   { href: "/recommendations", label: "Recommendations", glyph: "✦", permission: "seo.package.read" },
   { href: "/work-orders", label: "Work Orders", glyph: "✓", permission: "seo.package.read" },
-  { href: "/lead-verification", label: "Lead & Call Verification", glyph: "☎", permission: "lead_call.read" },
   { href: "/monthly-audits", label: "Monthly Audits", glyph: "▦", permission: "seo.package.read" },
   { href: "/reports", label: "Reports & Packages", glyph: "▧", permission: "seo.package.read" },
   { href: "/knowledge", label: "Knowledge / Niche Studies", glyph: "❖", permission: "seo.package.read" },

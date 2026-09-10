@@ -33,17 +33,37 @@ export async function POST(request: Request) {
 
   const decoded = await auth.verifyIdToken(body.idToken);
   const claimedTenantId = typeof decoded.tenantId === "string" ? decoded.tenantId : null;
-  const tenantId = claimedTenantId || env.pilotTenantId;
 
-  const userSnapshot = await db.doc(tenantUserPath(tenantId, decoded.uid)).get();
-  if (!userSnapshot.exists) {
+  // Resolve the user's tenant defensively: try their Firebase claim first, then
+  // the pilot env, then the canonical "map-ranking". This tolerates env drift
+  // (e.g. MTOS_PILOT_TENANT_ID pointing at a different tenant than where the
+  // user's record actually lives) so a mismatch can never lock a user out.
+  const candidateTenantIds = Array.from(
+    new Set(
+      [claimedTenantId, env.pilotTenantId, "map-ranking"].filter(
+        (id): id is string => Boolean(id),
+      ),
+    ),
+  );
+
+  let tenantId: string | null = null;
+  let userData: { role?: Role } | undefined;
+  for (const candidate of candidateTenantIds) {
+    const snapshot = await db.doc(tenantUserPath(candidate, decoded.uid)).get();
+    if (snapshot.exists) {
+      tenantId = candidate;
+      userData = snapshot.data() as { role?: Role } | undefined;
+      break;
+    }
+  }
+
+  if (!tenantId) {
     return NextResponse.json(
       { error: "User is not assigned to this tenant." },
       { status: 403 },
     );
   }
 
-  const userData = userSnapshot.data() as { role?: Role } | undefined;
   const role = userData?.role;
   if (!role || !allowedRoles.has(role)) {
     return NextResponse.json({ error: "User role is not allowed." }, { status: 403 });

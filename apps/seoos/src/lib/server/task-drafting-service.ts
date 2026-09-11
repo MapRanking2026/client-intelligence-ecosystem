@@ -5,7 +5,7 @@ import { PreparedTaskV1 } from "@/src/lib/domain/prepared-task";
 import type { SeoProjectV1 } from "@/src/lib/domain/project";
 import { nowIso } from "@/src/lib/ids";
 import { getPreparedTaskRepo } from "@/src/lib/server/repositories/prepared-task-repo";
-import { getProject } from "@/src/lib/server/projects-service";
+import { getProject, listProjectsForViewer } from "@/src/lib/server/projects-service";
 import { listSpecialists } from "@/src/lib/server/specialists-service";
 import { addCorrectionRule } from "@/src/lib/server/specialist-style-service";
 import { composeAiSystem } from "@/src/lib/server/prompts-service";
@@ -34,6 +34,15 @@ export async function getTaskForViewer(authz: AuthzContextV1, taskId: string): P
   if (!task) return null;
   if (!canAccessClient(authz.clientVisibility, task.clientId)) return null;
   return task;
+}
+
+/** Every prepared task in the viewer's client scope (admins: all). */
+export async function listTasksForViewer(authz: AuthzContextV1): Promise<PreparedTaskV1[]> {
+  const all = await getPreparedTaskRepo().listByTenant(authz.tenantId);
+  if (authz.clientVisibility === "all") return all;
+  const myProjects = await listProjectsForViewer(authz);
+  const myClientIds = new Set(myProjects.map((p) => p.clientId));
+  return all.filter((t) => myClientIds.has(t.clientId));
 }
 
 export interface DraftTaskResult {

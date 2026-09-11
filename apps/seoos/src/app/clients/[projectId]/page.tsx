@@ -8,6 +8,7 @@ import { FullScanButton } from "@/src/components/full-scan-button";
 import { GenerateAiRecsButton } from "@/src/components/generate-ai-recs-button";
 import { StartServiceButton } from "@/src/components/start-service-button";
 import { getProject } from "@/src/lib/server/projects-service";
+import { getClientHealth } from "@/src/lib/server/client-health-service";
 import { getPerformanceSnapshotRepo } from "@/src/lib/server/repositories/performance-snapshot-repo";
 import { getKeywordRepo } from "@/src/lib/server/repositories/keyword-repo";
 import { getRecommendationRepo } from "@/src/lib/server/repositories/recommendation-repo";
@@ -49,6 +50,9 @@ export default async function ProjectSetupPage({
     getRecommendationRepo().listByProject(authz.tenantId, projectId),
   ]);
   const hasData = Boolean(snapshot && (snapshot.grids.length || snapshot.keywords.length));
+  const health = await getClientHealth(authz, project);
+  const healthLabel =
+    health.status === "at_risk" ? "At risk" : health.status === "needs_attention" ? "Needs attention" : "On track";
 
   return (
     <AppShell
@@ -76,6 +80,45 @@ export default async function ProjectSetupPage({
           {project.serviceTier ? <>Services: {project.serviceTier} · </> : null}
           {project.valueProposition ? <>“{project.valueProposition}”</> : null}
         </p>
+      </Panel>
+
+      <Panel title="Health & what's needed">
+        <div className="toolbar" style={{ marginBottom: 10, alignItems: "center", gap: 12 }}>
+          <span
+            className={`badge ${health.status === "needs_attention" ? "badge--warn" : health.status === "on_track" ? "status-active" : ""}`}
+            style={health.status === "at_risk" ? { borderColor: "var(--danger)", color: "var(--danger)" } : undefined}
+          >
+            {healthLabel}
+          </span>
+          {health.inPlace.length ? (
+            <span className="muted" style={{ fontSize: 12 }}>In place: {health.inPlace.join(" · ")}</span>
+          ) : null}
+        </div>
+        {health.needs.length === 0 ? (
+          <p className="muted" style={{ marginTop: 0 }}>Nothing blocking this client right now. ✅</p>
+        ) : (
+          <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
+            {health.needs.map((n, idx) => (
+              <li key={idx} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                <span
+                  aria-hidden="true"
+                  style={{
+                    width: 8,
+                    height: 8,
+                    borderRadius: "50%",
+                    flex: "none",
+                    background:
+                      n.severity === "high" ? "var(--danger)" : n.severity === "medium" ? "#e0a500" : "var(--muted)",
+                  }}
+                />
+                <span>{n.label}</span>
+                {n.href ? (
+                  <Link href={n.href} style={{ marginLeft: "auto", fontSize: 13 }}>Open →</Link>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        )}
       </Panel>
 
       {Object.keys(project.dashboardMetrics ?? {}).length ? (

@@ -18,6 +18,7 @@ import type { PreparedTaskV1 } from "@/src/lib/domain/prepared-task";
 import type { TicketV1 } from "@/src/lib/domain/ticket";
 import type { MonthlyAuditV1 } from "@/src/lib/domain/monthly-audit";
 import type { IntegrationConnectionV1 } from "@/src/lib/domain/integration";
+import type { RuleV1 } from "@/src/lib/domain/rule";
 
 /**
  * In-memory store for the no-Firestore fallback (dev). Intentionally EMPTY —
@@ -44,6 +45,7 @@ interface SeedStore {
   tickets: TicketV1[];
   monthlyAudits: MonthlyAuditV1[];
   integrations: IntegrationConnectionV1[];
+  rules: RuleV1[];
 }
 
 function buildSeed(): SeedStore {
@@ -66,6 +68,7 @@ function buildSeed(): SeedStore {
     tickets: [],
     monthlyAudits: [],
     integrations: [],
+    rules: [],
   };
 }
 

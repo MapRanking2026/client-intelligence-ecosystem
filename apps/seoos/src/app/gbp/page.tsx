@@ -5,6 +5,8 @@ import { AppShell } from "@/src/components/app-shell";
 import { EmptyState, Panel, StatCard, UnauthorizedPage } from "@/src/components/states";
 import { ClientSelect } from "@/src/components/client-select";
 import { GbpLivePanel } from "@/src/components/gbp-live-panel";
+import { GenerateGbpAuditButton } from "@/src/components/generate-gbp-audit-button";
+import { getGbpAudit } from "@/src/lib/server/gbp-audit-service";
 import { listProjectsForViewer } from "@/src/lib/server/projects-service";
 import { getPerformanceSnapshotRepo } from "@/src/lib/server/repositories/performance-snapshot-repo";
 import { listIntegrations } from "@/src/lib/server/integrations-service";
@@ -33,6 +35,8 @@ export default async function GbpPage({
   const { projectId } = await searchParams;
   const selected = projects.find((p) => p.id === projectId) ?? projects[0];
   const snapshot = selected ? await getPerformanceSnapshotRepo().get(authz.tenantId, selected.id) : null;
+  const canManage = authzHas(authz, "seo.project.manage");
+  const gbpAudit = selected ? await getGbpAudit(authz.tenantId, selected.id) : null;
 
   const integrations = await listIntegrations(authz.tenantId);
   const gbpConnected = integrations.some((i) => i.id === "google-business-profile" && i.status === "connected");
@@ -100,6 +104,31 @@ export default async function GbpPage({
                 action={<Link href="/integrations">Integrations →</Link>}
               />
             )}
+          </Panel>
+
+          <Panel title="GBP Audit — AI draft (nothing published)">
+            {selected ? (
+              <>
+                {canManage ? <GenerateGbpAuditButton projectId={selected.id} hasAudit={Boolean(gbpAudit)} /> : null}
+                {gbpAudit ? (
+                  <>
+                    <p className="muted" style={{ fontSize: 12, marginTop: 10 }}>
+                      Generated {new Date(gbpAudit.generatedAt).toLocaleString()}.
+                      {gbpAudit.dataNote ? ` ${gbpAudit.dataNote}` : ""}
+                    </p>
+                    <pre style={{ whiteSpace: "pre-wrap", fontFamily: "inherit", fontSize: 13, lineHeight: 1.55, margin: 0 }}>
+                      {gbpAudit.content}
+                    </pre>
+                  </>
+                ) : (
+                  <p className="muted" style={{ marginTop: 10, fontSize: 13 }}>
+                    {canManage
+                      ? "Generate an AI GBP audit — it drafts a keyword set, category plan, description, and completeness check from what we know, and flags anything it can't verify. Nothing is sent to Google."
+                      : "No GBP audit generated yet."}
+                  </p>
+                )}
+              </>
+            ) : null}
           </Panel>
         </>
       )}

@@ -13,6 +13,7 @@ import {
 import { listProjectsForViewer } from "@/src/lib/server/projects-service";
 import { listRequests } from "@/src/lib/server/seo-engine";
 import { listIntegrations } from "@/src/lib/server/integrations-service";
+import { getPrioritiesForViewer, priorityKindLabel } from "@/src/lib/server/priorities-service";
 
 export const dynamic = "force-dynamic";
 
@@ -31,6 +32,7 @@ export default async function DashboardPage() {
   if (!authz) return <UnauthorizedPage />;
 
   const projects = await listProjectsForViewer(authz);
+  const priorities = await getPrioritiesForViewer(authz);
   const requests = await listRequests(authz.tenantId);
   const integrations = await listIntegrations(authz.tenantId);
   const connectedIntegrations = integrations.filter((i) => i.status === "connected");
@@ -49,6 +51,57 @@ export default async function DashboardPage() {
       title="SEO Operations Dashboard"
       subtitle="Rolling 30-day view · workload, requests, and data health"
     >
+      <Panel title="Needs your attention">
+        {priorities.totalNeedsAction === 0 ? (
+          <EmptyState
+            title="You're all caught up 🎉"
+            message="No tickets or tasks are waiting on you right now."
+          />
+        ) : (
+          <>
+            <div className="grid-cards" style={{ marginBottom: 14 }}>
+              <StatCard label="Awaiting your approval" value={priorities.toApprove} />
+              <StatCard label="Needs info" value={priorities.needInfo} />
+              <StatCard label="Ready to draft" value={priorities.toDraft} />
+              <StatCard label="Your clients" value={priorities.clients} />
+            </div>
+            <div className="table-scroll">
+              <table className="data">
+                <thead>
+                  <tr><th>Client</th><th>What</th><th>Item</th><th /></tr>
+                </thead>
+                <tbody>
+                  {priorities.items.map((i) => (
+                    <tr key={`${i.type}-${i.id}`}>
+                      <td>{i.clientName}</td>
+                      <td>
+                        <span
+                          className={`badge status-${
+                            i.kind === "approve" ? "awaiting_approval" : i.kind === "info" ? "needs_info" : "pending"
+                          }`}
+                        >
+                          {priorityKindLabel(i.kind)}
+                        </span>
+                      </td>
+                      <td>{i.title}</td>
+                      <td>
+                        <Link href={i.href}>{i.type === "ticket" ? "Open ticket →" : "Open task →"}</Link>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {priorities.totalNeedsAction > priorities.items.length ? (
+              <p className="muted" style={{ fontSize: 12, marginBottom: 0 }}>
+                Showing the top {priorities.items.length} of {priorities.totalNeedsAction}. Open{" "}
+                <Link href="/tickets">Tickets</Link> and <Link href="/tasks">Tasks</Link> for the rest.
+              </p>
+            ) : null}
+          </>
+        )}
+      </Panel>
+
       <div className="grid-cards" style={{ marginBottom: 18 }}>
         <StatCard label="Active projects" value={active} />
         <StatCard label="Onboarding / setup" value={onboarding} />

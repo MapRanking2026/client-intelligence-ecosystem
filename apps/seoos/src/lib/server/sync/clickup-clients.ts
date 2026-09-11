@@ -384,9 +384,15 @@ export async function fetchClickUpClientRoster(input: {
       raw = await fetchTasksFromTeam(token, teamId);
     }
 
+    // Dedupe by task id FIRST: with subtasks=true, ClickUp can return the same
+    // task across pages (and a team scan orders by "updated", so a task that
+    // changes mid-fetch can reappear) — without this a client is pulled twice.
+    const byId = new Map<string, ClickUpTask>();
+    for (const t of raw) if (t.id && !byId.has(t.id)) byId.set(t.id, t);
+
     // Clients = top-level tasks + real "Project"-typed subtasks (white-label /
     // sub-account clients). Plain checklist subtasks (default type) are skipped.
-    const active = raw.filter((t) => isClientTask(t) && isActiveTask(t));
+    const active = [...byId.values()].filter((t) => isClientTask(t) && isActiveTask(t));
     const clients: RosterClient[] = active.map((task) => {
       // On the SEO Dashboard the task name IS the client/business name.
       const name =

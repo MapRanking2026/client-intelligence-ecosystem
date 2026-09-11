@@ -6,6 +6,7 @@ import { EmptyState, Panel, UnauthorizedPage } from "@/src/components/states";
 import { CreateProjectForm } from "@/src/components/create-project-form";
 import { ClientsTable, type ClientRow, type SpecialistOption } from "@/src/components/clients-table";
 import { SpecialistManager, type SpecialistRow } from "@/src/components/specialist-manager";
+import { AutoSyncClients } from "@/src/components/auto-sync-clients";
 import { listProjectsForViewer, effectiveSpecialistId } from "@/src/lib/server/projects-service";
 import { listSpecialists, matchSpecialistId } from "@/src/lib/server/specialists-service";
 
@@ -77,6 +78,7 @@ export default async function ClientsPage() {
       subtitle="Grouped by SEO specialist"
       breadcrumbs={[{ label: "SEOOS" }, { label: "Clients" }]}
     >
+      {canManage ? <AutoSyncClients /> : null}
       {!canManage ? (
         <div className="state state--blocked">
           <span className="badge badge--warn">Permission required</span>

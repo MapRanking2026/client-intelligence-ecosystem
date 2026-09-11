@@ -12,6 +12,7 @@ import { listIntegrations } from "@/src/lib/server/integrations-service";
 import type { RosterClient } from "@/src/lib/server/sync/clickup-clients";
 import { getClientEngine, ingestClickUpIntoEngine } from "@/src/lib/server/engine/client-engine";
 import { engineTenantId } from "@/src/lib/server/engine/engine-store";
+import { clientKey } from "@cie/engine";
 
 /**
  * The client-identity fields SEOOS needs to build a project, sourced from either
@@ -201,6 +202,21 @@ export async function syncClientsFromClickUp(tenantId: string): Promise<SyncClie
     if (rows.length === 0 && dashboardRoster.length > 0) rows = dashboardRoster.map(rosterToRow);
   }
 
+  // Dedupe so a client is never pooled twice — by ClickUp task id, and by
+  // normalized business name (the same client under two task ids, or spelled
+  // slightly differently across the SEO Dashboard and the Health Tracker).
+  {
+    const seenId = new Set<string>();
+    const seenBiz = new Set<string>();
+    rows = rows.filter((r) => {
+      const bizKey = clientKey(r.name || r.clientId);
+      if (seenId.has(r.clientId) || (bizKey && seenBiz.has(bizKey))) return false;
+      seenId.add(r.clientId);
+      if (bizKey) seenBiz.add(bizKey);
+      return true;
+    });
+  }
+
   // Pod values are informational; client → specialist grouping is driven by the
   // seoSpecialist field carried on each row.
   const discoveredPods = Array.from(
@@ -289,6 +305,29 @@ export async function syncClientsFromClickUp(tenantId: string): Promise<SyncClie
     pruned = staleIds.length;
   }
 
+  // Clean up any pre-existing duplicate projects from earlier runs: keep one
+  // project per business name (most recently updated wins). Only ClickUp-sourced
+  // projects are considered, so manually-created projects are never removed.
+  {
+    const allProjects = await repo.list(tenantId);
+    const byBusiness = new Map<string, SeoProjectV1[]>();
+    for (const p of allProjects) {
+      if (!p.externalIds?.clickupTaskId) continue;
+      const k = clientKey(p.businessName || p.clientId);
+      const arr = byBusiness.get(k);
+      if (arr) arr.push(p);
+      else byBusiness.set(k, [p]);
+    }
+    const dupIds: string[] = [];
+    for (const group of byBusiness.values()) {
+      if (group.length <= 1) continue;
+      group.sort((a, b) => (b.updatedAt > a.updatedAt ? 1 : -1));
+      dupIds.push(...group.slice(1).map((p) => p.id));
+    }
+    if (dupIds.length) await repo.removeMany(tenantId, dupIds);
+    pruned += dupIds.length;
+  }
+
   return {
     ok: true,
     created,
@@ -320,9 +359,22 @@ export function effectiveSpecialistId(
  * specialist (resolved by login email/name against the roster). This scopes each
  * specialist to their own accounts, like an MTOS account manager.
  */
+/** Keep one project per business name (most recently updated wins) so a client
+ * never shows twice, even if duplicate projects exist in the store. */
+function dedupeByBusiness(projects: SeoProjectV1[]): SeoProjectV1[] {
+  const bestByKey = new Map<string, SeoProjectV1>();
+  for (const p of projects) {
+    const k = clientKey(p.businessName || p.clientId);
+    const cur = bestByKey.get(k);
+    if (!cur || p.updatedAt > cur.updatedAt) bestByKey.set(k, p);
+  }
+  const keep = new Set([...bestByKey.values()].map((p) => p.id));
+  return projects.filter((p) => keep.has(p.id));
+}
+
 export async function listProjectsForViewer(authz: AuthzContextV1): Promise<SeoProjectV1[]> {
   const all = await getProjectRepo().list(authz.tenantId);
-  if (authz.clientVisibility === "all") return all;
+  if (authz.clientVisibility === "all") return dedupeByBusiness(all);
 
   const specialists = await listSpecialists(authz.tenantId);
   const mySpecialistId = await resolveViewerSpecialistId(authz.tenantId, authz.userId);
@@ -330,12 +382,14 @@ export async function listProjectsForViewer(authz: AuthzContextV1): Promise<SeoP
     ? new Set(authz.clientVisibility)
     : new Set<string>();
 
-  if (!mySpecialistId) return all.filter((p) => allowlist.has(p.clientId));
+  if (!mySpecialistId) return dedupeByBusiness(all.filter((p) => allowlist.has(p.clientId)));
 
-  return all.filter((project) => {
-    if (allowlist.has(project.clientId)) return true;
-    return effectiveSpecialistId(project, specialists) === mySpecialistId;
-  });
+  return dedupeByBusiness(
+    all.filter((project) => {
+      if (allowlist.has(project.clientId)) return true;
+      return effectiveSpecialistId(project, specialists) === mySpecialistId;
+    }),
+  );
 }
 
 /**

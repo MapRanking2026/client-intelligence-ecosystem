@@ -1,4 +1,5 @@
 import { getServerEnv } from "@/src/lib/server/env";
+import { assertOutboundAllowed } from "@/src/lib/server/egress-policy";
 
 export class EmailNotConfiguredError extends Error {
   constructor() {
@@ -14,6 +15,7 @@ export async function sendEmail(input: {
   html: string;
   replyTo?: string;
 }): Promise<{ id?: string }> {
+  assertOutboundAllowed("send email");
   const env = getServerEnv();
   if (!env.resendApiKey || !env.emailFrom) throw new EmailNotConfiguredError();
 

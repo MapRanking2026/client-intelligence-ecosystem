@@ -6,6 +6,7 @@ import {
 import { newId, nowIso } from "@/src/lib/ids";
 import { getOutboxRepo } from "@/src/lib/server/repositories/outbox-repo";
 import { deliverToMtos } from "@/src/lib/server/gateway/client";
+import { isOutboundLocked } from "@/src/lib/server/egress-policy";
 
 const MAX_ATTEMPTS = 6;
 const BASE_BACKOFF_MS = 60_000;
@@ -59,6 +60,10 @@ export async function runOutboxDelivery(
   nowMs: number,
   limit = 20,
 ): Promise<DeliveryRunResult> {
+  // Outbound lock (read-only mode): deliver nothing while ON. Events stay due
+  // and are delivered once the lock is lifted — never claimed, retried, or
+  // dead-lettered because of the lock.
+  if (isOutboundLocked()) return { attempted: 0, delivered: 0, failed: 0, deadLettered: 0 };
   const repo = getOutboxRepo();
   const due = await repo.claimDue(tenantId, new Date(nowMs).toISOString(), limit);
   const result: DeliveryRunResult = { attempted: 0, delivered: 0, failed: 0, deadLettered: 0 };

@@ -12,6 +12,7 @@ import { LogoutButton } from "@/src/components/logout-button";
 import { ImpersonationBanner } from "@/src/components/impersonation-banner";
 import { getUserRepo } from "@/src/lib/server/repositories/user-repo";
 import { listSpecialists } from "@/src/lib/server/specialists-service";
+import { isOutboundLocked } from "@/src/lib/server/egress-policy";
 
 export interface Breadcrumb {
   label: string;
@@ -104,6 +105,12 @@ export async function AppShell({
           </div>
         </header>
         <main className="content">
+          {isOutboundLocked() ? (
+            <div className="egress-banner">
+              🔒 <strong>Read-only mode</strong> — outbound is locked. Data still syncs in; nothing is sent
+              or changed in any external system (ClickUp, email, MTOS) until you lift it.
+            </div>
+          ) : null}
           {impersonatingName ? <ImpersonationBanner name={impersonatingName} /> : null}
           {mustReset ? (
             <div className="reset-banner">

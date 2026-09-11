@@ -14,6 +14,7 @@ import {
 } from "@cie/contracts";
 import { z } from "zod";
 import { secretFingerprint, signGatewayRequest } from "@cie/core";
+import { isOutboundLocked } from "@/src/lib/server/egress-policy";
 
 import { getServerEnv } from "@/src/lib/server/env";
 import { newId, nowIso } from "@/src/lib/ids";
@@ -144,6 +145,8 @@ export async function getIntegrationHealth(
 export async function deliverToMtos(
   event: OutboxEventV1,
 ): Promise<{ ok: boolean; error?: string }> {
+  // Outbound lock (read-only mode): never write to MTOS while ON.
+  if (isOutboundLocked()) return { ok: false, error: "outbound_locked (SEOOS read-only mode)" };
   const env = getServerEnv();
   if (!env.integrationGatewayUrl || !env.serviceToServiceSecret) {
     return { ok: false, error: "gateway_not_configured" };

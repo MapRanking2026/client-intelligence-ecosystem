@@ -165,6 +165,7 @@ button:disabled {
 .impersonation-banner button { padding: 6px 12px; }
 .reset-banner { margin-bottom: 16px; padding: 10px 14px; border-radius: 10px; border: 1px solid var(--danger); background: color-mix(in srgb, var(--danger) 14%, transparent); color: var(--fg); font-size: 13px; }
 .reset-banner a { color: var(--accent); font-weight: 600; }
+.egress-banner { margin-bottom: 16px; padding: 10px 14px; border-radius: 10px; border: 1px solid color-mix(in srgb, #e0a500 60%, var(--border)); background: color-mix(in srgb, #e0a500 15%, transparent); color: var(--fg); font-size: 13px; }
 
 code,
 pre {

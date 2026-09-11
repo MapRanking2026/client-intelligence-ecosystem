@@ -8,6 +8,10 @@ import { ThemeToggle } from "@/src/components/theme-toggle";
 import { AnnotationsToggle } from "@/src/components/annotations-toggle";
 import { Annotator } from "@/src/components/annotator";
 import { GlobalSearch } from "@/src/components/global-search";
+import { LogoutButton } from "@/src/components/logout-button";
+import { ImpersonationBanner } from "@/src/components/impersonation-banner";
+import { getUserRepo } from "@/src/lib/server/repositories/user-repo";
+import { listSpecialists } from "@/src/lib/server/specialists-service";
 
 export interface Breadcrumb {
   label: string;
@@ -24,7 +28,7 @@ interface AppShellProps {
 }
 
 /** Authenticated application chrome: sidebar + topbar + content region. */
-export function AppShell({
+export async function AppShell({
   authz,
   title,
   subtitle,
@@ -38,12 +42,24 @@ export function AppShell({
   const role = authz.roles[0] ?? "member";
   // Friendly role: admins → "Admin", everyone else → "SEO Specialist".
   const roleLabel = /admin|owner/i.test(role) ? "Admin" : "SEO Specialist";
-  // Show the person's name with each word capitalized (e.g. "francisco" → "Francisco").
-  const displayName = authz.userId
-    .split(/[\s._-]+/)
-    .filter(Boolean)
-    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
-    .join(" ");
+
+  const titleCase = (s: string) =>
+    s.split(/[\s._-]+/).filter(Boolean).map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
+
+  // When the super-admin is impersonating, authz.userId is "imp__<specialistId>".
+  const impersonatingId = authz.userId.startsWith("imp__") ? authz.userId.slice(5) : null;
+  let displayName: string;
+  let impersonatingName: string | null = null;
+  let mustReset = false;
+  if (impersonatingId) {
+    const specialists = await listSpecialists(authz.tenantId);
+    impersonatingName = specialists.find((s) => s.id === impersonatingId)?.name ?? impersonatingId;
+    displayName = impersonatingName;
+  } else {
+    const user = await getUserRepo().getById(authz.tenantId, authz.userId);
+    mustReset = user?.mustResetPassword === true;
+    displayName = user?.displayName || titleCase(authz.userId);
+  }
 
   return (
     <div className="app-grid">
@@ -84,9 +100,18 @@ export function AppShell({
               <span className="role-pill">{roleLabel}</span>
               <span className="user-id">{displayName}</span>
             </span>
+            <LogoutButton />
           </div>
         </header>
-        <main className="content">{children}</main>
+        <main className="content">
+          {impersonatingName ? <ImpersonationBanner name={impersonatingName} /> : null}
+          {mustReset ? (
+            <div className="reset-banner">
+              You must set a new password. <a href="/set-password">Set it now →</a>
+            </div>
+          ) : null}
+          {children}
+        </main>
         <Annotator />
       </div>
     </div>

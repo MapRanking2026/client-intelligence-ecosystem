@@ -130,6 +130,14 @@ export async function resolveViewerSpecialistId(
   tenantId: string,
   userId: string,
 ): Promise<string | undefined> {
+  // Impersonation marker (super-admin viewing as a specialist): userId is
+  // "imp__<specialistId>". Resolve straight to that specialist so all per-viewer
+  // scoping (projects/tickets/tasks) reflects exactly what the specialist sees.
+  if (userId.startsWith("imp__")) {
+    const sid = userId.slice(5);
+    const specialists = await listSpecialists(tenantId);
+    return specialists.some((s) => s.id === sid) ? sid : undefined;
+  }
   const user = await getUserRepo().getById(tenantId, userId);
   if (!user) return undefined;
   const specialists = await listSpecialists(tenantId);

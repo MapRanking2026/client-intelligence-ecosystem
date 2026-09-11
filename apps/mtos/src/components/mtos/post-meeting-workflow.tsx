@@ -25,6 +25,7 @@ import type {
   TicketPriority,
   TicketType,
 } from "@/src/lib/mtos-data";
+import { DateField } from "@/src/components/mtos/date-field";
 
 const DEPARTMENTS: TicketDepartment[] = ["SEO", "Web Design", "Ads", "Account Manager", "Other"];
 
@@ -155,14 +156,17 @@ function FieldInput({
   return (
     <div>
       <label className={fieldLabelClass}>{label}</label>
-      <input
-        type={type}
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        placeholder={placeholder}
-        style={type === "date" ? { color: "#e2e8f0", colorScheme: "dark" } : undefined}
-        className={fieldInputClass}
-      />
+      {type === "date" ? (
+        <DateField variant="dark" value={value} onChange={onChange} />
+      ) : (
+        <input
+          type={type}
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          placeholder={placeholder}
+          className={fieldInputClass}
+        />
+      )}
     </div>
   );
 }
@@ -654,26 +658,18 @@ export function PostMeetingWorkflow({ touchId, postMeeting, qaReview }: PostMeet
                           <label className="text-[11px] uppercase tracking-[0.2em] text-slate-400">
                             Date requested
                           </label>
-                          <input
-                            type="date"
+                          <DateField
+                            variant="dark"
                             value={ticket.dateRequested || ""}
-                            onChange={(event) =>
-                              updateTicket(ticket.id, { dateRequested: event.target.value || undefined })
-                            }
-                            style={{ color: "#e2e8f0", colorScheme: "dark" }}
-                            className="mt-1 w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-slate-200 outline-none"
+                            onChange={(v) => updateTicket(ticket.id, { dateRequested: v || undefined })}
                           />
                         </div>
                         <div>
                           <label className="text-[11px] uppercase tracking-[0.2em] text-slate-400">Due date</label>
-                          <input
-                            type="date"
+                          <DateField
+                            variant="dark"
                             value={ticket.dueDate || ""}
-                            onChange={(event) =>
-                              updateTicket(ticket.id, { dueDate: event.target.value || undefined })
-                            }
-                            style={{ color: "#e2e8f0", colorScheme: "dark" }}
-                            className="mt-1 w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-slate-200 outline-none"
+                            onChange={(v) => updateTicket(ticket.id, { dueDate: v || undefined })}
                           />
                         </div>
                       </div>
@@ -728,12 +724,10 @@ export function PostMeetingWorkflow({ touchId, postMeeting, qaReview }: PostMeet
                       </div>
                       <div>
                         <label className="text-[11px] uppercase tracking-[0.2em] text-slate-400">Due date</label>
-                        <input
-                          type="date"
+                        <DateField
+                          variant="dark"
                           value={ticket.dueDate || ""}
-                          onChange={(event) => updateTicket(ticket.id, { dueDate: event.target.value || undefined })}
-                          style={{ color: "#e2e8f0", colorScheme: "dark" }}
-                          className="mt-1 w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-slate-200 outline-none"
+                          onChange={(v) => updateTicket(ticket.id, { dueDate: v || undefined })}
                         />
                         <p className="mt-1 text-[11px] text-slate-500">Blank = auto from priority.</p>
                       </div>

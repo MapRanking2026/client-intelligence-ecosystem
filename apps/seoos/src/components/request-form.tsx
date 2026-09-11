@@ -3,6 +3,8 @@
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 
+import { DatePicker } from "./date-picker";
+
 const CAPABILITIES = [
   "full-monthly-package",
   "keyword-ranking-summary",
@@ -98,12 +100,22 @@ export function RequestForm() {
       </div>
       <div className="row" style={{ marginTop: 12 }}>
         <div>
-          <label htmlFor="start">Reporting period start (ISO)</label>
-          <input id="start" value={start} onChange={(e) => setStart(e.target.value)} />
+          <label htmlFor="start">Reporting period start</label>
+          <DatePicker
+            id="start"
+            value={start.slice(0, 10)}
+            onChange={(v) => setStart(v ? `${v}T00:00:00.000Z` : "")}
+            max={end.slice(0, 10) || undefined}
+          />
         </div>
         <div>
-          <label htmlFor="end">Reporting period end (ISO)</label>
-          <input id="end" value={end} onChange={(e) => setEnd(e.target.value)} />
+          <label htmlFor="end">Reporting period end</label>
+          <DatePicker
+            id="end"
+            value={end.slice(0, 10)}
+            onChange={(v) => setEnd(v ? `${v}T00:00:00.000Z` : "")}
+            min={start.slice(0, 10) || undefined}
+          />
         </div>
       </div>
       <div style={{ marginTop: 16, display: "flex", gap: 12, alignItems: "center" }}>

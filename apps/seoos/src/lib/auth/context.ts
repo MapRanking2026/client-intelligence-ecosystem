@@ -58,7 +58,7 @@ function membershipToAuthz(m: AppMembershipV1): AuthzContextV1 {
  * authenticated to the tenant but has no SEOOS membership. Callers treat null
  * as "permission denied" (never as an error).
  */
-export async function resolveSeoAuthz(
+async function resolveRealSeoAuthz(
   request?: Request,
 ): Promise<AuthzContextV1 | null> {
   const env = getServerEnv();
@@ -103,6 +103,52 @@ export async function resolveSeoAuthz(
 
   // In seed mode, still allow (dev convenience); otherwise deny.
   return env.useSeedData ? seedAuthz() : null;
+}
+
+/** The developer/super-admin who may impersonate specialists (userId). */
+const SUPER_ADMIN_USER_ID = process.env.SEOOS_SUPERADMIN_USER_ID || "francisco";
+
+/** Read the impersonation cookie ("view as specialist"), from a request or the request scope. */
+async function readImpersonateCookie(request?: Request): Promise<string | null> {
+  if (request) {
+    const raw = request.headers.get("cookie") ?? "";
+    const m = raw.match(/(?:^|;\s*)seoos_impersonate=([^;]+)/);
+    return m ? decodeURIComponent(m[1]) : null;
+  }
+  const { cookies } = await import("next/headers");
+  const store = await cookies();
+  return store.get("seoos_impersonate")?.value ?? null;
+}
+
+/**
+ * Returns the resolved SEOOS authorization context. If the super-admin (dev) has
+ * an impersonation cookie set, this returns an authz that reflects exactly what
+ * the chosen SEO specialist sees — non-admin, scoped to their assigned clients.
+ * Impersonation is honored ONLY for the super-admin; anyone else's cookie is
+ * ignored, so it can never escalate privileges. Callers treat null as denied.
+ */
+export async function resolveSeoAuthz(
+  request?: Request,
+): Promise<AuthzContextV1 | null> {
+  const real = await resolveRealSeoAuthz(request);
+  if (!real) return null;
+
+  const env = getServerEnv();
+  const session = await resolveSession(request);
+  const isSuperAdmin = env.useSeedData || session?.userId === SUPER_ADMIN_USER_ID;
+  if (!isSuperAdmin) return real;
+
+  const specialistId = await readImpersonateCookie(request);
+  if (!specialistId) return real;
+
+  return {
+    tenantId: real.tenantId,
+    userId: `imp__${specialistId}`,
+    app: "seoos",
+    roles: ["seo_specialist"],
+    permissions: computePermissions(["seo_specialist"]),
+    clientVisibility: [],
+  } as AuthzContextV1;
 }
 
 export function authzHas(

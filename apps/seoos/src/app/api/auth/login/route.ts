@@ -45,7 +45,7 @@ export async function POST(request: Request) {
     role: user.roles[0] ?? "seo_specialist",
   });
 
-  const res = NextResponse.json({ ok: true });
+  const res = NextResponse.json({ ok: true, mustResetPassword: user.mustResetPassword === true });
   res.cookies.set(env.sessionCookieName, token, {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",

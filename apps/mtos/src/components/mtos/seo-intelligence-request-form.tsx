@@ -3,6 +3,8 @@
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 
+import { DateField } from "@/src/components/mtos/date-field";
+
 const CAPABILITIES = [
   "full-monthly-package",
   "executive-seo-summary",
@@ -83,14 +85,22 @@ export function SeoIntelligenceRequestForm({ defaultClientId = "" }: { defaultCl
           </select>
         </label>
         <label className="block text-xs text-white/60">
-          Reporting start (ISO)
-          <input value={start} onChange={(e) => setStart(e.target.value)}
-            className="mt-1 w-full rounded-md border border-white/10 bg-black/30 px-2 py-1.5 text-sm text-white" />
+          Reporting start
+          <DateField
+            variant="dark"
+            value={start.slice(0, 10)}
+            onChange={(v) => setStart(v ? `${v}T00:00:00.000Z` : "")}
+            max={end.slice(0, 10) || undefined}
+          />
         </label>
         <label className="block text-xs text-white/60">
-          Reporting end (ISO)
-          <input value={end} onChange={(e) => setEnd(e.target.value)}
-            className="mt-1 w-full rounded-md border border-white/10 bg-black/30 px-2 py-1.5 text-sm text-white" />
+          Reporting end
+          <DateField
+            variant="dark"
+            value={end.slice(0, 10)}
+            onChange={(v) => setEnd(v ? `${v}T00:00:00.000Z` : "")}
+            min={start.slice(0, 10) || undefined}
+          />
         </label>
       </div>
       <label className="mt-3 block text-xs text-white/60">

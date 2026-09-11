@@ -8,6 +8,7 @@ import {
   type MonthlyAuditStatus,
   type MonthlyAuditV1,
 } from "@/src/lib/domain/monthly-audit";
+import { DatePicker } from "./date-picker";
 
 const RESULTS: AuditResult[] = [
   "pending",
@@ -86,7 +87,7 @@ export function MonthlyAuditManager({
         <h2 className="panel-title">Start a monthly audit</h2>
         {canManage ? (
           <div className="toolbar" style={{ marginTop: 8 }}>
-            <input value={period} onChange={(e) => setPeriod(e.target.value)} placeholder="YYYY-MM" style={{ maxWidth: 120 }} />
+            <DatePicker mode="month" value={period} onChange={setPeriod} placeholder="Pick month" style={{ maxWidth: 200 }} />
             <button type="button" onClick={create} disabled={busy}>Create audit</button>
             <span className="muted" style={{ fontSize: 12 }}>Unresolved items carry forward from the prior month.</span>
           </div>

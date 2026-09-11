@@ -178,6 +178,44 @@ function coerceHours(value: unknown): number | undefined {
 }
 
 /**
+ * Strip Markdown syntax so a client-facing email reads as a plain, paste-ready
+ * email instead of raw `**`, `##`, `-`, backtick text. Emojis and normal
+ * punctuation are preserved. Used on the generated follow-up email so the AM can
+ * copy it straight into their mail client with nothing to clean up.
+ */
+export function toPlainEmail(input: string): string {
+  let s = (input ?? "").replace(/\r\n?/g, "\n");
+  // Fenced + inline code -> keep the inner text.
+  s = s.replace(/```[^\n]*\n?([\s\S]*?)```/g, "$1");
+  s = s.replace(/`([^`]+)`/g, "$1");
+  // Links [text](url) -> text (url); bare autolinks <url> -> url.
+  s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g, "$1 ($2)");
+  s = s.replace(/<((?:https?:\/\/|mailto:)[^>]+)>/g, "$1");
+  // Bold / italic markers.
+  s = s.replace(/\*\*([^*]+)\*\*/g, "$1");
+  s = s.replace(/__([^_]+)__/g, "$1");
+  s = s.replace(/(?<!\*)\*(?!\s)([^*\n]+?)\*(?!\*)/g, "$1");
+  // Headings: "### Title" -> "Title".
+  s = s.replace(/^\s{0,3}#{1,6}\s+/gm, "");
+  // Blockquotes: "> quote" -> "quote".
+  s = s.replace(/^\s{0,3}>\s?/gm, "");
+  // Horizontal rules (---, ***, ___).
+  s = s.replace(/^\s*([-*_])\1{2,}\s*$/gm, "");
+  // Bullets: "- ", "* ", "+ " -> "• ".
+  s = s.replace(/^\s*[-*+]\s+/gm, "• ");
+  // Any leftover leading hashes.
+  s = s.replace(/^\s{0,3}#+\s*/gm, "");
+  // Collapse 3+ blank lines.
+  s = s.replace(/\n{3,}/g, "\n\n");
+  return s.trim();
+}
+
+/** One-line field (subject): drop markdown emphasis/heading marks. */
+export function toPlainLine(input: string): string {
+  return (input ?? "").replace(/[*_`#]+/g, "").replace(/\s+/g, " ").trim();
+}
+
+/**
  * Coerce the raw LLM object into the exact shape `analysisSchema` expects, so a
  * model that returns commitments-as-objects or emits more than the max number of
  * items degrades gracefully (flattened + trimmed) instead of throwing a Zod
@@ -212,9 +250,9 @@ function normalizePostMeetingAnalysis(raw: Record<string, unknown>) {
     recapSummary: coerceText(raw.recapSummary ?? raw.recap ?? raw.summary),
     extractedCommitments: commitments,
     draftTickets,
-    clientEmailSubject: coerceText(raw.clientEmailSubject ?? raw.emailSubject ?? raw.subject),
-    // Preserve paragraph breaks for the email body rather than the "—" joiner.
-    clientEmailBody: coerceText(emailBody, "\n\n"),
+    clientEmailSubject: toPlainLine(coerceText(raw.clientEmailSubject ?? raw.emailSubject ?? raw.subject)),
+    // Preserve paragraph breaks, and strip Markdown so the body is paste-ready.
+    clientEmailBody: toPlainEmail(coerceText(emailBody, "\n\n")),
   };
 }
 
@@ -1114,8 +1152,8 @@ export async function applyPostMeetingDecisions(
   );
 
   const clientEmail: ClientEmailDraft = {
-    subject: decisions.email.subject.trim(),
-    body: decisions.email.body,
+    subject: toPlainLine(decisions.email.subject),
+    body: toPlainEmail(decisions.email.body),
     status: decisions.email.approve ? "approved" : "pending",
   };
 

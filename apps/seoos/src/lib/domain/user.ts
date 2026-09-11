@@ -13,6 +13,8 @@ export const SeoUserV1 = z.object({
   roles: z.array(z.string().min(1)).min(1),
   clientVisibility: ClientVisibility.default("all"),
   disabled: z.boolean().default(false),
+  /** When true, the next successful login forces the user to set a new password. */
+  mustResetPassword: z.boolean().optional(),
   createdAt: zIsoTimestamp,
   updatedAt: zIsoTimestamp,
 });

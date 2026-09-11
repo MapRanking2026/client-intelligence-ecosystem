@@ -125,6 +125,47 @@ button:disabled {
   cursor: default;
 }
 
+/* ---------- Date picker (click-to-open calendar) ---------- */
+.dp { position: relative; width: 100%; }
+.dp-trigger { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 10px; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; color: var(--fg); font: inherit; font-weight: 400; cursor: pointer; text-align: left; }
+.dp-trigger:hover { border-color: color-mix(in srgb, var(--accent) 55%, var(--border)); }
+.dp-value { color: var(--fg); }
+.dp-placeholder { color: var(--muted); }
+.dp-icon { color: var(--muted); flex: none; }
+.dp-pop { position: absolute; z-index: 60; top: calc(100% + 6px); left: 0; width: 262px; background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 10px; box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45); }
+.dp-pop-up { top: auto; bottom: calc(100% + 6px); }
+.dp-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.dp-nav { width: 28px; height: 28px; padding: 0; background: transparent; color: var(--muted); border: 0; border-radius: 8px; font-size: 18px; font-weight: 600; line-height: 1; display: grid; place-items: center; cursor: pointer; }
+.dp-nav:hover { background: color-mix(in srgb, var(--fg) 12%, transparent); color: var(--fg); }
+.dp-title { font-size: 13px; font-weight: 600; color: var(--fg); }
+.dp-weekdays { display: grid; grid-template-columns: repeat(7, 1fr); margin-bottom: 2px; }
+.dp-weekday { text-align: center; font-size: 11px; color: var(--muted); height: 22px; line-height: 22px; }
+.dp-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
+.dp-months { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; }
+.dp-cell { height: 32px; padding: 0; background: transparent; border: 0; border-radius: 8px; color: var(--fg); font-size: 13px; font-weight: 400; cursor: pointer; display: grid; place-items: center; }
+.dp-mcell { height: 36px; }
+.dp-cell:hover:not(:disabled):not(.dp-empty) { background: color-mix(in srgb, var(--fg) 12%, transparent); }
+.dp-cell:disabled { opacity: 0.3; cursor: default; }
+.dp-empty { cursor: default; }
+.dp-cell.dp-sel { background: var(--accent); color: var(--accent-fg); }
+.dp-cell.dp-sel:hover { background: var(--accent); }
+.dp-cell.dp-today:not(.dp-sel) { box-shadow: inset 0 0 0 1px var(--accent); }
+.dp-foot { display: flex; align-items: center; justify-content: space-between; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); }
+.dp-quick { background: transparent; color: var(--muted); border: 0; padding: 4px 8px; border-radius: 8px; font-size: 12px; font-weight: 500; cursor: pointer; }
+.dp-quick:hover { background: color-mix(in srgb, var(--fg) 12%, transparent); color: var(--fg); }
+
+/* ---------- Global loading bar ---------- */
+.seoos-loadbar { position: fixed; top: 0; left: 0; right: 0; height: 3px; z-index: 100; pointer-events: none; opacity: 0; transition: opacity 200ms ease; }
+.seoos-loadbar[data-active="1"] { opacity: 1; }
+.seoos-loadbar-fill { height: 100%; width: 0; border-radius: 0 3px 3px 0; background: linear-gradient(90deg, var(--accent), color-mix(in srgb, var(--accent) 55%, #ffffff)); box-shadow: 0 0 10px color-mix(in srgb, var(--accent) 65%, transparent); transition: width 250ms ease; }
+@media (prefers-reduced-motion: reduce) { .seoos-loadbar-fill { transition: none; } }
+
+/* ---------- Banners (impersonation / forced reset) ---------- */
+.impersonation-banner { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; padding: 10px 14px; border-radius: 10px; border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border)); background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--fg); font-size: 13px; }
+.impersonation-banner button { padding: 6px 12px; }
+.reset-banner { margin-bottom: 16px; padding: 10px 14px; border-radius: 10px; border: 1px solid var(--danger); background: color-mix(in srgb, var(--danger) 14%, transparent); color: var(--fg); font-size: 13px; }
+.reset-banner a { color: var(--accent); font-weight: 600; }
+
 code,
 pre {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;

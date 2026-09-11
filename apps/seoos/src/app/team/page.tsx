@@ -6,6 +6,10 @@ import { Panel, StatCard, UnauthorizedPage } from "@/src/components/states";
 import { getServerEnv, hasFirebaseAdminConfig, hasAiConfig, hasGoogleOAuth } from "@/src/lib/server/env";
 import { listSpecialists } from "@/src/lib/server/specialists-service";
 import { listProjectsForViewer } from "@/src/lib/server/projects-service";
+import { SeedStylesButton } from "@/src/components/seed-styles-button";
+import { getUserRepo } from "@/src/lib/server/repositories/user-repo";
+import { UserAdmin } from "@/src/components/user-admin";
+import { ImpersonationPanel } from "@/src/components/impersonation-panel";
 
 export const dynamic = "force-dynamic";
 
@@ -24,10 +28,20 @@ export default async function TeamPage() {
   }
 
   const env = getServerEnv();
-  const [specialists, projects] = await Promise.all([
+  const [specialists, projects, users] = await Promise.all([
     listSpecialists(authz.tenantId),
     listProjectsForViewer(authz),
+    getUserRepo().list(authz.tenantId),
   ]);
+  const managedUsers = users.map((u) => ({
+    userId: u.userId,
+    email: u.email,
+    displayName: u.displayName ?? "",
+    isAdmin: u.clientVisibility === "all" || u.roles.includes("tenant_admin"),
+    disabled: u.disabled,
+    mustResetPassword: u.mustResetPassword === true,
+  }));
+  const isSuperAdmin = authz.userId === (process.env.SEOOS_SUPERADMIN_USER_ID || "francisco");
   const flag = (b: boolean) => (b ? "✓ configured" : "— not set");
 
   return (
@@ -61,6 +75,33 @@ export default async function TeamPage() {
             </tbody>
           </table>
         </div>
+      </Panel>
+
+      <Panel title="User accounts">
+        <p className="muted" style={{ marginTop: 0, fontSize: 13 }}>
+          Create login users, make someone an admin, or force a password reset on their next login.
+          Creating a user shows a one-time temporary password they must change when they first log in.
+        </p>
+        <UserAdmin users={managedUsers} />
+      </Panel>
+
+      {isSuperAdmin ? (
+        <Panel title="Impersonate a specialist (developer)">
+          <p className="muted" style={{ marginTop: 0, fontSize: 13 }}>
+            Open the app exactly as a specialist sees it, to verify their view. A banner stays visible while
+            impersonating — click &ldquo;Stop impersonating&rdquo; to return to your admin account.
+          </p>
+          <ImpersonationPanel specialists={specialists.map((s) => ({ id: s.id, name: s.name }))} />
+        </Panel>
+      ) : null}
+
+      <Panel title="Specialist writing styles">
+        <p className="muted" style={{ marginTop: 0, fontSize: 13 }}>
+          Learn how each specialist writes from their own ClickUp comments, so AI drafts sound like them
+          from the first run. Reads ClickUp only — nothing is written back, and each person&apos;s learned
+          corrections are always kept. {hasAiConfig() ? null : <strong>Set an AI key first (below).</strong>}
+        </p>
+        <SeedStylesButton />
       </Panel>
 
       <Panel title="System configuration">

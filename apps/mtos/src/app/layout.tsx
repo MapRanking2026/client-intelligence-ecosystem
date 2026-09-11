@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Inter, IBM_Plex_Mono } from "next/font/google";
 import "./globals.css";
+import { LoadingBarProvider } from "@/src/components/mtos/loading-bar";
 
 const bodyFont = Inter({
   variable: "--font-inter",
@@ -35,7 +36,7 @@ export default function RootLayout({
             __html: `(function(){try{var q=new URLSearchParams(location.search);var t=q.get('theme')||localStorage.getItem('mtos-theme');if(t==='dark'||t==='light')document.documentElement.setAttribute('data-theme',t);if((q.get('anno')||localStorage.getItem('mtos-annotations'))==='on')document.documentElement.setAttribute('data-annotations','on');if(q.get('hints')==='preview')document.documentElement.setAttribute('data-hints','preview');}catch(e){}})();`,
           }}
         />
-        {children}
+        <LoadingBarProvider>{children}</LoadingBarProvider>
       </body>
     </html>
   );

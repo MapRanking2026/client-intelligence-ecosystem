@@ -21,6 +21,7 @@ import { BrandMark } from "@/src/components/mtos/brand-mark";
 import { ThemeToggle } from "@/src/components/mtos/theme-toggle";
 import { AnnotationsToggle } from "@/src/components/mtos/annotations-toggle";
 import { NotificationsBell, type AppNotification } from "@/src/components/mtos/notifications-bell";
+import { LogoutButton } from "@/src/components/mtos/logout-button";
 
 const NOTIFICATIONS: AppNotification[] = [
   { id: "n1", tone: "important", title: "Monthly Touches this week", detail: "Review and prep the upcoming touches", href: "/monthly-touch" },
@@ -118,6 +119,7 @@ export function AppChrome({ title, subtitle, children }: AppChromeProps) {
               <div className="rl">{userRole}</div>
             </div>
           </div>
+          <LogoutButton />
         </div>
       </aside>
 

@@ -159,6 +159,18 @@ a { color: inherit; text-decoration: none; }
 
 .page { padding: clamp(20px,3vw,36px) clamp(16px,3vw,36px) 80px; max-width: 1520px; margin: 0 auto; }
 
+/* ---------- Global loading bar ---------- */
+.mtos-loadbar { position: fixed; top: 0; left: 0; right: 0; height: 3px; z-index: 100; pointer-events: none; opacity: 0; transition: opacity 200ms var(--ease, ease); }
+.mtos-loadbar[data-active="1"] { opacity: 1; }
+.mtos-loadbar-fill { height: 100%; width: 0; border-radius: 0 3px 3px 0; background: linear-gradient(90deg, var(--accent), var(--teal-200, var(--accent))); box-shadow: 0 0 10px color-mix(in srgb, var(--accent) 65%, transparent), 0 0 4px color-mix(in srgb, var(--accent) 80%, transparent); transition: width 250ms ease; }
+@media (prefers-reduced-motion: reduce) { .mtos-loadbar-fill { transition: none; } }
+
+/* ---------- Logout button (sidebar) ---------- */
+.logout-btn { margin-top: 10px; width: 100%; display: inline-flex; align-items: center; justify-content: center; gap: 8px; padding: 8px 12px; border-radius: var(--r-md); border: 1px solid var(--hair); background: var(--surface); color: var(--slate-300); font-size: 0.82rem; font-weight: 600; cursor: pointer; transition: all var(--dur) var(--ease); }
+.logout-btn:hover { background: var(--surface-2); color: var(--text); border-color: var(--hair-strong); }
+.logout-btn:disabled { opacity: 0.6; cursor: default; }
+.logout-btn svg { width: 16px; height: 16px; }
+
 /* ---------- TYPOGRAPHY ---------- */
 .eyebrow { font-size: var(--t-eyebrow); letter-spacing: 0.1em; text-transform: uppercase; font-weight: 700; color: var(--accent); display: inline-flex; align-items: center; gap: 7px; }
 .eyebrow.muted { color: var(--slate-400); }

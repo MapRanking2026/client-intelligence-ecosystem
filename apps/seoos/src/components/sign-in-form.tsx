@@ -38,6 +38,12 @@ export function SignInForm() {
         setError((body && body.error) || (mode === "signin" ? "Sign-in failed" : "Sign-up failed"));
         return;
       }
+      if (mode === "signin" && body?.mustResetPassword) {
+        // A forced password reset was set for this account — go set a new one.
+        router.push("/set-password");
+        router.refresh();
+        return;
+      }
       if (mode === "signup" && body?.firstUser) {
         setNotice("Admin account created — signing you in…");
       }

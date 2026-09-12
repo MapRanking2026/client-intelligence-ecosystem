@@ -10,6 +10,7 @@ import { StartServiceButton } from "@/src/components/start-service-button";
 import { getProject } from "@/src/lib/server/projects-service";
 import { getClientHealth } from "@/src/lib/server/client-health-service";
 import { getRankingsIntel } from "@/src/lib/server/rankings-intelligence-service";
+import { getMonthlyScoreReadout } from "@/src/lib/server/scoring-service";
 import { getPerformanceSnapshotRepo } from "@/src/lib/server/repositories/performance-snapshot-repo";
 import { getKeywordRepo } from "@/src/lib/server/repositories/keyword-repo";
 import { getRecommendationRepo } from "@/src/lib/server/repositories/recommendation-repo";
@@ -51,9 +52,10 @@ export default async function ProjectSetupPage({
     getRecommendationRepo().listByProject(authz.tenantId, projectId),
   ]);
   const hasData = Boolean(snapshot && (snapshot.grids.length || snapshot.keywords.length));
-  const [health, intel] = await Promise.all([
+  const [health, intel, score] = await Promise.all([
     getClientHealth(authz, project),
     getRankingsIntel(authz, project),
+    getMonthlyScoreReadout(authz, project),
   ]);
   const healthLabel =
     health.status === "at_risk" ? "At risk" : health.status === "needs_attention" ? "Needs attention" : "On track";
@@ -157,6 +159,39 @@ export default async function ProjectSetupPage({
             {" · "}<Link href="/rules">tune band →</Link>
           </p>
         ) : null}
+      </Panel>
+
+      <Panel title="Monthly performance — Results pillar">
+        {score.hasData ? (
+          <>
+            <div className="grid-cards" style={{ marginBottom: 10 }}>
+              <StatCard label="Top 5" value={`${score.distribution.top5Pct}%`} hint={`${score.distribution.rankedKeywords} keywords`} />
+              <StatCard label="Pos 5–12" value={`${score.distribution.pos5to12Pct}%`} />
+              <StatCard label="Pos 12–20" value={`${score.distribution.pos12to20Pct}%`} />
+              <StatCard
+                label="Results distribution"
+                value={`${score.resultsDistributionPoints} / ${score.resultsDistributionMax}`}
+                hint="documented bands (M10.40)"
+              />
+            </div>
+            <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>
+              Grid weight applied: <strong>{score.gridWeight ?? "—"}</strong>
+              {score.gridSize ? ` (grid ${score.gridSize}, ~${score.gridRadiusAssumedMiles}mi assumed)` : ""} ·
+              Results pillar cap {score.resultsPillarMax} pts · from{" "}
+              <Link href="/rules">Rule Library</Link> (scoring.results_grid_weights).
+            </p>
+            <p className="muted" style={{ fontSize: 12, marginBottom: 6 }}>
+              Tier scale: {score.tierScale}
+            </p>
+          </>
+        ) : (
+          <p className="muted" style={{ marginTop: 0, fontSize: 13 }}>
+            No grid data yet — run a full scan to compute the Results pillar.
+          </p>
+        )}
+        <p className="muted" style={{ fontSize: 12, marginBottom: 0 }}>
+          Not computed here (need org-internal inputs SEOOS doesn't hold yet): {score.uncomputedPillars.join(" · ")}.
+        </p>
       </Panel>
 
       {Object.keys(project.dashboardMetrics ?? {}).length ? (

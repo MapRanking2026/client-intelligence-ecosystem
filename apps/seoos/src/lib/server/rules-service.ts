@@ -45,6 +45,29 @@ export async function getRuleValue(tenantId: string, key: string): Promise<strin
 }
 
 /**
+ * Render a "governing thresholds" block for an AI action, using the tenant's
+ * effective (override-or-default) values. Pass the rule keys relevant to the
+ * action; unknown keys are skipped. This is how the Rule Library actually
+ * governs AI drafts — the numbers the model must follow come from here, live.
+ * Returns "" when no keys resolve (so callers can concatenate unconditionally).
+ */
+export async function renderRuleGuidance(tenantId: string, keys: string[]): Promise<string> {
+  const overrides = new Map((await getRuleRepo().list(tenantId)).map((r) => [r.key, r]));
+  const lines: string[] = [];
+  for (const key of keys) {
+    const def = getRuleDef(key);
+    if (!def) continue;
+    const value = overrides.get(key)?.value ?? def.defaultValue;
+    lines.push(`- ${def.name}: ${value}${def.unit ? ` ${def.unit}` : ""}`);
+  }
+  if (!lines.length) return "";
+  return [
+    "GOVERNING THRESHOLDS (these are the current rules — follow these exact values, do not substitute your own):",
+    ...lines,
+  ].join("\n");
+}
+
+/**
  * A rule as a number, for consumers that need one (e.g. a threshold).
  * Parses the leading number out of the value ("5-20" → 5, "700-750" → 700,
  * "9x9" → 9). Falls back to `fallback` when the rule is unknown/unparseable.

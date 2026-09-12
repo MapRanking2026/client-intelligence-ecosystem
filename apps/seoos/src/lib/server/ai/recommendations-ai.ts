@@ -7,6 +7,7 @@ import { AiNotConfiguredError, extractJson, generateText } from "@/src/lib/serve
 import { hasAiConfig } from "@/src/lib/server/env";
 import { findForNiche } from "@/src/lib/server/niche-studies-service";
 import { composeAiSystem } from "@/src/lib/server/prompts-service";
+import { renderRuleGuidance } from "@/src/lib/server/rules-service";
 import { listSpecialists } from "@/src/lib/server/specialists-service";
 import { effectiveSpecialistId } from "@/src/lib/server/projects-service";
 
@@ -37,6 +38,7 @@ function buildUserPrompt(input: {
   checkinBusinessCount: number;
   checkinTotalPosts: number;
   nichePlaybooks: string;
+  ruleGuidance: string;
 }): string {
   const allowed = TYPES.join(", ");
   return [
@@ -54,6 +56,7 @@ function buildUserPrompt(input: {
     ),
     input.keywords.length ? `Tracked keywords: ${input.keywords.slice(0, 40).join(", ")}` : "",
     input.nichePlaybooks ? `\nNiche playbooks (apply these proven tactics):\n${input.nichePlaybooks}` : "",
+    input.ruleGuidance ? `\n${input.ruleGuidance}` : "",
     "",
     `Propose 5-8 recommendations. Each "type" MUST be one of: ${allowed}.`,
     'Return JSON: {"recommendations":[{"type","title","rationale","clientSafeExplanation",',
@@ -112,6 +115,19 @@ export async function generateAiRecommendations(
     .map((s) => `- ${s.title}: ${s.content.replace(/\s+/g, " ").slice(0, 1200)}`)
     .join("\n");
 
+  const ruleGuidance = await renderRuleGuidance(tenantId, [
+    "grid.dominance.top3_count",
+    "grid.dominance.top3_pct",
+    "rankings.top3.max_rank",
+    "market_share.headline_band",
+    "low_perf.avg_rank_band",
+    "gbp.description.char_target",
+    "gbp.additional_categories.max",
+    "posting.gbp_per_week",
+    "reviews.velocity.b2c_per_month",
+    "citations.monthly.build_count",
+  ]);
+
   const user = buildUserPrompt({
     businessName: project.businessName,
     website: project.website,
@@ -130,6 +146,7 @@ export async function generateAiRecommendations(
     checkinBusinessCount: snapshot.checkinBusinessCount,
     checkinTotalPosts: snapshot.checkinTotalPosts,
     nichePlaybooks,
+    ruleGuidance,
   });
 
   // System = global guardrails + the editable action prompt + the account

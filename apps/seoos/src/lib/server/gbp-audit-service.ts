@@ -7,6 +7,7 @@ import { nowIso } from "@/src/lib/ids";
 import { getGbpAuditRepo } from "@/src/lib/server/repositories/gbp-audit-repo";
 import { getProject } from "@/src/lib/server/projects-service";
 import { composeAiSystem } from "@/src/lib/server/prompts-service";
+import { renderRuleGuidance } from "@/src/lib/server/rules-service";
 import { AiNotConfiguredError, generateText } from "@/src/lib/server/ai/llm";
 import { hasAiConfig } from "@/src/lib/server/env";
 import { fetchGbpForClient, type GbpResult } from "@/src/lib/server/sync/gbp-adapter";
@@ -28,7 +29,7 @@ export async function getGbpAudit(tenantId: string, projectId: string) {
 }
 
 /** Facts-only context for the GBP audit prompt. Missing GBP fields stay as NEEDS INFO. */
-function buildContext(project: SeoProjectV1, gbp?: GbpResult): string {
+function buildContext(project: SeoProjectV1, gbp: GbpResult | undefined, ruleGuidance: string): string {
   const lines = [
     "Produce the GBP audit for this client using ONLY the facts below. For any GBP field that is NOT provided here, emit a NEEDS INFO line — never invent categories, description, hours, photos, attributes, or metrics.",
     "",
@@ -64,6 +65,7 @@ function buildContext(project: SeoProjectV1, gbp?: GbpResult): string {
       "Live GBP profile fields (existing categories, description, hours, photos, attributes, service areas, posts, reviews) were NOT available for this run — treat each as NEEDS INFO rather than assuming a value.",
     );
   }
+  if (ruleGuidance) lines.push("", ruleGuidance);
   return lines.filter(Boolean).join("\n");
 }
 
@@ -100,8 +102,19 @@ export async function generateGbpAuditForViewer(
     ? undefined
     : "Live GBP was unavailable (not connected or the Business Profile API isn't approved yet), so this audit is based on the client's services, niche, geo, and ClickUp SEO Dashboard fields — GBP profile items are flagged NEEDS INFO.";
 
+  const ruleGuidance = await renderRuleGuidance(authz.tenantId, [
+    "gbp.description.char_target",
+    "gbp.service_description.char_max",
+    "gbp.additional_categories.max",
+    "gbp.service_area.warn_miles",
+    "gbp.hours.competitor_open_pct",
+    "posting.gbp_per_week",
+    "posting.photos_per_month",
+    "reviews.velocity.b2c_per_month",
+    "reviews.response_sla_hours",
+  ]);
   const system = await composeAiSystem(authz.tenantId, "gbp.audit", undefined, undefined);
-  const user = buildContext(project, gbp);
+  const user = buildContext(project, gbp, ruleGuidance);
 
   try {
     const content = (await generateText(system, user)).trim();

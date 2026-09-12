@@ -7,6 +7,7 @@ import { ClientSelect } from "@/src/components/client-select";
 import { GbpLivePanel } from "@/src/components/gbp-live-panel";
 import { GenerateGbpAuditButton } from "@/src/components/generate-gbp-audit-button";
 import { getGbpAudit } from "@/src/lib/server/gbp-audit-service";
+import { getMtReadiness } from "@/src/lib/server/mt-readiness-service";
 import { listProjectsForViewer } from "@/src/lib/server/projects-service";
 import { getPerformanceSnapshotRepo } from "@/src/lib/server/repositories/performance-snapshot-repo";
 import { listIntegrations } from "@/src/lib/server/integrations-service";
@@ -37,6 +38,7 @@ export default async function GbpPage({
   const snapshot = selected ? await getPerformanceSnapshotRepo().get(authz.tenantId, selected.id) : null;
   const canManage = authzHas(authz, "seo.project.manage");
   const gbpAudit = selected ? await getGbpAudit(authz.tenantId, selected.id) : null;
+  const readiness = selected ? await getMtReadiness(authz, selected) : null;
 
   const integrations = await listIntegrations(authz.tenantId);
   const gbpConnected = integrations.some((i) => i.id === "google-business-profile" && i.status === "connected");
@@ -64,6 +66,42 @@ export default async function GbpPage({
             selectedId={selected?.id}
             basePath="/gbp"
           />
+
+          {readiness ? (
+            <Panel title="Monthly-Touch readiness">
+              <div className="toolbar" style={{ marginBottom: 10, alignItems: "center", gap: 12 }}>
+                <span
+                  className={`badge ${readiness.ready ? "status-active" : "badge--warn"}`}
+                >
+                  {readiness.ready ? "Ready" : "Not ready"} · {readiness.completenessPct}%
+                </span>
+                <span className="muted" style={{ fontSize: 12 }}>
+                  Gate: {readiness.completenessGatePct}% complete ·{" "}
+                  <Link href="/rules">tune in Rule Library →</Link>
+                </span>
+              </div>
+              <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
+                {readiness.items.map((it) => (
+                  <li key={it.label} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 5, fontSize: 13 }}>
+                    <span aria-hidden="true" style={{ flex: "none" }}>
+                      {it.state === "ready" ? "✅" : it.state === "manual" ? "🔎" : "⬜"}
+                    </span>
+                    <span>{it.label}</span>
+                    {it.detail ? <span className="muted" style={{ marginLeft: "auto", fontSize: 12 }}>{it.detail}</span> : null}
+                  </li>
+                ))}
+              </ul>
+              <h4 style={{ margin: "12px 0 6px", fontSize: 13 }}>Manual checks (no API confirms these)</h4>
+              <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
+                {readiness.manualChecks.map((it) => (
+                  <li key={it.label} style={{ fontSize: 12, marginBottom: 5 }}>
+                    <span aria-hidden="true">🔎</span> <strong>{it.label}</strong>
+                    {it.detail ? <span className="muted"> — {it.detail}</span> : null}
+                  </li>
+                ))}
+              </ul>
+            </Panel>
+          ) : null}
 
           <Panel title="Map Check-In activity">
             {snapshot ? (

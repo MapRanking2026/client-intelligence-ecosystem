@@ -22,10 +22,29 @@ export interface OnPageAudit {
   checks: Array<{ label: string; status: "pass" | "warn" | "fail"; detail?: string }>;
 }
 
+/** On-page thresholds, normally sourced from the Rule Library (content.* keys). */
+export interface AuditThresholds {
+  titleRange: [number, number];
+  metaRange: [number, number];
+  h1Count: number;
+}
+
+const DEFAULT_THRESHOLDS: AuditThresholds = {
+  titleRange: [55, 60],
+  metaRange: [150, 160],
+  h1Count: 1,
+};
+
 function normalizeUrl(raw: string): string {
   const t = raw.trim();
   if (/^https?:\/\//i.test(t)) return t;
   return `https://${t}`;
+}
+
+/** pass within [lo,hi], warn if present but outside (soft, per 6.5), fail if missing. */
+function rangeStatus(len: number | undefined, [lo, hi]: [number, number]): "pass" | "warn" | "fail" {
+  if (len == null) return "fail";
+  return len >= lo && len <= hi ? "pass" : "warn";
 }
 
 function attr(html: string, re: RegExp): string | undefined {
@@ -33,10 +52,11 @@ function attr(html: string, re: RegExp): string | undefined {
   return m?.[1]?.trim();
 }
 
-export async function auditUrl(rawUrl: string): Promise<OnPageAudit> {
+export async function auditUrl(rawUrl: string, thresholds: AuditThresholds = DEFAULT_THRESHOLDS): Promise<OnPageAudit> {
   if (!rawUrl?.trim()) {
     return { ok: false, error: "This client has no website set.", checks: [] };
   }
+  const { titleRange, metaRange, h1Count: h1Target } = thresholds;
   const url = normalizeUrl(rawUrl);
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 15000);
@@ -73,17 +93,17 @@ export async function auditUrl(rawUrl: string): Promise<OnPageAudit> {
     checks.push({ label: "HTTPS", status: https ? "pass" : "fail" });
     checks.push({
       label: "Title tag",
-      status: !title ? "fail" : title.length < 15 || title.length > 65 ? "warn" : "pass",
-      detail: title ? `${title.length} chars` : "missing",
+      status: rangeStatus(title?.length, titleRange),
+      detail: title ? `${title.length} chars (target ${titleRange[0]}-${titleRange[1]})` : "missing",
     });
     checks.push({
       label: "Meta description",
-      status: !metaDescription ? "fail" : metaDescription.length < 50 || metaDescription.length > 165 ? "warn" : "pass",
-      detail: metaDescription ? `${metaDescription.length} chars` : "missing",
+      status: rangeStatus(metaDescription?.length, metaRange),
+      detail: metaDescription ? `${metaDescription.length} chars (target ${metaRange[0]}-${metaRange[1]})` : "missing",
     });
     checks.push({
-      label: "Single H1",
-      status: h1Count === 1 ? "pass" : h1Count === 0 ? "fail" : "warn",
+      label: `H1 count (${h1Target} expected)`,
+      status: h1Count === h1Target ? "pass" : h1Count === 0 ? "fail" : "warn",
       detail: `${h1Count} found`,
     });
     checks.push({ label: "Canonical tag", status: hasCanonical ? "pass" : "warn" });

@@ -6,6 +6,7 @@ import { getProject } from "@/src/lib/server/projects-service";
 import { auditUrl } from "@/src/lib/server/sync/onpage-audit";
 import { fetchGscForClient } from "@/src/lib/server/sync/gsc-adapter";
 import { listIntegrations } from "@/src/lib/server/integrations-service";
+import { getRuleNumber, getRuleRange } from "@/src/lib/server/rules-service";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -27,8 +28,13 @@ export async function GET(
     const gscConnected = (await listIntegrations(authz.tenantId)).some(
       (i) => i.id === "google-search-console" && i.status === "connected",
     );
+    const [titleRange, metaRange, h1Count] = await Promise.all([
+      getRuleRange(authz.tenantId, "content.meta_title.char_range", 55, 60),
+      getRuleRange(authz.tenantId, "content.meta_description.char_range", 150, 160),
+      getRuleNumber(authz.tenantId, "content.heading_rules.h1_count", 1),
+    ]);
     const [onpage, gsc] = await Promise.all([
-      auditUrl(project.website ?? ""),
+      auditUrl(project.website ?? "", { titleRange, metaRange, h1Count }),
       gscConnected ? fetchGscForClient(authz.tenantId, project.website) : Promise.resolve(null),
     ]);
     return NextResponse.json({ data: { onpage, gsc, gscConnected } });

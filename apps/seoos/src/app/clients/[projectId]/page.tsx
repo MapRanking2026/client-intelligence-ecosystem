@@ -9,6 +9,7 @@ import { GenerateAiRecsButton } from "@/src/components/generate-ai-recs-button";
 import { StartServiceButton } from "@/src/components/start-service-button";
 import { getProject } from "@/src/lib/server/projects-service";
 import { getClientHealth } from "@/src/lib/server/client-health-service";
+import { getRankingsIntel } from "@/src/lib/server/rankings-intelligence-service";
 import { getPerformanceSnapshotRepo } from "@/src/lib/server/repositories/performance-snapshot-repo";
 import { getKeywordRepo } from "@/src/lib/server/repositories/keyword-repo";
 import { getRecommendationRepo } from "@/src/lib/server/repositories/recommendation-repo";
@@ -50,9 +51,20 @@ export default async function ProjectSetupPage({
     getRecommendationRepo().listByProject(authz.tenantId, projectId),
   ]);
   const hasData = Boolean(snapshot && (snapshot.grids.length || snapshot.keywords.length));
-  const health = await getClientHealth(authz, project);
+  const [health, intel] = await Promise.all([
+    getClientHealth(authz, project),
+    getRankingsIntel(authz, project),
+  ]);
   const healthLabel =
     health.status === "at_risk" ? "At risk" : health.status === "needs_attention" ? "Needs attention" : "On track";
+  const intelBadge =
+    intel.verdict === "dominating"
+      ? { label: "Dominating", cls: "status-active", style: undefined as React.CSSProperties | undefined }
+      : intel.verdict === "low_performance"
+        ? { label: "Low performance", cls: "", style: { borderColor: "var(--danger)", color: "var(--danger)" } }
+        : intel.verdict === "progressing"
+          ? { label: "Progressing", cls: "badge--warn", style: undefined }
+          : { label: "No data", cls: "", style: undefined };
 
   return (
     <AppShell
@@ -119,6 +131,32 @@ export default async function ProjectSetupPage({
             ))}
           </ul>
         )}
+      </Panel>
+
+      <Panel title="Rankings intelligence">
+        <div className="toolbar" style={{ marginBottom: 10, alignItems: "center", gap: 12 }}>
+          <span className={`badge ${intelBadge.cls}`} style={intelBadge.style}>{intelBadge.label}</span>
+          {intel.verdict !== "no_data" ? (
+            <span className="muted" style={{ fontSize: 12 }}>
+              {intel.top3Keywords}/{intel.trackedKeywords} keywords in top {intel.applied.top3RankCutoff} · avg rank {intel.avgRank ?? "—"}
+            </span>
+          ) : null}
+        </div>
+        <p style={{ marginTop: 0, fontSize: 13 }}>{intel.headline}</p>
+        {intel.verdict === "dominating" ? (
+          <p className="muted" style={{ fontSize: 12, marginBottom: 0 }}>
+            Rule applied: {intel.trackedKeywords <= intel.applied.portfolioSize
+              ? `${intel.applied.top3CountRule}+ of the tracked keywords in the top ${intel.applied.top3RankCutoff}`
+              : `${intel.applied.top3PctRule}%+ of keywords in the top ${intel.applied.top3RankCutoff}`}
+            {" · "}<Link href="/rules">tune in Rule Library →</Link>
+          </p>
+        ) : intel.verdict === "low_performance" ? (
+          <p className="muted" style={{ fontSize: 12, marginBottom: 0 }}>
+            Low-Performance band {intel.applied.lowPerfBand[0]}-{intel.applied.lowPerfBand[1]} ·{" "}
+            <Link href={`/recommendations?projectId=${project.id}`}>build an improvement plan →</Link>
+            {" · "}<Link href="/rules">tune band →</Link>
+          </p>
+        ) : null}
       </Panel>
 
       {Object.keys(project.dashboardMetrics ?? {}).length ? (

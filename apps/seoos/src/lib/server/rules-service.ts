@@ -86,6 +86,24 @@ function parseLeadingNumber(raw: string | undefined): number | undefined {
   return Number.isFinite(n) ? n : undefined;
 }
 
+/**
+ * A rule expressed as a numeric range ("5-20" -> [5,20], "700-720" -> [700,720]).
+ * A single-number value returns [n, n]. Falls back to [fallbackLo, fallbackHi]
+ * when the rule is unknown/unparseable. Consumers that gate on a band read this.
+ */
+export async function getRuleRange(
+  tenantId: string,
+  key: string,
+  fallbackLo: number,
+  fallbackHi: number,
+): Promise<[number, number]> {
+  const raw = await getRuleValue(tenantId, key);
+  const nums = (raw?.match(/-?\d+(\.\d+)?/g) ?? []).map(Number).filter((n) => Number.isFinite(n));
+  if (nums.length === 0) return [fallbackLo, fallbackHi];
+  if (nums.length === 1) return [nums[0], nums[0]];
+  return [Math.min(nums[0], nums[1]), Math.max(nums[0], nums[1])];
+}
+
 /** Admin: save an override; takes effect immediately. */
 export async function upsertRule(
   tenantId: string,

@@ -118,14 +118,13 @@ export async function generateAiRecommendations(
   const ruleGuidance = await renderRuleGuidance(tenantId, [
     "grid.dominance.top3_count",
     "grid.dominance.top3_pct",
-    "rankings.top3.max_rank",
-    "market_share.headline_band",
-    "low_perf.avg_rank_band",
-    "gbp.description.char_target",
-    "gbp.additional_categories.max",
-    "posting.gbp_per_week",
-    "reviews.velocity.b2c_per_month",
-    "citations.monthly.build_count",
+    "market_share.definition_threshold",
+    "low_performance.avg_rank_band",
+    "gbp.business_description.target_range",
+    "gbp.secondary_category.max_count",
+    "posting.baseline_per_week",
+    "reviews.velocity.default_monthly_target",
+    "keyword_strategy.new_site_priority_sequence",
   ]);
 
   const user = buildUserPrompt({

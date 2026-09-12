@@ -103,15 +103,15 @@ export async function generateGbpAuditForViewer(
     : "Live GBP was unavailable (not connected or the Business Profile API isn't approved yet), so this audit is based on the client's services, niche, geo, and ClickUp SEO Dashboard fields — GBP profile items are flagged NEEDS INFO.";
 
   const ruleGuidance = await renderRuleGuidance(authz.tenantId, [
-    "gbp.description.char_target",
-    "gbp.service_description.char_max",
-    "gbp.additional_categories.max",
-    "gbp.service_area.warn_miles",
-    "gbp.hours.competitor_open_pct",
-    "posting.gbp_per_week",
-    "posting.photos_per_month",
-    "reviews.velocity.b2c_per_month",
+    "gbp.business_description.target_range",
+    "gbp.service_description.target_range",
+    "gbp.secondary_category.max_count",
+    "gbp.service_area.mr_target_radius_miles",
+    "gbp.hours.open_close_percentile",
+    "posting.baseline_per_week",
+    "reviews.velocity.default_monthly_target",
     "reviews.response_sla_hours",
+    "gbp.pre_mt_readiness.completeness_pct",
   ]);
   const system = await composeAiSystem(authz.tenantId, "gbp.audit", undefined, undefined);
   const user = buildContext(project, gbp, ruleGuidance);

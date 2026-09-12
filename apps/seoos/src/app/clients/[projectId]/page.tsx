@@ -11,6 +11,7 @@ import { getProject } from "@/src/lib/server/projects-service";
 import { getClientHealth } from "@/src/lib/server/client-health-service";
 import { getRankingsIntel } from "@/src/lib/server/rankings-intelligence-service";
 import { getMonthlyScoreReadout } from "@/src/lib/server/scoring-service";
+import { getLowPerformanceDiagnosis } from "@/src/lib/server/low-performance-service";
 import { getPerformanceSnapshotRepo } from "@/src/lib/server/repositories/performance-snapshot-repo";
 import { getKeywordRepo } from "@/src/lib/server/repositories/keyword-repo";
 import { getRecommendationRepo } from "@/src/lib/server/repositories/recommendation-repo";
@@ -57,6 +58,7 @@ export default async function ProjectSetupPage({
     getRankingsIntel(authz, project),
     getMonthlyScoreReadout(authz, project),
   ]);
+  const lpDiagnosis = await getLowPerformanceDiagnosis(authz, project, intel);
   const healthLabel =
     health.status === "at_risk" ? "At risk" : health.status === "needs_attention" ? "Needs attention" : "On track";
   const intelBadge =
@@ -160,6 +162,48 @@ export default async function ProjectSetupPage({
           </p>
         ) : null}
       </Panel>
+
+      {lpDiagnosis.applicable ? (
+        <Panel title="Low-Performance diagnosis">
+          <div className="toolbar" style={{ marginBottom: 8, alignItems: "center", gap: 12 }}>
+            <span className="badge" style={{ borderColor: "var(--danger)", color: "var(--danger)" }}>
+              {lpDiagnosis.subclassLabel}
+            </span>
+            <span className="muted" style={{ fontSize: 12 }}>
+              avg rank {lpDiagnosis.avgRank ?? "—"} · band {lpDiagnosis.band[0]}-{lpDiagnosis.band[1]}
+            </span>
+          </div>
+          <p style={{ marginTop: 0, fontSize: 13 }}>{lpDiagnosis.summary}</p>
+          <h4 style={{ margin: "10px 0 6px", fontSize: 13 }}>Improvement plan (by impact)</h4>
+          <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
+            {lpDiagnosis.plan.map((a, i) => (
+              <li key={i} style={{ display: "flex", gap: 8, marginBottom: 5, fontSize: 13 }}>
+                <span
+                  className="badge"
+                  style={{
+                    flex: "none",
+                    fontSize: 10,
+                    textTransform: "uppercase",
+                    borderColor: a.tier === "high" ? "var(--danger)" : a.tier === "medium" ? "#e0a500" : "var(--border)",
+                    color: a.tier === "high" ? "var(--danger)" : a.tier === "medium" ? "#e0a500" : "var(--muted)",
+                  }}
+                >
+                  {a.tier}
+                </span>
+                <span>{a.action}</span>
+              </li>
+            ))}
+          </ul>
+          <h4 style={{ margin: "12px 0 6px", fontSize: 13 }}>Confirm before committing the plan</h4>
+          <ul className="muted" style={{ fontSize: 12, marginTop: 0, marginBottom: 8, paddingLeft: 18 }}>
+            {lpDiagnosis.confirmNext.map((c, i) => (<li key={i}>{c}</li>))}
+          </ul>
+          <p className="muted" style={{ fontSize: 12, marginBottom: 0 }}>
+            <Link href={`/recommendations?projectId=${project.id}`}>Turn into recommendations →</Link>
+            {" · "}<Link href="/rules">tune the band →</Link>
+          </p>
+        </Panel>
+      ) : null}
 
       <Panel title="Monthly performance — Results pillar">
         {score.hasData ? (

@@ -5,6 +5,7 @@ import { AppShell } from "@/src/components/app-shell";
 import { EmptyState, Panel, StatCard, UnauthorizedPage } from "@/src/components/states";
 import { ClientSelect } from "@/src/components/client-select";
 import { AuditPanel } from "@/src/components/audit-panel";
+import { SiteAuditPanel } from "@/src/components/site-audit-panel";
 import { listProjectsForViewer } from "@/src/lib/server/projects-service";
 import { getContentPlan } from "@/src/lib/server/content-plan-service";
 
@@ -102,6 +103,7 @@ export default async function AuditsPage({
                 );
               })()}
               <AuditPanel projectId={selected.id} />
+              {selected.website ? <SiteAuditPanel projectId={selected.id} /> : null}
             </>
           ) : (
             <Panel title="Website Audits">

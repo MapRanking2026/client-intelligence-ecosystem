@@ -6,6 +6,7 @@ import { Panel, StatCard, UnauthorizedPage } from "@/src/components/states";
 import { getServerEnv, hasFirebaseAdminConfig, hasAiConfig, hasGoogleOAuth } from "@/src/lib/server/env";
 import { listSpecialists } from "@/src/lib/server/specialists-service";
 import { listProjectsForViewer } from "@/src/lib/server/projects-service";
+import { getTeamKpis } from "@/src/lib/server/team-kpi-service";
 import { SeedStylesButton } from "@/src/components/seed-styles-button";
 import { getUserRepo } from "@/src/lib/server/repositories/user-repo";
 import { UserAdmin } from "@/src/components/user-admin";
@@ -28,10 +29,11 @@ export default async function TeamPage() {
   }
 
   const env = getServerEnv();
-  const [specialists, projects, users] = await Promise.all([
+  const [specialists, projects, users, kpis] = await Promise.all([
     listSpecialists(authz.tenantId),
     listProjectsForViewer(authz),
     getUserRepo().list(authz.tenantId),
+    getTeamKpis(authz),
   ]);
   const managedUsers = users.map((u) => ({
     userId: u.userId,
@@ -75,6 +77,53 @@ export default async function TeamPage() {
             </tbody>
           </table>
         </div>
+      </Panel>
+
+      <Panel title="Team KPIs & workload">
+        <p className="muted" style={{ marginTop: 0, fontSize: 12 }}>
+          Task Execution % and Closed Tickets % per specialist, from task/ticket statuses. Targets from the{" "}
+          <Link href="/rules">Rule Library</Link> (Task Execution {kpis.taskExecutionTargetPct}%, Closed Tickets {kpis.ticketsClosedTargetPct}%).
+        </p>
+        {kpis.rows.length ? (
+          <div className="table-scroll">
+            <table className="data">
+              <thead>
+                <tr>
+                  <th>Specialist</th><th>Task Execution</th><th>Tasks (done/total)</th>
+                  <th>Closed Tickets</th><th>Open items</th>
+                </tr>
+              </thead>
+              <tbody>
+                {kpis.rows.map((r) => (
+                  <tr key={r.specialistId}>
+                    <td>{r.name}</td>
+                    <td>
+                      {r.taskExecutionPct == null ? (
+                        <span className="muted">—</span>
+                      ) : (
+                        <span
+                          className="badge"
+                          style={r.taskTargetMet ? { borderColor: "var(--ok,#3fb950)", color: "var(--ok,#3fb950)" } : { borderColor: "#e0a500", color: "#e0a500" }}
+                        >
+                          {r.taskExecutionPct}%
+                        </span>
+                      )}
+                    </td>
+                    <td className="muted">{r.tasksCompleted}/{r.tasksTotal}</td>
+                    <td className="muted">{r.ticketsClosedPct == null ? "—" : `${r.ticketsClosedPct}% (${r.ticketsClosed}/${r.ticketsTotal})`}</td>
+                    <td className="muted">{r.tasksOpen + r.ticketsOpen}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <p className="muted" style={{ fontSize: 13 }}>No tasks or tickets yet.</p>
+        )}
+        <p className="muted" style={{ fontSize: 12, marginBottom: 0 }}>
+          &ldquo;Open items&rdquo; is a count, not hours — the SOP&apos;s hours-based daily cap needs a per-task time
+          estimate SEOOS doesn&apos;t store yet.
+        </p>
       </Panel>
 
       <Panel title="User accounts">

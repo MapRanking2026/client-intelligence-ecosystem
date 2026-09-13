@@ -12,6 +12,7 @@ import { getClientHealth } from "@/src/lib/server/client-health-service";
 import { getRankingsIntel } from "@/src/lib/server/rankings-intelligence-service";
 import { getMonthlyScoreReadout } from "@/src/lib/server/scoring-service";
 import { getLowPerformanceDiagnosis } from "@/src/lib/server/low-performance-service";
+import { getOffboardingChecklist } from "@/src/lib/server/offboarding-service";
 import { getPerformanceSnapshotRepo } from "@/src/lib/server/repositories/performance-snapshot-repo";
 import { getKeywordRepo } from "@/src/lib/server/repositories/keyword-repo";
 import { getRecommendationRepo } from "@/src/lib/server/repositories/recommendation-repo";
@@ -59,6 +60,7 @@ export default async function ProjectSetupPage({
     getMonthlyScoreReadout(authz, project),
   ]);
   const lpDiagnosis = await getLowPerformanceDiagnosis(authz, project, intel);
+  const offboarding = canManage ? getOffboardingChecklist(project) : null;
   const healthLabel =
     health.status === "at_risk" ? "At risk" : health.status === "needs_attention" ? "Needs attention" : "On track";
   const intelBadge =
@@ -306,6 +308,47 @@ export default async function ProjectSetupPage({
           )}
         </Panel>
       </div>
+
+      {offboarding ? (
+        <details className="panel" open={offboarding.windingDown} style={{ marginBottom: 12 }}>
+          <summary style={{ cursor: "pointer", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            <strong>Offboarding checklist</strong>
+            {offboarding.windingDown ? <span className="badge badge--warn" style={{ fontSize: 11 }}>winding down</span> : null}
+            <span className="muted" style={{ fontSize: 12, marginLeft: "auto" }}>
+              {offboarding.counts.total} steps · {offboarding.counts.internal} SEOOS can do ·{" "}
+              {offboarding.outboundLocked ? `${offboarding.counts.externalBlocked} blocked by outbound lock` : "external steps unlocked"}
+            </span>
+          </summary>
+          {offboarding.outboundLocked ? (
+            <p className="muted" style={{ fontSize: 12, marginTop: 8 }}>
+              🔒 The outbound lock is ON — SEOOS will not change any external system. Do the external steps by hand,
+              or lift the lock (<code>SEOOS_OUTBOUND_UNLOCKED=true</code>) when ready. SEOOS can still do the internal
+              closure steps.
+            </p>
+          ) : null}
+          {[...new Set(offboarding.items.map((i) => i.group))].map((group) => (
+            <div key={group} style={{ marginTop: 10 }}>
+              <h4 style={{ margin: "0 0 4px", fontSize: 13 }}>{group}</h4>
+              <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
+                {offboarding.items.filter((i) => i.group === group).map((it, i) => (
+                  <li key={i} style={{ display: "flex", gap: 8, marginBottom: 4, fontSize: 13 }}>
+                    <span aria-hidden="true" style={{ flex: "none" }}>
+                      {it.external ? (offboarding.outboundLocked ? "🔒" : "↗") : "☑"}
+                    </span>
+                    <span>
+                      {it.label}
+                      {it.note ? <span className="muted" style={{ fontSize: 12 }}> — {it.note}</span> : null}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+          <p className="muted" style={{ fontSize: 12, marginTop: 10, marginBottom: 0 }}>
+            ☑ = SEOOS can do it internally · {offboarding.outboundLocked ? "🔒 = external, blocked by the lock" : "↗ = external"}
+          </p>
+        </details>
+      ) : null}
 
       <Panel title="Workspace">
         <div className="toolbar" style={{ flexWrap: "wrap", gap: 8 }}>

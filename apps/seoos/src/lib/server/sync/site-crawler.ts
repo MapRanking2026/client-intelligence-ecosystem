@@ -31,7 +31,27 @@ export interface CrawledPage {
   wordCount?: number;
   /** Count of same-origin links found on this page. */
   internalLinks: number;
+  /** Normalized phone numbers found on the page (from tel: links + JSON-LD). */
+  phones: string[];
+  /** Structured NAP from JSON-LD LocalBusiness/Organization, if present. */
+  structuredNap?: StructuredNap;
   error?: string;
+}
+
+export interface StructuredNap {
+  name?: string;
+  telephone?: string;
+  street?: string;
+  locality?: string;
+  region?: string;
+  postalCode?: string;
+}
+
+/** Digits-only US-normalized phone key (drops a leading country 1). Empty if unusable. */
+export function normalizePhone(raw: string): string {
+  const d = (raw || "").replace(/\D/g, "");
+  if (d.length === 11 && d.startsWith("1")) return d.slice(1);
+  return d.length >= 7 ? d : "";
 }
 
 export interface CrawlResult {
@@ -82,6 +102,77 @@ function attr(html: string, re: RegExp): string | undefined {
   return m?.[1]?.trim();
 }
 
+/** Walk a parsed JSON-LD value for the first node carrying NAP fields. */
+function findNapNode(node: unknown): StructuredNap | undefined {
+  if (!node || typeof node !== "object") return undefined;
+  if (Array.isArray(node)) {
+    for (const item of node) {
+      const hit = findNapNode(item);
+      if (hit) return hit;
+    }
+    return undefined;
+  }
+  const obj = node as Record<string, unknown>;
+  if (Array.isArray(obj["@graph"])) {
+    const hit = findNapNode(obj["@graph"]);
+    if (hit) return hit;
+  }
+  const telephone = typeof obj.telephone === "string" ? obj.telephone : undefined;
+  const addr = obj.address;
+  const hasNap = telephone || (addr && typeof addr === "object");
+  if (hasNap) {
+    const a = (typeof addr === "object" && addr ? addr : {}) as Record<string, unknown>;
+    const s = (v: unknown) => (typeof v === "string" ? v : undefined);
+    return {
+      name: s(obj.name),
+      telephone,
+      street: s(a.streetAddress),
+      locality: s(a.addressLocality),
+      region: s(a.addressRegion),
+      postalCode: s(a.postalCode),
+    };
+  }
+  // Recurse into nested objects (e.g. a wrapper with a nested LocalBusiness).
+  for (const v of Object.values(obj)) {
+    if (v && typeof v === "object") {
+      const hit = findNapNode(v);
+      if (hit) return hit;
+    }
+  }
+  return undefined;
+}
+
+function extractNap(html: string): { phones: string[]; structuredNap?: StructuredNap } {
+  const phoneSet = new Set<string>();
+  // tel: links are the reliable phone signal (visible-text patterns are too noisy).
+  const telRe = /href=["']tel:([^"']+)["']/gi;
+  let t: RegExpExecArray | null;
+  while ((t = telRe.exec(html)) !== null) {
+    const n = normalizePhone(decodeURIComponent(t[1]));
+    if (n) phoneSet.add(n);
+  }
+  // JSON-LD LocalBusiness/Organization structured NAP.
+  let structuredNap: StructuredNap | undefined;
+  const ldRe = /<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
+  let m: RegExpExecArray | null;
+  while ((m = ldRe.exec(html)) !== null) {
+    try {
+      const parsed = JSON.parse(m[1].trim());
+      const nap = findNapNode(parsed);
+      if (nap) {
+        if (!structuredNap) structuredNap = nap;
+        if (nap.telephone) {
+          const n = normalizePhone(nap.telephone);
+          if (n) phoneSet.add(n);
+        }
+      }
+    } catch {
+      /* invalid JSON-LD — skip */
+    }
+  }
+  return { phones: [...phoneSet], structuredNap };
+}
+
 function analyze(html: string): Pick<
   CrawledPage,
   | "title"
@@ -93,6 +184,8 @@ function analyze(html: string): Pick<
   | "canonicalUrl"
   | "robotsNoindex"
   | "wordCount"
+  | "phones"
+  | "structuredNap"
 > & { links: string[] } {
   const title = attr(html, /<title[^>]*>([\s\S]*?)<\/title>/i);
   const metaDescription = attr(
@@ -109,6 +202,7 @@ function analyze(html: string): Pick<
     .replace(/\s+/g, " ")
     .trim();
   const wordCount = text ? text.split(" ").length : 0;
+  const { phones, structuredNap } = extractNap(html);
 
   const links: string[] = [];
   const linkRe = /<a\b[^>]*\shref=["']([^"']+)["']/gi;
@@ -129,6 +223,8 @@ function analyze(html: string): Pick<
     canonicalUrl,
     robotsNoindex,
     wordCount,
+    phones,
+    structuredNap,
     links,
   };
 }
@@ -165,6 +261,7 @@ async function fetchPage(
           hasCanonical: false,
           robotsNoindex: false,
           internalLinks: 0,
+          phones: [],
         },
         sameOriginLinks: [],
       };
@@ -202,6 +299,8 @@ async function fetchPage(
         robotsNoindex: a.robotsNoindex,
         wordCount: a.wordCount,
         internalLinks: sameOriginLinks.length,
+        phones: a.phones,
+        structuredNap: a.structuredNap,
       },
       sameOriginLinks,
     };
@@ -216,6 +315,7 @@ async function fetchPage(
         hasCanonical: false,
         robotsNoindex: false,
         internalLinks: 0,
+        phones: [],
         error: e instanceof Error ? (e.name === "AbortError" ? "timeout" : e.message) : "fetch_failed",
       },
       sameOriginLinks: [],

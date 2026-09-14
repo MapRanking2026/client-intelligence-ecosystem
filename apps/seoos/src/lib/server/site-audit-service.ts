@@ -1,7 +1,7 @@
 import type { AuthzContextV1 } from "@cie/contracts";
 
 import type { SeoProjectV1 } from "@/src/lib/domain/project";
-import { crawlSite, type CrawledPage, type CrawlResult } from "@/src/lib/server/sync/site-crawler";
+import { crawlSite, normalizePhone, type CrawledPage, type CrawlResult, type StructuredNap } from "@/src/lib/server/sync/site-crawler";
 import { getRuleNumber, getRuleRange } from "@/src/lib/server/rules-service";
 
 /**
@@ -47,11 +47,123 @@ export interface SiteAudit {
     maxDepthSeen: number;
   };
   issues: SiteIssue[];
+  nap: NapConsistency;
   pages: CrawledPage[];
   notes: string[];
 }
 
+/**
+ * NAP (Name / Address / Phone) consistency — the read-only half of M5. SEOOS
+ * holds no structured phone/address, so the client's own website is the
+ * authoritative source: we read the phone (tel: links) and structured NAP
+ * (JSON-LD LocalBusiness) it publishes, and check the site is internally
+ * consistent. Building/submitting external citations (BrightLocal etc.) is
+ * outbound and stays deferred — this produces the master NAP + alignment plan.
+ */
+export interface NapConsistency {
+  canonicalName: string;
+  targetPct: number;
+  phones: Array<{ phone: string; display: string; pages: number }>;
+  primaryPhone?: string;
+  phoneConsistent: boolean;
+  pagesWithPhone: number;
+  pagesScanned: number;
+  structuredNapPresent: boolean;
+  structuredNap?: StructuredNap;
+  nameMatchesStructured?: boolean;
+  issues: string[];
+  directoryChecklist: Array<{ name: string; note: string }>;
+}
+
 const EX_CAP = 6;
+
+const CITATION_DIRECTORIES = [
+  "Google Business Profile",
+  "Bing Places",
+  "Apple Business Connect",
+  "Facebook Page",
+  "Yelp",
+  "Better Business Bureau",
+  "YellowPages",
+  "Foursquare",
+];
+
+function displayPhone(digits: string): string {
+  return digits.length === 10 ? `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}` : digits;
+}
+
+function napNorm(s: string): string {
+  return s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+function completeness(n: StructuredNap): number {
+  return [n.name, n.telephone, n.street, n.locality, n.region, n.postalCode].filter(Boolean).length;
+}
+
+function computeNap(htmlPages: CrawledPage[], businessName: string, targetPct: number): NapConsistency {
+  // Phone: count how many pages each distinct number appears on.
+  const phoneCounts = new Map<string, number>();
+  let pagesWithPhone = 0;
+  for (const p of htmlPages) {
+    if (p.phones.length) pagesWithPhone++;
+    for (const raw of p.phones) {
+      const n = normalizePhone(raw);
+      if (n) phoneCounts.set(n, (phoneCounts.get(n) ?? 0) + 1);
+    }
+  }
+  const phones = [...phoneCounts.entries()]
+    .map(([phone, pages]) => ({ phone, display: displayPhone(phone), pages }))
+    .sort((a, b) => b.pages - a.pages);
+  const primaryPhone = phones[0]?.display;
+  const phoneConsistent = phones.length <= 1;
+
+  // Structured NAP: pick the most complete JSON-LD node seen anywhere.
+  let structuredNap: StructuredNap | undefined;
+  for (const p of htmlPages) {
+    if (p.structuredNap && (!structuredNap || completeness(p.structuredNap) > completeness(structuredNap))) {
+      structuredNap = p.structuredNap;
+    }
+  }
+  const structuredNapPresent = Boolean(structuredNap);
+  const nameMatchesStructured = structuredNap?.name
+    ? napNorm(structuredNap.name).includes(napNorm(businessName)) || napNorm(businessName).includes(napNorm(structuredNap.name))
+    : undefined;
+
+  const issues: string[] = [];
+  if (phones.length > 1) {
+    issues.push(`Site shows ${phones.length} different phone numbers (${phones.map((p) => p.display).join(", ")}). Pick one and make it consistent everywhere — the M5 target is ${targetPct}%.`);
+  } else if (phones.length === 0) {
+    issues.push("No phone number found on the site (no tel: link or JSON-LD telephone). Add a clickable phone so it can be verified against citations.");
+  }
+  if (!structuredNapPresent) {
+    issues.push("No LocalBusiness structured data (JSON-LD) found — add it so Google reads the business name, address, and phone unambiguously.");
+  } else if (nameMatchesStructured === false) {
+    issues.push(`Structured-data business name "${structuredNap!.name}" differs from the tracked name "${businessName}". Align them before building citations.`);
+  }
+  if (!structuredNap?.street || !structuredNap?.postalCode) {
+    issues.push("No full street address in structured data — the master NAP address can't be locked from the site alone. Confirm it from the client's records.");
+  }
+
+  const directoryChecklist = CITATION_DIRECTORIES.map((name) => ({
+    name,
+    note: "Match to the master NAP. Verification/submission runs after the outbound lock lifts (needs the citation tool).",
+  }));
+
+  return {
+    canonicalName: businessName,
+    targetPct,
+    phones,
+    primaryPhone,
+    phoneConsistent,
+    pagesWithPhone,
+    pagesScanned: htmlPages.length,
+    structuredNapPresent,
+    structuredNap,
+    nameMatchesStructured,
+    issues,
+    directoryChecklist,
+  };
+}
 
 function examples(pages: CrawledPage[]): string[] {
   return pages.slice(0, EX_CAP).map((p) => p.url);
@@ -75,11 +187,12 @@ export async function getSiteAudit(
   project: SeoProjectV1,
 ): Promise<SiteAudit> {
   const tenantId = authz.tenantId;
-  const [titleRange, metaRange, h1Count, maxDepthClicks] = await Promise.all([
+  const [titleRange, metaRange, h1Count, maxDepthClicks, napTargetPct] = await Promise.all([
     getRuleRange(tenantId, "content.meta_title.char_range", 55, 60),
     getRuleRange(tenantId, "content.meta_description.char_range", 150, 160),
     getRuleNumber(tenantId, "content.heading_rules.h1_count", 1),
     getRuleNumber(tenantId, "architecture.max_depth_clicks", 3),
+    getRuleNumber(tenantId, "citations.nap_consistency_target_pct", 100),
   ]);
   const thinWords = 200;
   const thresholds = { titleRange, metaRange, h1Count, maxDepthClicks, thinWords };
@@ -101,6 +214,7 @@ export async function getSiteAudit(
       thresholds,
       summary: { indexablePages: 0, noindexPages: 0, brokenPages: 0, avgWordCount: 0, maxDepthSeen: 0 },
       issues: [],
+      nap: computeNap([], project.businessName, napTargetPct),
       pages: [],
       notes: [],
     };
@@ -256,6 +370,7 @@ export async function getSiteAudit(
       maxDepthSeen,
     },
     issues,
+    nap: computeNap(html, project.businessName, napTargetPct),
     pages: all,
     notes,
   };

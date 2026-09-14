@@ -24,7 +24,29 @@ interface SiteAudit {
   thresholds: { titleRange: [number, number]; metaRange: [number, number]; h1Count: number; maxDepthClicks: number; thinWords: number };
   summary: { indexablePages: number; noindexPages: number; brokenPages: number; avgWordCount: number; maxDepthSeen: number };
   issues: SiteIssue[];
+  nap: NapConsistency;
   notes: string[];
+}
+interface StructuredNap { name?: string; telephone?: string; street?: string; locality?: string; region?: string; postalCode?: string }
+interface NapConsistency {
+  canonicalName: string;
+  targetPct: number;
+  phones: Array<{ phone: string; display: string; pages: number }>;
+  primaryPhone?: string;
+  phoneConsistent: boolean;
+  pagesWithPhone: number;
+  pagesScanned: number;
+  structuredNapPresent: boolean;
+  structuredNap?: StructuredNap;
+  nameMatchesStructured?: boolean;
+  issues: string[];
+  directoryChecklist: Array<{ name: string; note: string }>;
+}
+
+function formatAddress(n?: StructuredNap): string {
+  if (!n) return "—";
+  const parts = [n.street, n.locality, [n.region, n.postalCode].filter(Boolean).join(" ")].filter(Boolean);
+  return parts.length ? parts.join(", ") : "—";
 }
 
 const SEV_COLOR: Record<Severity, string> = { high: "#f85149", medium: "#d29922", low: "#8b949e" };
@@ -114,7 +136,66 @@ export function SiteAuditPanel({ projectId }: { projectId: string }) {
             <p className="muted" style={{ fontSize: 13 }}>No site-wide issues found across the crawled pages. 🎉</p>
           )}
 
-          <p className="muted" style={{ fontSize: 12, marginTop: 10, marginBottom: 0 }}>
+          <div style={{ marginTop: 16, paddingTop: 12, borderTop: "1px solid var(--border)" }}>
+            <h4 style={{ margin: "0 0 8px", fontSize: 13 }}>
+              NAP consistency (M5){" "}
+              <span
+                className="badge"
+                style={data.nap.phoneConsistent && data.nap.structuredNapPresent ? { borderColor: SEV_COLOR.low, color: "#3fb950", fontSize: 10 } : { borderColor: SEV_COLOR.medium, color: SEV_COLOR.medium, fontSize: 10 }}
+              >
+                target {data.nap.targetPct}%
+              </span>
+            </h4>
+            <div className="table-scroll">
+              <table className="data">
+                <tbody>
+                  <tr><td style={{ width: 140 }} className="muted">Name (tracked)</td><td>{data.nap.canonicalName}</td></tr>
+                  <tr>
+                    <td className="muted">Phone(s) on site</td>
+                    <td>
+                      {data.nap.phones.length === 0 ? (
+                        <span style={{ color: SEV_COLOR.medium }}>none found</span>
+                      ) : (
+                        data.nap.phones.map((p) => (
+                          <span key={p.phone} style={{ marginRight: 10 }}>
+                            {p.display} <span className="muted" style={{ fontSize: 11 }}>({p.pages} pg)</span>
+                          </span>
+                        ))
+                      )}
+                      {data.nap.phones.length > 1 ? <span style={{ color: SEV_COLOR.high, fontWeight: 600 }}> ⚠ inconsistent</span> : null}
+                    </td>
+                  </tr>
+                  <tr>
+                    <td className="muted">Structured NAP</td>
+                    <td>
+                      {data.nap.structuredNapPresent ? (
+                        <>JSON-LD: {data.nap.structuredNap?.name ?? "—"} · {formatAddress(data.nap.structuredNap)}</>
+                      ) : (
+                        <span style={{ color: SEV_COLOR.medium }}>no LocalBusiness JSON-LD</span>
+                      )}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            {data.nap.issues.length ? (
+              <ul style={{ margin: "8px 0 0", paddingLeft: 18, fontSize: 13 }}>
+                {data.nap.issues.map((iss, i) => (<li key={i} style={{ marginBottom: 3 }}>{iss}</li>))}
+              </ul>
+            ) : (
+              <p className="muted" style={{ fontSize: 13, margin: "8px 0 0" }}>Site NAP looks internally consistent.</p>
+            )}
+            <details style={{ marginTop: 8 }}>
+              <summary style={{ cursor: "pointer", fontSize: 12 }}>Citation alignment checklist ({data.nap.directoryChecklist.length}) — submission deferred until unlock</summary>
+              <ul style={{ margin: "6px 0 0", paddingLeft: 18, fontSize: 12 }}>
+                {data.nap.directoryChecklist.map((d) => (
+                  <li key={d.name} style={{ marginBottom: 2 }}><strong>{d.name}</strong> <span className="muted">— {d.note}</span></li>
+                ))}
+              </ul>
+            </details>
+          </div>
+
+          <p className="muted" style={{ fontSize: 12, marginTop: 12, marginBottom: 0 }}>
             Thresholds from the Rule Library — title {data.thresholds.titleRange[0]}–{data.thresholds.titleRange[1]},
             meta {data.thresholds.metaRange[0]}–{data.thresholds.metaRange[1]}, H1 {data.thresholds.h1Count},
             max depth {data.thresholds.maxDepthClicks} clicks. Avg {data.summary.avgWordCount} words/page ·

@@ -1,7 +1,7 @@
 import type { AuthzContextV1 } from "@cie/contracts";
 
 import type { SeoProjectV1 } from "@/src/lib/domain/project";
-import { crawlSite, normalizePhone, type CrawledPage, type CrawlResult, type StructuredNap } from "@/src/lib/server/sync/site-crawler";
+import { crawlSite, fetchSitemap, canonicalKey, normalizePhone, type CrawledPage, type CrawlResult, type SitemapResult, type StructuredNap } from "@/src/lib/server/sync/site-crawler";
 import { getRuleNumber, getRuleRange } from "@/src/lib/server/rules-service";
 
 /**
@@ -48,7 +48,30 @@ export interface SiteAudit {
   };
   issues: SiteIssue[];
   nap: NapConsistency;
+  indexation: IndexationAudit;
   pages: CrawledPage[];
+  notes: string[];
+}
+
+/**
+ * Indexation coverage — reconcile the sitemap's declared URLs against what the
+ * crawl could actually reach from the homepage. "In sitemap, not reached" is the
+ * honest orphan signal (a page declared for indexing that nothing links to, OR
+ * simply beyond the crawl budget — the notes say which). "Reached, not in
+ * sitemap" flags pages missing from the sitemap. Read-only.
+ */
+export interface IndexationAudit {
+  sitemapFound: boolean;
+  sitemapUrlCount: number;
+  sitemapSources: string[];
+  sitemapTruncated: boolean;
+  reachablePages: number;
+  notReached: string[];
+  notReachedCount: number;
+  notInSitemap: string[];
+  notInSitemapCount: number;
+  hubs: Array<{ url: string; outboundLinks: number }>;
+  reliableOrphanCheck: boolean;
   notes: string[];
 }
 
@@ -182,6 +205,75 @@ function duplicateGroups(pages: CrawledPage[], pick: (p: CrawledPage) => string 
   return dupes;
 }
 
+const LIST_CAP = 25;
+
+function computeIndexation(crawl: CrawlResult, sitemap: SitemapResult, htmlPages: CrawledPage[]): IndexationAudit {
+  const notes: string[] = [];
+  // Canonical keys of every page the crawl reached (any status).
+  const reachedKeys = new Set<string>();
+  for (const p of crawl.pages) {
+    const k = canonicalKey(p.url);
+    if (k) reachedKeys.add(k);
+  }
+  // Canonical keys declared in the sitemap.
+  const sitemapKeys = new Map<string, string>(); // key -> original URL (for display)
+  for (const u of sitemap.urls) {
+    const k = canonicalKey(u);
+    if (k && !sitemapKeys.has(k)) sitemapKeys.set(k, u);
+  }
+
+  // In sitemap, not reached by crawl.
+  const notReachedAll: string[] = [];
+  for (const [k, u] of sitemapKeys) if (!reachedKeys.has(k)) notReachedAll.push(u);
+
+  // Reached (indexable HTML) but not declared in sitemap.
+  const notInSitemapAll: string[] = [];
+  if (sitemap.found) {
+    for (const p of htmlPages) {
+      if (p.robotsNoindex) continue;
+      const k = canonicalKey(p.url);
+      if (k && !sitemapKeys.has(k)) notInSitemapAll.push(p.url);
+    }
+  }
+
+  // Hubs: crawled pages with the most outbound internal links (context, not a flag).
+  const hubs = [...crawl.pages]
+    .filter((p) => p.ok)
+    .sort((a, b) => b.internalLinks - a.internalLinks)
+    .slice(0, 5)
+    .map((p) => ({ url: p.url, outboundLinks: p.internalLinks }));
+
+  // Orphan reliability: only trustworthy if the crawl wasn't budget-limited.
+  const reliableOrphanCheck = !crawl.reachedCap && crawl.discoveredNotCrawled === 0;
+
+  if (!sitemap.found) {
+    notes.push("No readable sitemap.xml found (checked robots.txt and /sitemap.xml). A sitemap helps Google discover every page.");
+  } else {
+    notes.push(`Sitemap declares ${sitemap.urls.length} URL(s) across ${sitemap.sources.length} file(s).`);
+    if (sitemap.truncated) notes.push("Sitemap inventory was truncated at the read cap; counts are a floor.");
+  }
+  if (sitemap.found && !reliableOrphanCheck) {
+    notes.push('"Declared but not reached" is unreliable here — the crawl hit its page/budget cap, so some of these are simply un-crawled, not orphaned. Increase confidence by comparing against a full crawl.');
+  } else if (sitemap.found && notReachedAll.length) {
+    notes.push('"Declared but not reached" pages are likely orphans — in the sitemap but not linked from any crawled page.');
+  }
+
+  return {
+    sitemapFound: sitemap.found,
+    sitemapUrlCount: sitemap.urls.length,
+    sitemapSources: sitemap.sources,
+    sitemapTruncated: sitemap.truncated,
+    reachablePages: reachedKeys.size,
+    notReached: notReachedAll.slice(0, LIST_CAP),
+    notReachedCount: notReachedAll.length,
+    notInSitemap: notInSitemapAll.slice(0, LIST_CAP),
+    notInSitemapCount: notInSitemapAll.length,
+    hubs,
+    reliableOrphanCheck,
+    notes,
+  };
+}
+
 export async function getSiteAudit(
   authz: AuthzContextV1,
   project: SeoProjectV1,
@@ -197,9 +289,12 @@ export async function getSiteAudit(
   const thinWords = 200;
   const thresholds = { titleRange, metaRange, h1Count, maxDepthClicks, thinWords };
 
-  const crawl: CrawlResult = await crawlSite(project.website ?? "", {
-    maxDepth: maxDepthClicks + 1, // one past the limit so we can flag pages that violate it
-  });
+  const [crawl, sitemap]: [CrawlResult, SitemapResult] = await Promise.all([
+    crawlSite(project.website ?? "", {
+      maxDepth: maxDepthClicks + 1, // one past the limit so we can flag pages that violate it
+    }),
+    fetchSitemap(project.website ?? ""),
+  ]);
 
   if (!crawl.ok) {
     return {
@@ -215,6 +310,7 @@ export async function getSiteAudit(
       summary: { indexablePages: 0, noindexPages: 0, brokenPages: 0, avgWordCount: 0, maxDepthSeen: 0 },
       issues: [],
       nap: computeNap([], project.businessName, napTargetPct),
+      indexation: computeIndexation(crawl, sitemap, []),
       pages: [],
       notes: [],
     };
@@ -371,6 +467,7 @@ export async function getSiteAudit(
     },
     issues,
     nap: computeNap(html, project.businessName, napTargetPct),
+    indexation: computeIndexation(crawl, sitemap, html),
     pages: all,
     notes,
   };

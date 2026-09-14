@@ -25,6 +25,21 @@ interface SiteAudit {
   summary: { indexablePages: number; noindexPages: number; brokenPages: number; avgWordCount: number; maxDepthSeen: number };
   issues: SiteIssue[];
   nap: NapConsistency;
+  indexation: IndexationAudit;
+  notes: string[];
+}
+interface IndexationAudit {
+  sitemapFound: boolean;
+  sitemapUrlCount: number;
+  sitemapSources: string[];
+  sitemapTruncated: boolean;
+  reachablePages: number;
+  notReached: string[];
+  notReachedCount: number;
+  notInSitemap: string[];
+  notInSitemapCount: number;
+  hubs: Array<{ url: string; outboundLinks: number }>;
+  reliableOrphanCheck: boolean;
   notes: string[];
 }
 interface StructuredNap { name?: string; telephone?: string; street?: string; locality?: string; region?: string; postalCode?: string }
@@ -193,6 +208,52 @@ export function SiteAuditPanel({ projectId }: { projectId: string }) {
                 ))}
               </ul>
             </details>
+          </div>
+
+          <div style={{ marginTop: 16, paddingTop: 12, borderTop: "1px solid var(--border)" }}>
+            <h4 style={{ margin: "0 0 8px", fontSize: 13 }}>
+              Indexation &amp; sitemap coverage{" "}
+              <span
+                className="badge"
+                style={data.indexation.sitemapFound ? { borderColor: SEV_COLOR.low, color: "#3fb950", fontSize: 10 } : { borderColor: SEV_COLOR.medium, color: SEV_COLOR.medium, fontSize: 10 }}
+              >
+                {data.indexation.sitemapFound ? `sitemap: ${data.indexation.sitemapUrlCount} URLs` : "no sitemap"}
+              </span>
+            </h4>
+            <div className="grid-cards" style={{ marginBottom: 8 }}>
+              <div className="stat-card"><div className="stat-value">{data.indexation.reachablePages}</div><div className="stat-label">Reached by crawl</div></div>
+              <div className="stat-card"><div className="stat-value" style={{ color: data.indexation.notReachedCount ? SEV_COLOR.medium : undefined }}>{data.indexation.notReachedCount}</div><div className="stat-label">Declared, not reached</div></div>
+              <div className="stat-card"><div className="stat-value" style={{ color: data.indexation.notInSitemapCount ? SEV_COLOR.medium : undefined }}>{data.indexation.notInSitemapCount}</div><div className="stat-label">Reached, not in sitemap</div></div>
+            </div>
+            {data.indexation.notReachedCount ? (
+              <details style={{ marginBottom: 4 }}>
+                <summary style={{ cursor: "pointer", fontSize: 12 }}>
+                  Declared but not reached{data.indexation.reliableOrphanCheck ? " (likely orphans)" : " (may be beyond crawl budget)"} — showing {data.indexation.notReached.length} of {data.indexation.notReachedCount}
+                </summary>
+                <ul style={{ margin: "4px 0 0", paddingLeft: 16, fontSize: 12 }}>
+                  {data.indexation.notReached.map((u, i) => (<li key={i} style={{ wordBreak: "break-all" }}>{u}</li>))}
+                </ul>
+              </details>
+            ) : null}
+            {data.indexation.notInSitemapCount ? (
+              <details style={{ marginBottom: 4 }}>
+                <summary style={{ cursor: "pointer", fontSize: 12 }}>Reached but missing from sitemap — showing {data.indexation.notInSitemap.length} of {data.indexation.notInSitemapCount}</summary>
+                <ul style={{ margin: "4px 0 0", paddingLeft: 16, fontSize: 12 }}>
+                  {data.indexation.notInSitemap.map((u, i) => (<li key={i} style={{ wordBreak: "break-all" }}>{u}</li>))}
+                </ul>
+              </details>
+            ) : null}
+            {data.indexation.hubs.length ? (
+              <details style={{ marginBottom: 4 }}>
+                <summary style={{ cursor: "pointer", fontSize: 12 }}>Top internal-link hubs</summary>
+                <ul style={{ margin: "4px 0 0", paddingLeft: 16, fontSize: 12 }}>
+                  {data.indexation.hubs.map((h, i) => (<li key={i} style={{ wordBreak: "break-all" }}>{h.url} <span className="muted">— {h.outboundLinks} internal links</span></li>))}
+                </ul>
+              </details>
+            ) : null}
+            {data.indexation.notes.length ? (
+              <p className="muted" style={{ fontSize: 12, margin: "6px 0 0" }}>{data.indexation.notes.join(" ")}</p>
+            ) : null}
           </div>
 
           <p className="muted" style={{ fontSize: 12, marginTop: 12, marginBottom: 0 }}>

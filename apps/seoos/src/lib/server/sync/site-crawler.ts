@@ -97,6 +97,15 @@ function canonKey(u: URL): string {
   return `${u.origin}${path.toLowerCase()}`;
 }
 
+/** Public canonical key for a raw URL string (same rule the crawler dedupes on). */
+export function canonicalKey(rawUrl: string): string | null {
+  try {
+    return canonKey(new URL(rawUrl));
+  } catch {
+    return null;
+  }
+}
+
 function attr(html: string, re: RegExp): string | undefined {
   const m = html.match(re);
   return m?.[1]?.trim();
@@ -392,4 +401,109 @@ export async function crawlSite(rawUrl: string, opts: CrawlOptions = {}): Promis
     cap,
     durationMs: Date.now() - started,
   };
+}
+
+export interface SitemapResult {
+  found: boolean;
+  /** Declared page URLs (deduped, capped). */
+  urls: string[];
+  /** Sitemap files actually read (robots.txt Sitemap: lines + /sitemap.xml). */
+  sources: string[];
+  truncated: boolean;
+}
+
+async function fetchText(url: string, timeoutMs: number): Promise<string | null> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, {
+      redirect: "follow",
+      signal: controller.signal,
+      headers: { "user-agent": "SEOOS-Audit/1.0 (+seo site audit; read-only)" },
+      cache: "no-store",
+    });
+    if (!res.ok) return null;
+    return await res.text();
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function extractLocs(xml: string): string[] {
+  const out: string[] = [];
+  const re = /<loc>\s*([\s\S]*?)\s*<\/loc>/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(xml)) !== null) {
+    const v = m[1].trim().replace(/&amp;/g, "&");
+    if (v) out.push(v);
+  }
+  return out;
+}
+
+/**
+ * Fetch the site's declared URL inventory from its sitemap(s). Read-only.
+ * Reads robots.txt for Sitemap: directives, falls back to /sitemap.xml, and
+ * resolves one level of sitemap-index nesting. Bounded on files, URLs, and time;
+ * gzipped sitemaps (.xml.gz) are skipped (noted by the caller). Never fabricates
+ * — returns found:false if no sitemap is readable.
+ */
+export async function fetchSitemap(
+  rawUrl: string,
+  opts: { maxUrls?: number; maxSitemaps?: number; perFetchTimeoutMs?: number } = {},
+): Promise<SitemapResult> {
+  const maxUrls = opts.maxUrls ?? 3000;
+  const maxSitemaps = opts.maxSitemaps ?? 12;
+  const timeoutMs = opts.perFetchTimeoutMs ?? 10000;
+  const empty: SitemapResult = { found: false, urls: [], sources: [], truncated: false };
+  if (!rawUrl?.trim()) return empty;
+
+  let origin: string;
+  try {
+    origin = new URL(normalizeStart(rawUrl)).origin;
+  } catch {
+    return empty;
+  }
+
+  // 1) Candidate sitemap URLs: robots.txt Sitemap: lines, then /sitemap.xml.
+  const candidates: string[] = [];
+  const robots = await fetchText(`${origin}/robots.txt`, timeoutMs);
+  if (robots) {
+    for (const line of robots.split(/\r?\n/)) {
+      const m = line.match(/^\s*sitemap:\s*(\S+)/i);
+      if (m) candidates.push(m[1].trim());
+    }
+  }
+  if (candidates.length === 0) candidates.push(`${origin}/sitemap.xml`);
+
+  const sources: string[] = [];
+  const urlSet = new Set<string>();
+  let fetched = 0;
+  let truncated = false;
+  const queue = [...candidates];
+  const seenSitemaps = new Set<string>();
+
+  while (queue.length && fetched < maxSitemaps && urlSet.size < maxUrls) {
+    const sm = queue.shift()!;
+    if (seenSitemaps.has(sm) || /\.gz(\?|$)/i.test(sm)) continue;
+    seenSitemaps.add(sm);
+    const xml = await fetchText(sm, timeoutMs);
+    fetched++;
+    if (!xml) continue;
+    sources.push(sm);
+    const isIndex = /<sitemapindex[\s>]/i.test(xml);
+    const locs = extractLocs(xml);
+    if (isIndex) {
+      for (const child of locs) if (!seenSitemaps.has(child)) queue.push(child);
+    } else {
+      for (const u of locs) {
+        if (urlSet.size >= maxUrls) { truncated = true; break; }
+        urlSet.add(u);
+      }
+    }
+  }
+  if (queue.length && (fetched >= maxSitemaps || urlSet.size >= maxUrls)) truncated = true;
+
+  return { found: sources.length > 0, urls: [...urlSet], sources, truncated };
 }

@@ -108,15 +108,23 @@ export async function POST(request: Request) {
     const user = await repo.getById(authz.tenantId, userId);
     if (!user) return NextResponse.json({ error: "User not found" }, { status: 404 });
     const next = { ...user, updatedAt: now };
+    let temp: string | null = null;
     if (typeof displayName === "string" && displayName.trim()) next.displayName = displayName.trim();
     if (makeAdmin) {
       next.roles = ["tenant_admin"];
       next.clientVisibility = "all";
     }
     if (typeof disabled === "boolean") next.disabled = disabled;
-    if (forceReset) next.mustResetPassword = true;
+    if (forceReset) {
+      temp = tempPassword();
+      const { salt, hash } = hashPassword(temp);
+      next.passwordSalt = salt;
+      next.passwordHash = hash;
+      next.mustResetPassword = true;
+      next.disabled = false;
+    }
     await repo.save(SeoUserV1.parse(next));
-    return NextResponse.json({ data: { userId, ok: true } });
+    return NextResponse.json({ data: { userId, ok: true, tempPassword: temp } });
   } catch (e) {
     if (e instanceof AuthzError) return NextResponse.json({ error: e.message }, { status: 403 });
     return NextResponse.json({ error: e instanceof Error ? e.message : "Failed" }, { status: 400 });

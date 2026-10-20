@@ -50,6 +50,7 @@ export function UserAdmin({ users }: { users: ManagedUser[] }) {
   async function act(userId: string, patch: Record<string, unknown>) {
     setBusy(true);
     setMsg(null);
+    setTemp(null);
     try {
       const res = await fetch("/api/seo/users", {
         method: "POST",
@@ -58,7 +59,13 @@ export function UserAdmin({ users }: { users: ManagedUser[] }) {
       });
       const body = await res.json().catch(() => null);
       if (!res.ok) setMsg((body && body.error) || "Update failed");
-      else router.refresh();
+      else {
+        const resetUser = users.find((u) => u.userId === userId);
+        if (body?.data?.tempPassword && resetUser) {
+          setTemp({ email: resetUser.email, tempPassword: body.data.tempPassword });
+        }
+        router.refresh();
+      }
     } finally {
       setBusy(false);
     }

@@ -15,6 +15,8 @@ export const SeoUserV1 = z.object({
   disabled: z.boolean().default(false),
   /** When true, the next successful login forces the user to set a new password. */
   mustResetPassword: z.boolean().optional(),
+  passwordResetTokenHash: z.string().optional(),
+  passwordResetExpiresAt: z.string().optional(),
   createdAt: zIsoTimestamp,
   updatedAt: zIsoTimestamp,
 });

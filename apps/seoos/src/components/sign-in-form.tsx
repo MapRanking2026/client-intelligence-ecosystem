@@ -17,6 +17,29 @@ export function SignInForm() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
+  async function forgotPassword() {
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const res = await fetch("/api/auth/forgot-password", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ email }),
+      });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) {
+        setError((body && body.error) || "Could not send reset email");
+        return;
+      }
+      setNotice("If that email exists, a reset link has been sent.");
+    } catch {
+      setError("Could not send reset email");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setBusy(true);
@@ -81,6 +104,16 @@ export function SignInForm() {
         autoComplete={mode === "signin" ? "current-password" : "new-password"} required
         minLength={mode === "signup" ? 8 : undefined} />
       {mode === "signup" ? <p className="muted" style={{ fontSize: 12, margin: "4px 0 0" }}>At least 8 characters.</p> : null}
+      {mode === "signin" ? (
+        <button
+          type="button"
+          onClick={forgotPassword}
+          disabled={busy || !email}
+          style={{ ...ghost, marginTop: 8, padding: "4px 8px" }}
+        >
+          Forgot password?
+        </button>
+      ) : null}
 
       {mode === "signup" ? (
         <>

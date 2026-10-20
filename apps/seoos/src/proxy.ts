@@ -20,6 +20,9 @@ export async function proxy(request: NextRequest) {
     path.startsWith("/api/auth/login") ||
     path.startsWith("/api/auth/signup") ||
     path.startsWith("/api/auth/logout") ||
+    path.startsWith("/api/auth/forgot-password") ||
+    path.startsWith("/api/auth/reset-password") ||
+    path === "/reset-password" ||
     path.startsWith("/api/health") ||
     // AI visibility cron/worker: no session; each verifies CRON_SECRET itself.
     path === "/api/cron/ai-visibility" ||

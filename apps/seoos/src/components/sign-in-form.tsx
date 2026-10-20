@@ -83,9 +83,9 @@ export function SignInForm() {
   return (
     <form className="panel" onSubmit={submit} style={{ maxWidth: 400 }}>
       <div className="toolbar" style={{ marginBottom: 12 }} role="tablist" aria-label="Auth mode">
-        <button type="button" onClick={() => setMode("signin")}
+        <button type="button" role="tab" onClick={() => setMode("signin")}
           style={mode === "signin" ? {} : ghost} aria-selected={mode === "signin"}>Sign in</button>
-        <button type="button" onClick={() => setMode("signup")}
+        <button type="button" role="tab" onClick={() => setMode("signup")}
           style={mode === "signup" ? {} : ghost} aria-selected={mode === "signup"}>Create account</button>
       </div>
 

@@ -58,6 +58,13 @@ export interface ScorecardMetric {
   unit?: "count" | "currency" | "percent";
   availability: MetricAvailability;
   source: string;
+  /**
+   * The reporting window this figure covers, as the AM would say it out loud
+   * ("Last 30 days", "All time", "Latest scan"). Stated explicitly so the UI can
+   * show it on every tile and the AI can attribute a period without parsing the
+   * label. Optional: scorecards persisted before this field existed omit it.
+   */
+  period?: string;
 }
 
 export interface BusinessScorecard {
@@ -569,6 +576,43 @@ export interface StakeholderMapEntry {
   knownHistory?: string;
 }
 
+/**
+ * AI-suggested client-health reads, generated from the transcript so the score is
+ * grounded in what the client actually said rather than guessed before the call.
+ * Suggestions only -- the AM confirms or overrides every one of them.
+ */
+export interface ClientHealthSuggestion {
+  /** Suggested NPS, 0-10, or null when the transcript gives nothing to read. */
+  suggestedNps: number | null;
+  /** Why that score, in one sentence, grounded in the transcript. */
+  suggestedNpsReason: string;
+  /** True when the client said a number out loud (rather than it being inferred). */
+  npsStatedByClient?: boolean;
+  /**
+   * A ready reason for each score the AM might pick instead, keyed "0".."10", so
+   * changing the score still arrives with a grounded starting sentence.
+   */
+  npsReasonsByScore?: Record<string, string>;
+  /** Why the rubric's risk tier fits this client, in one sentence. */
+  riskReason?: string;
+  /** A ready reason for each alternate tier the AM might pick, keyed by tier. */
+  riskReasonsByTier?: Partial<Record<RiskTier, string>>;
+  model?: string;
+}
+
+/** What the AM actually recorded for this touch, after reviewing the suggestions. */
+export interface ClientHealthRecord {
+  /** The confirmed NPS, 0-10. */
+  nps: number | null;
+  npsReason: string;
+  /** The confirmed risk status for the register. */
+  riskTier?: RiskTier;
+  riskReason?: string;
+  /** True when the AM changed the score away from the suggestion. */
+  overrodeSuggestion?: boolean;
+  recordedAt: string;
+}
+
 export interface ClientIntelligenceReview {
   status: "draft_ready" | "applied";
   /** Narrative report -- always saved with the client, never posted to ClickUp. */
@@ -592,6 +636,14 @@ export interface ClientIntelligenceReview {
   stakeholderMapTaskUrl?: string;
   /** Non-fatal note (e.g. a list isn't configured) surfaced after applying. */
   executionNote?: string;
+  /**
+   * NPS and risk-status suggestions read from the transcript. Best-effort: absent
+   * when no model is configured or the suggestion call failed, which never blocks
+   * the rest of the intelligence step.
+   */
+  healthSuggestion?: ClientHealthSuggestion;
+  /** The NPS and risk status the AM confirmed. Absent until they save it. */
+  health?: ClientHealthRecord;
   analyzedAt?: string;
   model?: string;
   errorMessage?: string;

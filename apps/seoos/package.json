@@ -8,12 +8,15 @@
     "start": "next start",
     "lint": "eslint .",
     "check": "tsc --noEmit && eslint .",
-    "bootstrap:admin": "tsx scripts/bootstrap-seoos-admin.ts"
+    "bootstrap:admin": "tsx scripts/bootstrap-seoos-admin.ts",
+    "test:aiv": "tsx --test src/lib/ai-visibility/__tests__/*.test.ts src/lib/server/ai-visibility/__tests__/*.test.ts",
+    "test:aiv:e2e": "playwright test --config e2e/playwright.config.ts",
+    "aiv:worker": "tsx scripts/aiv-worker.ts"
   },
   "dependencies": {
-    "@cie/engine": "*",
     "@cie/contracts": "*",
     "@cie/core": "*",
+    "@cie/engine": "*",
     "@supabase/supabase-js": "^2.58.0",
     "firebase-admin": "^13.5.0",
     "jose": "^6.1.0",
@@ -23,6 +26,7 @@
     "zod": "^4.1.5"
   },
   "devDependencies": {
+    "@playwright/test": "^1.56.1",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",

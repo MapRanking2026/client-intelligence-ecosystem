@@ -74,6 +74,12 @@ export const PROMPT_BINDINGS: Record<string, PromptBinding[]> = {
       source: "src/lib/server/services/live-call-guide-service.ts",
     },
   ],
+  nps_client_health_prompt: [
+    {
+      module: "Post-meeting Client Health (suggested NPS, risk status & reasons)",
+      source: "src/lib/server/services/client-intelligence-service.ts",
+    },
+  ],
   michelin_communication_standard_prompt: [
     {
       module: "Live call guide (communication-standard tone on objections & value translations)",

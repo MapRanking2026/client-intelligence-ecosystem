@@ -97,8 +97,8 @@ export function CallGuideActions({ touchId, clientId, callGuide, screenOverrides
           <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">Live call guide</p>
           <p className="mt-1 text-sm text-slate-300">
             {callGuide?.status === "generated"
-              ? `Generated ${callGuide.source === "claude" ? "with Claude" : "from the prep pack"} -- each section shows the screen to present. Tap a link to open it in a new tab.`
-              : "Generate a timed, 60-minute guide from the prep pack before the call starts."}
+              ? `Generated ${callGuide.source === "claude" ? "with Claude" : "from the prep pack"} alongside the preparation above -- each section shows the screen to present. Tap a link to open it in a new tab.`
+              : "Generated together with the preparation above. Use Generate prep + call guide at the top of this page, or regenerate just the guide here."}
           </p>
           {callGuide?.errorMessage ? <p className="mt-1 text-xs text-amber-200">{callGuide.errorMessage}</p> : null}
         </div>
@@ -110,7 +110,7 @@ export function CallGuideActions({ touchId, clientId, callGuide, screenOverrides
           className="inline-flex items-center gap-2 rounded-full border border-[#d7f5ec]/20 bg-[#d7f5ec] px-4 py-2 text-sm font-semibold text-[#0d1625] transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-60"
         >
           {isPending ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
-          {callGuide?.status === "generated" ? "Regenerate guide" : "Generate call guide"}
+          {callGuide?.status === "generated" ? "Regenerate guide only" : "Generate guide only"}
         </button>
       </div>
 

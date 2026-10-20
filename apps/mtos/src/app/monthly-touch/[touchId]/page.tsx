@@ -5,7 +5,7 @@ import { ArrowLeft, Play, CheckCircle2, Sparkles } from "lucide-react";
 
 import { AppShell } from "@/src/components/mtos/app-shell";
 import { DataError } from "@/src/components/mtos/data-error";
-import { Linkified, SmartText } from "@/src/components/mtos/annotate";
+import { Linkified, SmartMarkdown } from "@/src/components/mtos/annotate";
 import { SectionAdditions } from "@/src/components/mtos/section-additions";
 import { FiveQuestions, type QStep } from "@/src/components/mtos/five-questions";
 import { CallGuideActions } from "@/src/components/mtos/call-guide-actions";
@@ -123,7 +123,7 @@ export default async function MonthlyTouchPage({
       summary: "Translate the numbers into business meaning",
       content: (
         <div className="flex flex-col gap-3">
-          <SmartText text={touch.executiveBrief} clientId={client.id} />
+          <SmartMarkdown text={touch.executiveBrief} clientId={client.id} />
           {touch.talkingPoints.length ? (
             <div>
               <div className="eyebrow muted mb-2 mt-1">How to say it</div>
@@ -217,6 +217,7 @@ export default async function MonthlyTouchPage({
             claudeStatus={prepPack?.claude.status}
             claudeError={prepPack?.claude.errorMessage}
             claudeProvider={prepPack?.claude.provider}
+            callGuideGenerated={touch.callGuide?.status === "generated"}
           />
         </div>
       </div>
@@ -350,7 +351,11 @@ export default async function MonthlyTouchPage({
         </div>
       ) : null}
 
-      <Section eyebrow="Live meeting" title="Live call guide" subtitle="A timed, section-by-section guide generated from the prep pack.">
+      <Section
+        eyebrow="Live meeting"
+        title="Live call guide"
+        subtitle="Generated with the preparation above. Walk it top to bottom during the call — it closes with the recap, the NPS question, and the client's risk status."
+      >
         <CallGuideActions touchId={touch.id} clientId={client.id} callGuide={touch.callGuide} screenOverrides={touch.callGuideScreens} />
       </Section>
 

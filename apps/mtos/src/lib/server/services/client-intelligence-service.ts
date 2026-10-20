@@ -1,6 +1,8 @@
 import type { TenantContext } from "@/src/lib/contracts/mtos";
 import type {
   CaseStatus,
+  ClientHealthRecord,
+  ClientHealthSuggestion,
   ClientIntelligenceReview,
   ClientRecord,
   ClientType,
@@ -22,6 +24,7 @@ import { getFirebaseAdminDb } from "@/src/lib/server/firebase/admin";
 import { getIntegrationConnection, getIntegrationCredentials } from "@/src/lib/server/integrations";
 import { callLlmForJson, getNowIso, hasAnyLlmProvider, stripUndefinedDeep } from "@/src/lib/server/services/mtos-ai";
 import { getAccountManagerIdentity } from "@/src/lib/server/services/user-service";
+import { getPromptText } from "@/src/lib/server/prompt-store";
 import {
   applyFieldWritesToTask,
   CustomFieldBuilder,
@@ -170,6 +173,127 @@ interface AnalysisInput {
   draftTickets: Array<{ title: string; description: string; department: string }>;
 }
 
+/** The five risk tiers, for the reason ladder the AM can pick from. */
+const RISK_TIERS: RiskTier[] = ["Healthy", "Low", "Medium", "High", "Critical"];
+
+/** An NPS only counts if it is a whole number on the 0-10 scale. */
+function npsScore(value: unknown): number | null {
+  const parsed = typeof value === "number" ? value : Number.parseFloat(str(value));
+  if (!Number.isFinite(parsed)) return null;
+  const rounded = Math.round(parsed);
+  return rounded >= 0 && rounded <= 10 ? rounded : null;
+}
+
+/** Keep only the "0".."10" keys the UI can actually offer. */
+function npsReasonLadder(value: unknown): Record<string, string> | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const ladder: Record<string, string> = {};
+  for (const [key, reason] of Object.entries(value as Record<string, unknown>)) {
+    const score = npsScore(key);
+    const text = str(reason);
+    if (score !== null && text) ladder[String(score)] = text;
+  }
+  return Object.keys(ladder).length ? ladder : undefined;
+}
+
+/** Keep only the five real tier names. */
+function riskReasonLadder(value: unknown): Partial<Record<RiskTier, string>> | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const ladder: Partial<Record<RiskTier, string>> = {};
+  for (const [key, reason] of Object.entries(value as Record<string, unknown>)) {
+    const tier = RISK_TIERS.find((candidate) => candidate.toLowerCase() === key.trim().toLowerCase());
+    const text = str(reason);
+    if (tier && text) ladder[tier] = text;
+  }
+  return Object.keys(ladder).length ? ladder : undefined;
+}
+
+/**
+ * Read the client's satisfaction and risk standing from what they actually said on
+ * the call, and propose an NPS score, a risk tier, and a one-sentence reason for
+ * each -- plus a ready reason for every other score and tier the AM might pick
+ * instead, so an override still starts from grounded wording rather than a blank
+ * box. Generated here, after the transcript, because nothing before the call can
+ * tell you how the client feels.
+ *
+ * Best-effort by design: wired to the Prompt Engine's `nps_client_health_prompt`
+ * and isolated so any failure simply omits the suggestions. The AM confirms or
+ * overrides every value, and a score is never recorded automatically.
+ */
+async function generateClientHealthSuggestion(
+  env: ReturnType<typeof getServerEnv>,
+  client: ClientRecord,
+  touch: MonthlyTouchRecord,
+  analysis: AnalysisInput,
+  riskContext: { score: number; tier: RiskTier; flags: Record<string, string>; riskDetected: boolean },
+): Promise<ClientHealthSuggestion | undefined> {
+  if (!hasAnyLlmProvider(env)) return undefined;
+
+  const system = await getPromptText("nps_client_health_prompt");
+  const userText = [
+    "Return a JSON object with exactly these keys:",
+    "  suggestedNps: integer 0-10, or null when the transcript gives nothing to read it from.",
+    "  npsStatedByClient: true only if the client said a number out loud; false if you inferred it.",
+    "  suggestedNpsReason: ONE sentence, grounded in what the client actually said.",
+    '  npsReasonsByScore: an object keyed "0" through "10". For EVERY score, one sentence the AM',
+    "    could use if they pick that score. Ground each one in this call's evidence; where the",
+    "    evidence does not support a score, say plainly what would have to be true for it instead",
+    "    of inventing agreement.",
+    "  riskReason: ONE sentence on why the risk tier below fits this client right now.",
+    '  riskReasonsByTier: an object keyed "Healthy","Low","Medium","High","Critical" -- one sentence',
+    "    per tier the AM could use if they set that tier instead, grounded the same way.",
+    "",
+    "Never invent a score the client did not give and never invent a quote. If sentiment is unclear,",
+    "return null for suggestedNps and say so in suggestedNpsReason.",
+    "",
+    JSON.stringify(
+      {
+        client: {
+          name: client.name,
+          contact: client.contact,
+          industry: client.industry,
+          healthScore: client.healthScore,
+          tone: client.tone,
+          topRisks: client.topRisks,
+          churnSignals: client.churnSignals,
+        },
+        touch: { wins: touch.wins, risks: touch.risks },
+        transcriptAnalysis: analysis,
+        // The rubric has already scored the six warning signs; the model explains
+        // that result rather than re-deriving or overriding it.
+        riskRubric: {
+          warningFlags: riskContext.flags,
+          riskScore: riskContext.score,
+          riskTier: riskContext.tier,
+          riskDetected: riskContext.riskDetected,
+          note: "riskScore is the count of warning signs marked Yes (0-6). Explain this tier; do not change it.",
+        },
+      },
+      null,
+      2,
+    ),
+  ].join("\n");
+
+  const { data, model } = await callLlmForJson({ env, system, userText, maxTokens: 3000 });
+
+  const suggestedNps = npsScore(data.suggestedNps);
+  const ladder = npsReasonLadder(data.npsReasonsByScore);
+
+  return stripUndefinedDeep({
+    suggestedNps,
+    suggestedNpsReason:
+      str(data.suggestedNpsReason) ||
+      (suggestedNps === null
+        ? "The transcript doesn't show enough of the client's sentiment to read a score -- ask them directly."
+        : ""),
+    npsStatedByClient: data.npsStatedByClient === true ? true : undefined,
+    npsReasonsByScore: ladder,
+    riskReason: str(data.riskReason) || undefined,
+    riskReasonsByTier: riskReasonLadder(data.riskReasonsByTier),
+    model,
+  } satisfies ClientHealthSuggestion);
+}
+
 /**
  * Generate the Client Intelligence record from the completed transcript analysis:
  * a narrative report (saved with the client, never posted); a Stakeholder Map
@@ -279,6 +403,24 @@ export async function generateClientIntelligence(
   // the client CURRENTLY flagged at risk (so we can clear it when the risk is gone)?
   const { linked, stakeholderUpToDate, currentlyFlagged } = await inspectClientTask(context, client);
 
+  // NPS + risk-status suggestions, read from the transcript. Isolated: the rest of
+  // the intelligence step must survive a failure here.
+  let healthSuggestion: ClientHealthSuggestion | undefined;
+  try {
+    healthSuggestion = await generateClientHealthSuggestion(env, client, touch, analysis, {
+      score,
+      tier,
+      flags,
+      riskDetected,
+    });
+  } catch (error) {
+    console.warn(
+      `Client health suggestion failed for ${client.id}: ${
+        error instanceof Error ? error.message : "unknown error"
+      }`,
+    );
+  }
+
   const review: ClientIntelligenceReview = {
     status: "draft_ready",
     report,
@@ -287,6 +429,7 @@ export async function generateClientIntelligence(
     stakeholderMapStatus: "pending",
     stakeholderUpToDate,
     clientTaskLinked: linked,
+    ...(healthSuggestion ? { healthSuggestion } : {}),
     analyzedAt: getNowIso(),
     model,
   };
@@ -565,6 +708,70 @@ export async function applyClientIntelligenceDecisions(
   }
 
   review.executionNote = notes.length ? Array.from(new Set(notes)).join(" ") : undefined;
+
+  const updatedTouch: MonthlyTouchRecord = stripUndefinedDeep({
+    ...touch,
+    postMeeting: { ...postMeeting, clientIntelligence: review },
+    updatedAt: getNowIso(),
+  });
+  await db.doc(monthlyTouchPath(context.tenantId, touch.id)).set(updatedTouch, { merge: true });
+
+  return { touch: updatedTouch };
+}
+
+/**
+ * Record the NPS and risk status the AM confirmed for this touch. Writes nothing
+ * to ClickUp on its own: the risk tier is folded into the Risk Register entry that
+ * the AM still approves through the existing gate, so the one write path to the
+ * client's Health Tracker row stays the approval they already own.
+ */
+export async function recordClientHealth(
+  context: TenantContext,
+  touchId: string,
+  input: { nps: number | null; npsReason: string; riskTier?: RiskTier; riskReason?: string },
+) {
+  const db = getFirebaseAdminDb();
+  if (!db) {
+    throw new Error("Firebase Admin must be configured before client health can be recorded");
+  }
+
+  const dataSource = getMtosDataSource(context);
+  const touch = await dataSource.getMonthlyTouchById(touchId);
+  if (!touch) {
+    throw new Error("Monthly touch not found");
+  }
+  const postMeeting = touch.postMeeting;
+  if (!postMeeting?.clientIntelligence) {
+    throw new Error("Analyze the transcript before recording NPS and risk status.");
+  }
+  const existing = postMeeting.clientIntelligence;
+  const suggested = existing.healthSuggestion?.suggestedNps ?? null;
+
+  const health: ClientHealthRecord = {
+    nps: input.nps,
+    npsReason: input.npsReason.trim(),
+    riskTier: input.riskTier,
+    riskReason: input.riskReason?.trim() || undefined,
+    overrodeSuggestion: suggested !== null && input.nps !== null && input.nps !== suggested ? true : undefined,
+    recordedAt: getNowIso(),
+  };
+
+  const review: ClientIntelligenceReview = {
+    ...existing,
+    health,
+    // Keep the register entry the AM will approve in step with the tier they just
+    // confirmed, so the two can't disagree at the approval gate.
+    ...(input.riskTier && existing.riskRegister
+      ? {
+          riskTier: input.riskTier,
+          riskRegister: {
+            ...existing.riskRegister,
+            riskTier: input.riskTier,
+            ...(health.riskReason ? { latestComments: health.riskReason } : {}),
+          },
+        }
+      : {}),
+  };
 
   const updatedTouch: MonthlyTouchRecord = stripUndefinedDeep({
     ...touch,

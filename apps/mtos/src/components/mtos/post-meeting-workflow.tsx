@@ -20,6 +20,7 @@ import type {
   PostMeetingReview,
   QaReview,
   RiskRegisterEntry,
+  RiskTier,
   StakeholderMapEntry,
   TicketDepartment,
   TicketPriority,
@@ -280,6 +281,52 @@ export function PostMeetingWorkflow({ touchId, postMeeting, qaReview }: PostMeet
   const [stakeDecision, setStakeDecision] = useState<"approved" | "declined" | undefined>(
     clientIntelligence?.stakeholderMapStatus === "pending" ? undefined : clientIntelligence?.stakeholderMapStatus,
   );
+  // Client health: the AM confirms the NPS and risk status, starting from the
+  // transcript-grounded suggestions. Every change to a score swaps in that score's
+  // suggested reason, unless the AM has already typed over it.
+  const healthSuggestion = clientIntelligence?.healthSuggestion;
+  const recordedHealth = clientIntelligence?.health;
+  const [npsScore, setNpsScore] = useState<number | null>(
+    recordedHealth?.nps ?? healthSuggestion?.suggestedNps ?? null,
+  );
+  const [npsReason, setNpsReason] = useState(
+    recordedHealth?.npsReason || healthSuggestion?.suggestedNpsReason || "",
+  );
+  const [npsReasonEdited, setNpsReasonEdited] = useState(Boolean(recordedHealth?.npsReason));
+  const [healthRiskTier, setHealthRiskTier] = useState<RiskTier | undefined>(
+    recordedHealth?.riskTier ?? clientIntelligence?.riskTier ?? undefined,
+  );
+  const [healthRiskReason, setHealthRiskReason] = useState(
+    recordedHealth?.riskReason || healthSuggestion?.riskReason || "",
+  );
+  const [healthRiskReasonEdited, setHealthRiskReasonEdited] = useState(Boolean(recordedHealth?.riskReason));
+
+  /** Pick a score and pull in its suggested reason, unless the AM wrote their own. */
+  function chooseNps(score: number | null) {
+    setNpsScore(score);
+    if (npsReasonEdited) return;
+    const suggested =
+      score === null
+        ? healthSuggestion?.suggestedNpsReason
+        : score === healthSuggestion?.suggestedNps
+          ? healthSuggestion?.suggestedNpsReason
+          : healthSuggestion?.npsReasonsByScore?.[String(score)];
+    setNpsReason(suggested || "");
+  }
+
+  /** Same for the risk tier. */
+  function chooseRiskTier(tier: RiskTier | undefined) {
+    setHealthRiskTier(tier);
+    if (healthRiskReasonEdited) return;
+    const suggested =
+      tier && tier === (clientIntelligence?.riskTier ?? undefined)
+        ? healthSuggestion?.riskReason
+        : tier
+          ? healthSuggestion?.riskReasonsByTier?.[tier]
+          : undefined;
+    setHealthRiskReason(suggested || "");
+  }
+
   function updateRisk(patch: Partial<RiskRegisterEntry>) {
     setRiskEntry((prev) => ({ ...prev, ...patch }));
   }
@@ -908,6 +955,141 @@ export function PostMeetingWorkflow({ touchId, postMeeting, qaReview }: PostMeet
                   </button>
                 </div>
               ) : null}
+
+              {/* Client health -- NPS + risk status, suggested from the transcript and
+                  confirmed by the AM. Sits here rather than at the end of the live
+                  guide because only the transcript can tell you how the client felt. */}
+              <div className="mt-4 space-y-3 rounded-2xl border border-[#2dd4bf]/20 bg-[#2dd4bf]/5 p-4">
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div>
+                    <p className="text-sm font-semibold text-white">Client health — NPS &amp; risk status</p>
+                    <p className="mt-0.5 text-xs text-slate-400">
+                      {healthSuggestion
+                        ? healthSuggestion.npsStatedByClient
+                          ? "The client gave a score on the call — confirm it and the reason below."
+                          : "Suggested from the transcript. Change either value and the reason updates to match."
+                        : "No suggestion was generated — record what the client told you on the call."}
+                    </p>
+                  </div>
+                  {recordedHealth ? (
+                    <span className="rounded-full border border-emerald-400/30 bg-emerald-500/20 px-3 py-1 text-xs text-emerald-100">
+                      Recorded
+                    </span>
+                  ) : null}
+                </div>
+
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <label className="block">
+                    <span className="text-xs text-slate-400">
+                      NPS (0–10)
+                      {healthSuggestion?.suggestedNps !== null && healthSuggestion?.suggestedNps !== undefined
+                        ? ` · suggested ${healthSuggestion.suggestedNps}`
+                        : ""}
+                    </span>
+                    <select
+                      value={npsScore === null ? "" : String(npsScore)}
+                      onChange={(event) =>
+                        chooseNps(event.target.value === "" ? null : Number(event.target.value))
+                      }
+                      className="mt-1 w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-slate-100 outline-none"
+                    >
+                      <option value="" style={{ color: "#0d1625" }}>
+                        Not given
+                      </option>
+                      {Array.from({ length: 11 }, (_, score) => (
+                        <option key={score} value={String(score)} style={{ color: "#0d1625" }}>
+                          {score}
+                          {score === healthSuggestion?.suggestedNps ? " (suggested)" : ""}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <label className="block">
+                    <span className="text-xs text-slate-400">
+                      Risk status
+                      {clientIntelligence.riskTier ? ` · suggested ${clientIntelligence.riskTier}` : ""}
+                    </span>
+                    <select
+                      value={healthRiskTier || ""}
+                      onChange={(event) =>
+                        chooseRiskTier(event.target.value ? (event.target.value as RiskTier) : undefined)
+                      }
+                      className="mt-1 w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-slate-100 outline-none"
+                    >
+                      <option value="" style={{ color: "#0d1625" }}>
+                        Not set
+                      </option>
+                      {(["Healthy", "Low", "Medium", "High", "Critical"] as RiskTier[]).map((tier) => (
+                        <option key={tier} value={tier} style={{ color: "#0d1625" }}>
+                          {tier}
+                          {tier === clientIntelligence.riskTier ? " (suggested)" : ""}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+
+                <label className="block">
+                  <span className="text-xs text-slate-400">Reason for the score</span>
+                  <textarea
+                    value={npsReason}
+                    onChange={(event) => {
+                      setNpsReason(event.target.value);
+                      setNpsReasonEdited(true);
+                    }}
+                    rows={2}
+                    placeholder="One line on why this score — in the client's own terms."
+                    className="mt-1 w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-slate-100 outline-none"
+                  />
+                </label>
+
+                <label className="block">
+                  <span className="text-xs text-slate-400">Reason for the risk status</span>
+                  <textarea
+                    value={healthRiskReason}
+                    onChange={(event) => {
+                      setHealthRiskReason(event.target.value);
+                      setHealthRiskReasonEdited(true);
+                    }}
+                    rows={2}
+                    placeholder="What drives this risk read right now."
+                    className="mt-1 w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-slate-100 outline-none"
+                  />
+                </label>
+
+                <div className="flex flex-wrap items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      run("record_client_health", {
+                        action: "record_client_health",
+                        nps: npsScore,
+                        npsReason,
+                        riskTier: healthRiskTier,
+                        riskReason: healthRiskReason,
+                      })
+                    }
+                    disabled={isPending || !npsReason.trim()}
+                    style={{ color: "#0d1625" }}
+                    className="inline-flex items-center gap-2 rounded-full border border-[#d7f5ec]/20 bg-[#d7f5ec] px-4 py-2 text-sm font-semibold transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {isPending && activeAction === "record_client_health" ? (
+                      <LoaderCircle className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <CheckCircle2 className="h-4 w-4" />
+                    )}
+                    {recordedHealth ? "Update NPS & risk status" : "Record NPS & risk status"}
+                  </button>
+                  {recordedHealth ? (
+                    <span className="text-xs text-slate-400">
+                      {recordedHealth.nps === null ? "No score given" : `NPS ${recordedHealth.nps}`}
+                      {recordedHealth.riskTier ? ` · ${recordedHealth.riskTier}` : ""}
+                      {recordedHealth.overrodeSuggestion ? " · changed from the suggestion" : ""}
+                    </span>
+                  ) : null}
+                </div>
+              </div>
 
               {/* Stakeholder Map -- ALWAYS: every client must be listed & kept current */}
               {clientIntelligence.stakeholderMap ? (

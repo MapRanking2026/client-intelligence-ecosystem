@@ -43,3 +43,6 @@ Thumbs.db
 
 # Stray app-level scratch
 /apps/clickupsync.md
+
+# AI visibility E2E artifacts
+apps/seoos/.e2e-results/

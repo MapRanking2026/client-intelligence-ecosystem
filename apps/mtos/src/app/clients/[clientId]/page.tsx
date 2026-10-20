@@ -16,7 +16,7 @@ import { DataError } from "@/src/components/mtos/data-error";
 import { ClientTabs } from "@/src/components/mtos/client-tabs";
 import { ClientAttachments } from "@/src/components/mtos/client-attachments";
 import { RetentionButton } from "@/src/components/mtos/retention-button";
-import { Linkified, Callout, SmartText } from "@/src/components/mtos/annotate";
+import { Linkified, Callout, SmartMarkdown } from "@/src/components/mtos/annotate";
 import { countClientAttachments } from "@/src/lib/server/services/client-attachments-service";
 import { ClientProfileMappings } from "@/src/components/mtos/client-profile-mappings";
 import { LeadVerificationQuickActions } from "@/src/components/mtos/lead-verification-quick-actions";
@@ -169,7 +169,7 @@ export default async function ClientWorkspacePage({
             <div className="card-title">Next Monthly Touch</div>
             {touch.executiveBrief ? (
               <div className="mt-3">
-                <SmartText text={touch.executiveBrief} clientId={client.id} />
+                <SmartMarkdown text={touch.executiveBrief} clientId={client.id} />
               </div>
             ) : null}
             <Link href={`/monthly-touch/${touch.id}`} className="btn btn-primary btn-block mt-4">

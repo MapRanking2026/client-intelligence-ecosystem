@@ -267,3 +267,173 @@ export function SmartText({
     </div>
   );
 }
+
+/** Inline `**bold**` / `__bold__`, applied around the link + highlight pass. */
+function renderInlineMarkdown(text: string, options: RichOptions): ReactNode {
+  const parts = text.split(/(\*\*[^*]+\*\*|__[^_]+__)/g).filter((part) => part !== "");
+  if (parts.length === 1) return renderRich(text, options);
+  return (
+    <>
+      {parts.map((part, index) => {
+        const bold = /^(\*\*[^*]+\*\*|__[^_]+__)$/.test(part);
+        const inner = bold ? part.slice(2, -2) : part;
+        return bold ? (
+          <strong key={index} style={{ color: "var(--text)", fontWeight: 650 }}>
+            {renderRich(inner, options)}
+          </strong>
+        ) : (
+          <span key={index}>{renderRich(inner, options)}</span>
+        );
+      })}
+    </>
+  );
+}
+
+type MdBlock =
+  | { kind: "heading"; level: number; text: string }
+  | { kind: "para"; text: string }
+  | { kind: "list"; ordered: boolean; items: string[] };
+
+/**
+ * Group markdown lines into blocks. Deliberately a small subset -- headings,
+ * bullets, numbered lists, paragraphs -- because that is all the AI briefs emit,
+ * and a full markdown dependency would pull its own sanitising and styling
+ * concerns into a surface that already has its own annotation layer.
+ */
+function parseMarkdownBlocks(text: string): MdBlock[] {
+  const blocks: MdBlock[] = [];
+  let list: { ordered: boolean; items: string[] } | null = null;
+
+  const flushList = () => {
+    if (list) blocks.push({ kind: "list", ...list });
+    list = null;
+  };
+
+  for (const rawLine of text.replace(/\r\n/g, "\n").split("\n")) {
+    const line = rawLine.trim();
+
+    if (!line) {
+      flushList();
+      continue;
+    }
+
+    const heading = /^(#{1,6})\s+(.*)$/.exec(line);
+    if (heading) {
+      flushList();
+      blocks.push({ kind: "heading", level: heading[1].length, text: heading[2].trim() });
+      continue;
+    }
+
+    const bullet = /^[-*+]\s+(.*)$/.exec(line);
+    if (bullet) {
+      if (!list || list.ordered) {
+        flushList();
+        list = { ordered: false, items: [] };
+      }
+      list.items.push(bullet[1].trim());
+      continue;
+    }
+
+    const numbered = /^\d+[.)]\s+(.*)$/.exec(line);
+    if (numbered) {
+      if (!list || !list.ordered) {
+        flushList();
+        list = { ordered: true, items: [] };
+      }
+      list.items.push(numbered[1].trim());
+      continue;
+    }
+
+    // A plain line that continues the previous paragraph rather than starting one,
+    // so a brief wrapped at 100 columns doesn't render as a stack of fragments.
+    const previous = blocks[blocks.length - 1];
+    if (!list && previous?.kind === "para") {
+      previous.text = `${previous.text} ${line}`;
+      continue;
+    }
+    flushList();
+    blocks.push({ kind: "para", text: line });
+  }
+
+  flushList();
+  return blocks;
+}
+
+/**
+ * Block formatter for AI-written long-form content that may contain markdown.
+ * Renders headings, bullets, numbered lists and bold, and keeps the client-linking
+ * and highlight pass that `SmartText` applies, so a brief reads as a document
+ * instead of showing `##` and `**` literally. Content with no markdown in it falls
+ * through to `SmartText`, preserving the old paragraph-splitting behaviour for
+ * briefs written as plain prose.
+ */
+export function SmartMarkdown({
+  text,
+  clients,
+  clientId,
+}: {
+  text: string;
+  clients?: { id: string; name: string }[];
+  clientId?: string;
+}) {
+  const trimmed = (text || "").trim();
+  if (!trimmed) return null;
+
+  const options: RichOptions = { clients, clientId };
+  const hasMarkdown = /(^|\n)\s*(#{1,6}\s|[-*+]\s|\d+[.)]\s)|\*\*[^*]+\*\*|__[^_]+__/.test(trimmed);
+  if (!hasMarkdown) {
+    return <SmartText text={trimmed} clients={clients} clientId={clientId} />;
+  }
+
+  const blocks = parseMarkdownBlocks(trimmed);
+
+  return (
+    <div className="smart-text smart-md">
+      {blocks.map((block, index) => {
+        if (block.kind === "heading") {
+          // h1/h2 in a brief are section labels, not page titles -- cap the visual
+          // weight so they sit inside the card rather than competing with it.
+          const level = Math.min(Math.max(block.level, 1), 6);
+          return (
+            <div
+              key={index}
+              className="smart-md-h"
+              style={{
+                fontSize: level <= 2 ? "0.92rem" : "0.86rem",
+                fontWeight: 700,
+                color: "var(--text)",
+                marginTop: index === 0 ? 0 : 14,
+                marginBottom: 4,
+                letterSpacing: level <= 2 ? "0.01em" : undefined,
+              }}
+            >
+              {renderInlineMarkdown(block.text, options)}
+            </div>
+          );
+        }
+
+        if (block.kind === "list") {
+          const ListTag = block.ordered ? "ol" : "ul";
+          return (
+            <ListTag
+              key={index}
+              style={{
+                margin: "6px 0 0",
+                paddingLeft: 18,
+                listStyleType: block.ordered ? "decimal" : "disc",
+              }}
+            >
+              {block.items.map((item, itemIndex) => (
+                <li key={itemIndex} style={{ fontSize: "0.89rem", lineHeight: 1.62, color: "var(--text-2)" }}>
+                  {renderInlineMarkdown(item, options)}
+                </li>
+              ))}
+            </ListTag>
+          );
+        }
+
+        return <p key={index}>{renderInlineMarkdown(block.text, options)}</p>;
+      })}
+    </div>
+  );
+}

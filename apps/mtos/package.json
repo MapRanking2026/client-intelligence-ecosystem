@@ -11,6 +11,7 @@
     "seed:firestore": "tsx scripts/seed-firestore-pilot.ts",
     "bootstrap:map-ranking": "tsx scripts/bootstrap-map-ranking.ts",
     "import:prompts": "tsx scripts/import-prompt-library.ts",
+    "publish:prompts": "tsx scripts/publish-prompts.ts",
     "check:prompt-store": "tsx scripts/check-prompt-store.ts"
   },
   "dependencies": {

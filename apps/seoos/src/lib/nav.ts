@@ -19,6 +19,7 @@ export const NAV: NavItem[] = [
   { href: "/keywords", label: "Keywords", glyph: "⌗", permission: "seo.package.read" },
   { href: "/rankings", label: "Rankings & Grids", glyph: "▚", permission: "seo.package.read" },
   { href: "/gbp", label: "GBP & Local Presence", glyph: "◉", permission: "seo.package.read" },
+  { href: "/ai-visibility", label: "AI Visibility", glyph: "◎", permission: "seo.package.read" },
   { href: "/audits", label: "Website Audits", glyph: "⚙", permission: "seo.package.read" },
   { href: "/recommendations", label: "Recommendations", glyph: "✦", permission: "seo.package.read" },
   { href: "/work-orders", label: "Work Orders", glyph: "✓", permission: "seo.package.read" },

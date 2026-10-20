@@ -21,6 +21,9 @@ export async function proxy(request: NextRequest) {
     path.startsWith("/api/auth/signup") ||
     path.startsWith("/api/auth/logout") ||
     path.startsWith("/api/health") ||
+    // AI visibility cron/worker: no session; each verifies CRON_SECRET itself.
+    path === "/api/cron/ai-visibility" ||
+    path === "/api/seo/ai-visibility/worker" ||
     path.startsWith("/_next") ||
     path.startsWith("/favicon");
 

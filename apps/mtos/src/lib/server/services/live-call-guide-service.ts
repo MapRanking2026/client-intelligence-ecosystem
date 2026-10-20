@@ -62,7 +62,10 @@ function formatScorecardMetric(metric?: ScorecardMetric) {
     metric.previousValue !== null && metric.previousValue !== undefined
       ? ` (was ${metric.previousValue})`
       : "";
-  return `${metric.label}: ${value}${delta}`;
+  // Period and source stay attached: a number read out on a call without its window
+  // or its origin is exactly what the SOP forbids.
+  const provenance = [metric.period, metric.source].filter(Boolean).join(", ");
+  return `${metric.label}: ${value}${delta}${provenance ? ` — ${provenance}` : ""}`;
 }
 
 /**
@@ -196,6 +199,10 @@ async function generateClaudeSections(
         executiveBrief: touch.executiveBrief,
         commitments: touch.commitments,
         opportunities: touch.opportunities,
+        // Vetted leads and calls from GoHighLevel, reconciled against Google Ads and
+        // GBP, so the lead-quality section quotes real verified numbers rather than
+        // only the scorecard totals.
+        leadVerification: touch.leadVerification ?? null,
         // The full evidence bundle: every connected source that fed the prep pack.
         prepPack: prepPack
           ? {

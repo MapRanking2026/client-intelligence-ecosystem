@@ -3,6 +3,10 @@
     {
       "path": "/api/cron/sync-clients",
       "schedule": "0 8 * * *"
+    },
+    {
+      "path": "/api/cron/ai-visibility",
+      "schedule": "20 9 * * *"
     }
   ]
 }

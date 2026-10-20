@@ -50,6 +50,11 @@ function MetricPreviewCard({ m, clientId }: { m: ScorecardMetric; clientId?: str
           {diff > 0 ? "▲" : "▼"} {pct > 0 ? "+" : ""}{pct}% vs prior period
         </span>
       ) : null}
+      {m.period ? (
+        <span className="muted block" style={{ fontSize: "0.7rem" }}>
+          Period: {m.period}
+        </span>
+      ) : null}
       <span className="muted block" style={{ fontSize: "0.7rem", marginBottom: clientId ? 8 : 0 }}>
         Source: {m.source}
       </span>
@@ -262,7 +267,7 @@ export function ScorecardGrid({ scorecard, clientId }: { scorecard: BusinessScor
               </div>
             )}
             <div className="muted" style={{ fontSize: "0.66rem", marginTop: 6 }}>
-              {m.source}
+              {m.period ? `${m.period} · ${m.source}` : m.source}
             </div>
           </div>
         );

@@ -11,9 +11,15 @@ import {
 } from "@/src/lib/server/services/post-meeting-service";
 import {
   applyClientIntelligenceDecisions,
+  recordClientHealth,
   retryClientIntelligence,
 } from "@/src/lib/server/services/client-intelligence-service";
 import { generateQaReview, recordVictorDecision } from "@/src/lib/server/services/qa-review-service";
+
+// One Generate now runs the prep pack and the live call guide back to back -- several
+// model calls plus the dashboard pulls. Matches the ceiling the other long-running
+// routes already use so the combined run isn't cut off mid-generation.
+export const maxDuration = 300;
 
 const yesNoSchema = z.enum(["Yes", "No"]);
 const riskRegisterSchema = z.object({
@@ -87,6 +93,14 @@ const touchRequestSchema = z.discriminatedUnion("action", [
     riskRegister: riskRegisterSchema.optional(),
     stakeholderMap: stakeholderMapSchema.optional(),
   }),
+  z.object({
+    action: z.literal("record_client_health"),
+    // NPS is the standard 0-10 scale; null when the AM genuinely couldn't get one.
+    nps: z.number().int().min(0).max(10).nullable(),
+    npsReason: z.string(),
+    riskTier: z.enum(["Healthy", "Low", "Medium", "High", "Critical"]).optional(),
+    riskReason: z.string().optional(),
+  }),
   z.object({ action: z.literal("generate_qa_review") }),
   z.object({
     action: z.literal("record_victor_decision"),
@@ -129,10 +143,19 @@ export async function POST(
 
     switch (payload.action) {
       case "prepare":
+        result = await prepareMonthlyTouch(context, touchId, { includeClaude: false });
+        break;
       case "prepare_and_generate":
-        result = await prepareMonthlyTouch(context, touchId, {
-          includeClaude: payload.action === "prepare_and_generate",
-        });
+        // One Generate action produces both halves of the workspace: the preparation
+        // pack and the interactive live call guide built from it. The AM scrolls from
+        // preparing straight into presenting, so the guide is never a second step.
+        await prepareMonthlyTouch(context, touchId, { includeClaude: true });
+        {
+          // The guide re-reads the touch the prep just persisted, so its copy carries
+          // the fresh prep pack too -- keep the response shape prep callers expect.
+          const generated = await generateLiveCallGuide(context, touchId);
+          result = { touch: generated.touch, prepPack: generated.touch.prepPack };
+        }
         break;
       case "generate_call_guide":
         result = await generateLiveCallGuide(context, touchId);
@@ -153,6 +176,14 @@ export async function POST(
         result = await applyClientIntelligenceDecisions(context, touchId, {
           riskRegister: payload.riskRegister,
           stakeholderMap: payload.stakeholderMap,
+        });
+        break;
+      case "record_client_health":
+        result = await recordClientHealth(context, touchId, {
+          nps: payload.nps,
+          npsReason: payload.npsReason,
+          riskTier: payload.riskTier,
+          riskReason: payload.riskReason,
         });
         break;
       case "generate_qa_review":

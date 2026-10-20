@@ -486,6 +486,7 @@ function metric(
   previousValue: number | null,
   source: string,
   unit: ScorecardMetric["unit"] = "count",
+  period = "Last 30 days",
 ): ScorecardMetric {
   return {
     label,
@@ -494,6 +495,7 @@ function metric(
     unit,
     availability: value === null ? "unavailable" : "available",
     source,
+    period,
   };
 }
 
@@ -547,45 +549,80 @@ function buildBusinessScorecard(
     { calls: 0, previousCalls: 0 },
   );
 
+  // The GBP snapshots carry their own window, so quote that rather than assuming 30 days.
+  const gbpPeriod = gbpPerformance.length
+    ? [gbpPerformance[0].periodStart, gbpPerformance[0].periodEnd].filter(Boolean).join(" → ") ||
+      "Last 30 days"
+    : "Last 30 days";
+
   return {
-    totalLeads: metric("New leads (last 30 days)", totalLeads, null, "GoHighLevel contacts"),
-    qualifiedLeads: metric("Pipeline opportunities (all time)", qualifiedLeads, null, "GoHighLevel opportunities"),
+    totalLeads: metric("New leads", totalLeads, null, "GoHighLevel contacts", "count", "Last 30 days"),
+    qualifiedLeads: metric(
+      "Pipeline opportunities",
+      qualifiedLeads,
+      null,
+      "GoHighLevel opportunities",
+      "count",
+      "All time",
+    ),
     costPerLead: metric(
       "Cost per lead",
       googleAdsCostPerLead,
       null,
       googleAdsCostPerLead !== null ? "Google Ads campaign metrics" : "Requires Google Ads / Meta Ads sync",
       "currency",
+      "Last 30 days",
     ),
     callsAnswered: metric(
       "GBP call clicks",
       gbpPerformance.length ? gbpTotals.calls : null,
       gbpPerformance.length ? gbpTotals.previousCalls : null,
       "Google Business Profile performance",
+      "count",
+      gbpPeriod,
     ),
-    callsMissed: metric("Calls missed", null, null, "Requires CRM call-tracking data"),
-    formSubmissions: metric("Form submissions", null, null, "Requires per-source contact breakdown"),
-    bookedJobs: metric("Booked jobs (won, all time)", bookedJobs, null, "GoHighLevel won opportunities"),
+    callsMissed: metric("Calls missed", null, null, "Requires CRM call-tracking data", "count", "Last 30 days"),
+    formSubmissions: metric(
+      "Form submissions",
+      null,
+      null,
+      "Requires per-source contact breakdown",
+      "count",
+      "Last 30 days",
+    ),
+    bookedJobs: metric(
+      "Booked jobs (won)",
+      bookedJobs,
+      null,
+      "GoHighLevel won opportunities",
+      "count",
+      "All time",
+    ),
     shareOfLocalVoice: metric(
       "Market Share (avg across keywords)",
       averageAcrossKeywords(keywordHistory, (scan) => scan.marketSharePercent, "latest"),
       averageAcrossKeywords(keywordHistory, (scan) => scan.marketSharePercent, "previous"),
       "Rank Tracker keyword scans",
       "percent",
+      "Latest scan vs previous",
     ),
     top3Coverage: metric(
       "Average keyword rank",
       averageAcrossKeywords(keywordHistory, (scan) => scan.averageRank, "latest"),
       averageAcrossKeywords(keywordHistory, (scan) => scan.averageRank, "previous"),
       "Rank Tracker keyword scans",
+      "count",
+      "Latest scan vs previous",
     ),
     mapCheckIns: metric(
-      "Map Check-In posts (all time)",
+      "Map Check-In posts",
       checkinBusinesses.length
         ? checkinBusinesses.reduce((sum, business) => sum + business.totalPosts, 0)
         : null,
       null,
       "Map Check-Ins dashboard",
+      "count",
+      "All time",
     ),
     hasSalesStructureData: totalLeads !== null && qualifiedLeads !== null,
   };
@@ -1109,6 +1146,7 @@ async function generateClaudeTouchOutput(
   client: ClientRecord,
   touch: MonthlyTouchRecord,
   variety?: VarietyContext,
+  leadVerification?: LeadVerificationReview,
 ) {
   if (!hasAnyLlmProvider(env)) {
     return null;
@@ -1199,6 +1237,10 @@ async function generateClaudeTouchOutput(
               currentStatus: touch.status,
             },
             prepPack,
+            // Vetted GoHighLevel leads and calls, reconciled against Google Ads and
+            // GBP. Primary evidence for lead quality and the funnel read -- each lead
+            // already marked real or flagged, with its channel.
+            leadVerification: leadVerification ?? null,
           },
           null,
           2,
@@ -1518,9 +1560,34 @@ export async function prepareMonthlyTouch(
   const varietyContext = buildVarietyContext(meetingFormat, previousTouch, decisionsTogether);
   const varietyNote = varietyContext.varietyNote;
 
+  // Lead & call verification runs as a non-fatal gated step: it vets the leads the
+  // client received and reconciles the counts. It runs BEFORE generation because the
+  // vetted GoHighLevel lead and call picture is primary evidence for the brief's
+  // lead-quality and funnel reasoning -- generating first would hide it from the
+  // model. A failure here still must never block prep. runLeadVerification also
+  // persists the per-client review used by the client card and the dedicated page.
+  let leadVerification: LeadVerificationReview | undefined;
+  try {
+    leadVerification = await runLeadVerification(context, client.id);
+  } catch (error) {
+    console.warn(
+      `Lead verification during prep failed for ${client.id}: ${
+        error instanceof Error ? error.message : "unknown error"
+      }`,
+    );
+  }
+
   if (options.includeClaude && hasAnyLlmProvider(env)) {
     try {
-      const claudeOutput = await generateClaudeTouchOutput(context, env, prepPack, client, touch, varietyContext);
+      const claudeOutput = await generateClaudeTouchOutput(
+        context,
+        env,
+        prepPack,
+        client,
+        touch,
+        varietyContext,
+        leadVerification,
+      );
       if (claudeOutput) {
         executiveBrief = claudeOutput.output.executiveBrief;
         agenda = claudeOutput.output.agenda;
@@ -1556,21 +1623,6 @@ export async function prepareMonthlyTouch(
   if (prepAdditions.risks.length) risks = [...risks, ...prepAdditions.risks];
   if (prepAdditions.brief.length) {
     executiveBrief = `${executiveBrief}\n\nAdded by the account manager:\n${prepAdditions.brief.map((t) => `- ${t}`).join("\n")}`;
-  }
-
-  // Lead & call verification runs as a non-fatal gated step: it vets the leads
-  // the client received and reconciles the counts, but a failure here must never
-  // block prep. runLeadVerification also persists the per-client review used by
-  // the client card and the dedicated page.
-  let leadVerification: LeadVerificationReview | undefined;
-  try {
-    leadVerification = await runLeadVerification(context, client.id);
-  } catch (error) {
-    console.warn(
-      `Lead verification during prep failed for ${client.id}: ${
-        error instanceof Error ? error.message : "unknown error"
-      }`,
-    );
   }
 
   const updatedTouch: MonthlyTouchRecord = stripUndefinedDeep({

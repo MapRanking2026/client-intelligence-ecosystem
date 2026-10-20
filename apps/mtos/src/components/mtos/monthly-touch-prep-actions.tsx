@@ -10,6 +10,8 @@ interface MonthlyTouchPrepActionsProps {
   claudeError?: string;
   /** Which LLM provider answered (claude/openai/gemini), when generated. */
   claudeProvider?: string;
+  /** Whether the live call guide below has been generated for this touch. */
+  callGuideGenerated?: boolean;
 }
 
 const PROVIDER_LABEL: Record<string, string> = {
@@ -55,6 +57,7 @@ export function MonthlyTouchPrepActions({
   claudeStatus,
   claudeError,
   claudeProvider,
+  callGuideGenerated,
 }: MonthlyTouchPrepActionsProps) {
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
@@ -100,6 +103,11 @@ export function MonthlyTouchPrepActions({
           {claudeStatus === "generated" && claudeProvider
             ? ` · via ${PROVIDER_LABEL[claudeProvider] || claudeProvider}`
             : ""}
+          {` · Live call guide: ${callGuideGenerated ? "ready" : "not generated"}`}
+        </p>
+        <p className="text-xs text-slate-500">
+          Generate builds the preparation and the live call guide together — scroll down to walk from prep
+          into the call.
         </p>
       </div>
 
@@ -116,7 +124,7 @@ export function MonthlyTouchPrepActions({
           ) : (
             <RefreshCw className="h-4 w-4" />
           )}
-          Refresh prep pack
+          Refresh data only
         </button>
         <button
           type="button"
@@ -130,7 +138,7 @@ export function MonthlyTouchPrepActions({
           ) : (
             <Sparkles className="h-4 w-4" />
           )}
-          Refresh + Claude
+          {callGuideGenerated ? "Regenerate prep + call guide" : "Generate prep + call guide"}
         </button>
       </div>
 

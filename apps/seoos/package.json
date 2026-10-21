@@ -11,7 +11,8 @@
     "bootstrap:admin": "tsx scripts/bootstrap-seoos-admin.ts",
     "test:aiv": "tsx --test src/lib/ai-visibility/__tests__/*.test.ts src/lib/server/ai-visibility/__tests__/*.test.ts",
     "test:aiv:e2e": "playwright test --config e2e/playwright.config.ts",
-    "aiv:worker": "tsx scripts/aiv-worker.ts"
+    "aiv:worker": "tsx scripts/aiv-worker.ts",
+    "reset:password": "tsx scripts/reset-seoos-password.ts"
   },
   "dependencies": {
     "@cie/contracts": "*",

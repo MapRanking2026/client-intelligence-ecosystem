@@ -101,13 +101,87 @@ export interface GbpPerformanceSnapshot {
   directionRequests: number;
   searches: number;
   mapViews: number;
+  /** Messages started from the profile. Optional: snapshots taken before this metric was pulled omit it. */
+  conversations?: number;
+  /** Bookings made through the profile. Optional for the same reason as `conversations`. */
+  bookings?: number;
   previous: {
     calls: number;
     websiteClicks: number;
     directionRequests: number;
     searches: number;
     mapViews: number;
+    conversations?: number;
+    bookings?: number;
   };
+}
+
+/** A single review worth reading out loud during the touch (negative, or still unanswered). */
+export interface GbpReviewHighlight {
+  reviewId: string;
+  reviewer: string;
+  starRating: number | null;
+  comment: string;
+  createdAt: string;
+  replied: boolean;
+}
+
+/**
+ * Everything the Business Profile APIs tell us about a client's listing beyond the raw
+ * performance counters: review health, posting cadence, photo freshness, Q&A, the search
+ * terms that surfaced the profile, and how complete the listing itself is. Every block is
+ * nullable because each one comes from a different Google API, and a client's connection may
+ * have access to some but not all of them -- a block that could not be read is null and the
+ * reason lands in `notes`.
+ */
+export interface GbpProfileInsight {
+  locationId: string;
+  locationName: string;
+  /** The window the period-scoped figures below cover (same window as GbpPerformanceSnapshot). */
+  periodStart: string;
+  periodEnd: string;
+  reviews: {
+    totalCount: number | null;
+    averageRating: number | null;
+    newInPeriod: number | null;
+    unansweredCount: number | null;
+    /** Share of all reviews that have an owner reply. */
+    responseRatePercent: number | null;
+    lastReviewAt: string | null;
+    /** Unanswered reviews, worst rating first -- the AM's to-do list for the call. */
+    unanswered: GbpReviewHighlight[];
+    /** Recent 1-2 star reviews, whether or not they were answered. */
+    recentNegative: GbpReviewHighlight[];
+  } | null;
+  posts: {
+    countInPeriod: number | null;
+    lastPostAt: string | null;
+    lastPostSummary: string;
+  } | null;
+  photos: {
+    totalCount: number | null;
+    newInPeriod: number | null;
+    lastPhotoAt: string | null;
+  } | null;
+  questions: {
+    totalCount: number | null;
+    unansweredCount: number | null;
+  } | null;
+  /** Top search terms that put this profile in front of someone, highest impressions first. */
+  searchKeywords: { term: string; impressions: number | null; isThreshold: boolean }[];
+  completeness: {
+    /** Share of the listing fields MTOS checks that are actually filled in. */
+    percent: number | null;
+    /** Human-readable names of the fields still missing, for the client ask list. */
+    missing: string[];
+    primaryCategory: string;
+    additionalCategoryCount: number | null;
+    serviceItemCount: number | null;
+    /** Google's own open state for the listing: OPEN, CLOSED_TEMPORARILY, CLOSED_PERMANENTLY. */
+    openState: string;
+  } | null;
+  /** Why a block above is null, or anything else the AM should know about this listing. */
+  notes: string[];
 }
 
 export interface MatchedRankTrackerBusiness {
@@ -192,6 +266,11 @@ export interface SeoPerformancePack {
   heatmapGrids: HeatmapGrid[];
   checkinBusinesses: MapCheckinBusinessSummary[];
   gbpPerformance: GbpPerformanceSnapshot[];
+  /**
+   * Listing health from the Business Profile APIs (reviews, posts, photos, Q&A, completeness).
+   * Optional: prep packs persisted before GBP listing data was pulled omit it.
+   */
+  gbpProfiles?: GbpProfileInsight[];
   mapCheckInCount: number | null;
   availability: MetricAvailability;
   notes: string[];

@@ -9,6 +9,8 @@ import type {
   ClientParticipation,
   ClientRecord,
   CommitmentRecord,
+  GbpProfileInsight,
+  GbpReviewHighlight,
   HeatmapGrid,
   IssueSolutionItem,
   KeywordScanHistory,
@@ -480,6 +482,106 @@ function extractGbpPerformanceRows(payload: JsonRecord | undefined, clientId: st
     });
 }
 
+/**
+ * Listing health (reviews, posts, photos, Q&A, completeness) for the locations matched to this
+ * client. Shape-checked field by field because the snapshot is whatever the last sync wrote --
+ * a sync from before listing data was pulled simply yields nothing here.
+ */
+function extractGbpProfileInsights(payload: JsonRecord | undefined, clientId: string): GbpProfileInsight[] {
+  if (!payload) {
+    return [];
+  }
+
+  const locationsByClient = (payload.locationsByClient || {}) as JsonRecord;
+  const matchedLocations = Array.isArray(locationsByClient[clientId])
+    ? (locationsByClient[clientId] as JsonRecord[])
+    : [];
+  const matchedLocationIds = new Set(
+    matchedLocations.map((location) => String(location.name || "").split("/").filter(Boolean).pop()),
+  );
+
+  const rows = Array.isArray(payload.profileInsights) ? (payload.profileInsights as JsonRecord[]) : [];
+
+  const coerceHighlights = (value: unknown): GbpReviewHighlight[] =>
+    (Array.isArray(value) ? (value as JsonRecord[]) : []).map((item) => ({
+      reviewId: String(item.reviewId || ""),
+      reviewer: String(item.reviewer || "Anonymous"),
+      starRating: typeof item.starRating === "number" ? item.starRating : null,
+      comment: String(item.comment || ""),
+      createdAt: String(item.createdAt || ""),
+      replied: Boolean(item.replied),
+    }));
+
+  const coerceNumber = (value: unknown) => (typeof value === "number" && Number.isFinite(value) ? value : null);
+
+  return rows
+    .filter((row) => matchedLocationIds.has(String(row.locationId || "")))
+    .map((row) => {
+      const reviews = (row.reviews || null) as JsonRecord | null;
+      const posts = (row.posts || null) as JsonRecord | null;
+      const photos = (row.photos || null) as JsonRecord | null;
+      const questions = (row.questions || null) as JsonRecord | null;
+      const completeness = (row.completeness || null) as JsonRecord | null;
+
+      return {
+        locationId: String(row.locationId || ""),
+        locationName: String(row.locationName || ""),
+        periodStart: String(row.periodStart || ""),
+        periodEnd: String(row.periodEnd || ""),
+        reviews: reviews
+          ? {
+              totalCount: coerceNumber(reviews.totalCount),
+              averageRating: coerceNumber(reviews.averageRating),
+              newInPeriod: coerceNumber(reviews.newInPeriod),
+              unansweredCount: coerceNumber(reviews.unansweredCount),
+              responseRatePercent: coerceNumber(reviews.responseRatePercent),
+              lastReviewAt: typeof reviews.lastReviewAt === "string" ? reviews.lastReviewAt : null,
+              unanswered: coerceHighlights(reviews.unanswered),
+              recentNegative: coerceHighlights(reviews.recentNegative),
+            }
+          : null,
+        posts: posts
+          ? {
+              countInPeriod: coerceNumber(posts.countInPeriod),
+              lastPostAt: typeof posts.lastPostAt === "string" ? posts.lastPostAt : null,
+              lastPostSummary: String(posts.lastPostSummary || ""),
+            }
+          : null,
+        photos: photos
+          ? {
+              totalCount: coerceNumber(photos.totalCount),
+              newInPeriod: coerceNumber(photos.newInPeriod),
+              lastPhotoAt: typeof photos.lastPhotoAt === "string" ? photos.lastPhotoAt : null,
+            }
+          : null,
+        questions: questions
+          ? {
+              totalCount: coerceNumber(questions.totalCount),
+              unansweredCount: coerceNumber(questions.unansweredCount),
+            }
+          : null,
+        searchKeywords: (Array.isArray(row.searchKeywords) ? (row.searchKeywords as JsonRecord[]) : []).map(
+          (item) => ({
+            term: String(item.term || ""),
+            impressions: coerceNumber(item.impressions),
+            isThreshold: Boolean(item.isThreshold),
+          }),
+        ),
+        completeness: completeness
+          ? {
+              percent: coerceNumber(completeness.percent),
+              missing: (Array.isArray(completeness.missing) ? completeness.missing : []).map((item) => String(item)),
+              primaryCategory: String(completeness.primaryCategory || ""),
+              additionalCategoryCount: coerceNumber(completeness.additionalCategoryCount),
+              serviceItemCount: coerceNumber(completeness.serviceItemCount),
+              openState: String(completeness.openState || ""),
+            }
+          : null,
+        notes: (Array.isArray(row.notes) ? row.notes : []).map((item) => String(item)),
+      };
+    });
+}
+
 function metric(
   label: string,
   value: number | null,
@@ -628,10 +730,93 @@ function buildBusinessScorecard(
   };
 }
 
+function formatReviewAge(timestamp: string | null) {
+  if (!timestamp) {
+    return "never";
+  }
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime())) {
+    return "an unknown date";
+  }
+  const days = Math.floor((Date.now() - date.getTime()) / 86_400_000);
+  if (days <= 0) {
+    return "today";
+  }
+  return `${days} day${days === 1 ? "" : "s"} ago`;
+}
+
+/**
+ * Turns listing health into the handful of statements an AM would actually say on the call --
+ * unanswered reviews, a profile nobody has posted to, stale photos, an incomplete listing. Only
+ * conditions that need an action or an ask become notes; healthy listings stay quiet.
+ */
+function buildGbpListingNotes(gbpProfiles: GbpProfileInsight[]) {
+  const notes: string[] = [];
+
+  for (const profile of gbpProfiles) {
+    const label = profile.locationName || profile.locationId;
+
+    if (profile.completeness?.openState === "CLOSED_PERMANENTLY") {
+      notes.push(`"${label}" is marked CLOSED PERMANENTLY on Google -- this needs fixing before anything else.`);
+    } else if (profile.completeness?.openState === "CLOSED_TEMPORARILY") {
+      notes.push(`"${label}" is marked CLOSED TEMPORARILY on Google, which suppresses visibility -- confirm with the client.`);
+    }
+
+    const reviews = profile.reviews;
+    if (reviews) {
+      if (reviews.unansweredCount) {
+        notes.push(
+          `"${label}" has ${reviews.unansweredCount} unanswered review${reviews.unansweredCount === 1 ? "" : "s"}` +
+            `${reviews.responseRatePercent === null ? "" : ` (${reviews.responseRatePercent}% reply rate)`} -- replying is a same-day win to commit to on the call.`,
+        );
+      }
+      if (reviews.recentNegative.length) {
+        notes.push(
+          `"${label}" has ${reviews.recentNegative.length} recent 1-2 star review${reviews.recentNegative.length === 1 ? "" : "s"} -- read these before the call so the client is not the one to raise them.`,
+        );
+      }
+      if (!reviews.newInPeriod) {
+        notes.push(
+          `"${label}" gained no new reviews in the last 30 days (last review ${formatReviewAge(reviews.lastReviewAt)}) -- review velocity is the ask for this month.`,
+        );
+      }
+    }
+
+    if (profile.posts && !profile.posts.countInPeriod) {
+      notes.push(
+        `Nothing was posted to "${label}" in the last 30 days (last post ${formatReviewAge(profile.posts.lastPostAt)}).`,
+      );
+    }
+
+    if (profile.photos && !profile.photos.newInPeriod) {
+      notes.push(
+        `No new photos were added to "${label}" in the last 30 days (last photo ${formatReviewAge(profile.photos.lastPhotoAt)}) -- fresh photos are a standing client ask.`,
+      );
+    }
+
+    if (profile.questions?.unansweredCount) {
+      notes.push(
+        `"${label}" has ${profile.questions.unansweredCount} unanswered question${profile.questions.unansweredCount === 1 ? "" : "s"} on the listing.`,
+      );
+    }
+
+    if (profile.completeness?.missing.length) {
+      notes.push(
+        `"${label}" listing is ${profile.completeness.percent}% complete -- still missing: ${profile.completeness.missing.join(", ")}.`,
+      );
+    }
+
+    notes.push(...profile.notes);
+  }
+
+  return notes;
+}
+
 function buildSeoPerformance(
   matchedBusinesses: ReturnType<typeof extractMatchedBusinesses>,
   profiles: RankTrackerProfileEvidence[],
   gbpPerformance: ReturnType<typeof extractGbpPerformanceRows>,
+  gbpProfiles: GbpProfileInsight[],
   keywordHistory: KeywordScanHistory[],
   heatmapGrids: HeatmapGrid[],
   checkinBusinesses: MapCheckinBusinessSummary[],
@@ -668,6 +853,7 @@ function buildSeoPerformance(
   if (!checkinBusinesses.length) {
     notes.push("No Map Check-Ins business matched this client -- check-ins may not be part of this client's package.");
   }
+  notes.push(...buildGbpListingNotes(gbpProfiles));
 
   return {
     heatmaps: [],
@@ -677,11 +863,14 @@ function buildSeoPerformance(
     heatmapGrids,
     checkinBusinesses,
     gbpPerformance,
+    gbpProfiles,
     mapCheckInCount: checkinBusinesses.length
       ? checkinBusinesses.reduce((sum, business) => sum + business.totalPosts, 0)
       : null,
     availability:
-      matchedBusinesses.length || gbpPerformance.length || checkinBusinesses.length ? "available" : "unavailable",
+      matchedBusinesses.length || gbpPerformance.length || gbpProfiles.length || checkinBusinesses.length
+        ? "available"
+        : "unavailable",
     notes,
   };
 }
@@ -1408,6 +1597,7 @@ async function buildPrepPack(
 ) {
   const snapshotMatches = extractMatchedBusinesses(rawSnapshots.get("rank-tracker"), client.id);
   const gbpPerformance = extractGbpPerformanceRows(rawSnapshots.get("google-business-profile"), client.id);
+  const gbpProfiles = extractGbpProfileInsights(rawSnapshots.get("google-business-profile"), client.id);
   const snapshotCheckins = extractCheckinBusinesses(rawSnapshots.get("map-checkins"), client.id);
   const { profiles, keywordHistory, heatmapGrids, checkinBusinesses } = await fetchLiveRankTrackerEvidence(
     context,
@@ -1428,6 +1618,7 @@ async function buildPrepPack(
     matchedBusinesses,
     profiles,
     gbpPerformance,
+    gbpProfiles,
     keywordHistory,
     heatmapGrids,
     checkinBusinesses,

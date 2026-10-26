@@ -13,7 +13,12 @@ import type {
   IntegrationSyncJobRecord,
 } from "@/src/lib/contracts/integration-sync";
 import type { TenantContext } from "@/src/lib/contracts/mtos";
-import type { ClientRecord, CommitmentRecord } from "@/src/lib/mtos-data";
+import type {
+  ClientRecord,
+  CommitmentRecord,
+  GbpProfileInsight,
+  GbpReviewHighlight,
+} from "@/src/lib/mtos-data";
 import {
   getIntegrationConnection,
   getIntegrationCredentials,
@@ -873,7 +878,28 @@ async function syncGoogleBusinessProfile(context: TenantContext, record: Integra
     do {
       const url = new URL(`https://mybusinessbusinessinformation.googleapis.com/v1/${account.name}/locations`);
       url.searchParams.set("pageSize", "100");
-      url.searchParams.set("readMask", "name,title,storeCode,websiteUri,metadata");
+      // Wide enough to judge listing completeness on the touch (categories, hours, description,
+      // service items, open state), not just identify the location.
+      url.searchParams.set(
+        "readMask",
+        [
+          "name",
+          "title",
+          "storeCode",
+          "websiteUri",
+          "metadata",
+          "phoneNumbers",
+          "categories",
+          "storefrontAddress",
+          "regularHours",
+          "specialHours",
+          "serviceArea",
+          "profile",
+          "latlng",
+          "openInfo",
+          "serviceItems",
+        ].join(","),
+      );
       if (pageToken) {
         url.searchParams.set("pageToken", pageToken);
       }
@@ -888,6 +914,10 @@ async function syncGoogleBusinessProfile(context: TenantContext, record: Integra
         ...accountLocations.map((location) => ({
           ...location,
           accountName: account.accountName || account.name,
+          // The v4 reviews/posts/media endpoints are addressed as
+          // accounts/{id}/locations/{id}, so the owning account's RESOURCE name has to travel
+          // with the location -- accountName above is a display name and cannot be used here.
+          accountResourceName: account.name,
         })),
       );
       pageToken = typeof locationsPayload.nextPageToken === "string" ? locationsPayload.nextPageToken : undefined;
@@ -902,15 +932,27 @@ async function syncGoogleBusinessProfile(context: TenantContext, record: Integra
   const matchedLocations = Object.values(locationsByClient).flat();
 
   const performance: Array<Awaited<ReturnType<typeof fetchGbpLocationPerformance>>> = [];
+  const profileInsights: GbpProfileInsight[] = [];
+  // Sequential across locations to stay friendly to Google's per-minute quota, but the two pulls
+  // for a given location are independent and run together.
   for (const location of matchedLocations) {
-    performance.push(await fetchGbpLocationPerformance(accessToken, String(location.name || "")));
+    const [locationPerformance, locationInsights] = await Promise.all([
+      fetchGbpLocationPerformance(accessToken, String(location.name || "")),
+      fetchGbpProfileInsights(accessToken, location),
+    ]);
+    performance.push(locationPerformance);
+    profileInsights.push(locationInsights);
   }
+
+  const reviewTotal = profileInsights.reduce((sum, entry) => sum + (entry.reviews?.totalCount ?? 0), 0);
+  const unansweredTotal = profileInsights.reduce((sum, entry) => sum + (entry.reviews?.unansweredCount ?? 0), 0);
 
   return {
     summary: [
       `${formatSummaryCount("account", accounts.length)} loaded`,
       `${formatSummaryCount("location", locations.length)} discovered`,
       `${formatSummaryCount("location", matchedLocations.length)} matched to MTOS clients`,
+      `${formatSummaryCount("review", reviewTotal)} read (${unansweredTotal} unanswered)`,
     ].join(", "),
     counts,
     snapshotPayload: {
@@ -922,6 +964,7 @@ async function syncGoogleBusinessProfile(context: TenantContext, record: Integra
       locations,
       locationsByClient,
       performance: performance.filter((entry): entry is NonNullable<typeof entry> => Boolean(entry)),
+      profileInsights,
     },
   } satisfies SyncExecutionResult;
 }
@@ -934,6 +977,8 @@ const GBP_PERFORMANCE_METRICS = [
   "BUSINESS_IMPRESSIONS_DESKTOP_MAPS",
   "BUSINESS_IMPRESSIONS_MOBILE_SEARCH",
   "BUSINESS_IMPRESSIONS_MOBILE_MAPS",
+  "BUSINESS_CONVERSATIONS",
+  "BUSINESS_BOOKINGS",
 ];
 
 function formatIsoDate(date: Date) {
@@ -966,12 +1011,12 @@ function sumGbpDailyMetrics(payload: JsonRecord) {
   return totals;
 }
 
-async function fetchGbpLocationPerformance(accessToken: string, locationResourceName: string) {
-  const locationId = locationResourceName.split("/").filter(Boolean).pop();
-  if (!locationId) {
-    return null;
-  }
-
+/**
+ * The 30-day window the touch reports on, ending yesterday, plus the 30 days before it for the
+ * prior-period comparison. Shared by the performance counters and the listing insights so review,
+ * post, and photo counts cover the same window as the calls and clicks shown beside them.
+ */
+function getGbpReportingWindow() {
   const periodEnd = new Date();
   periodEnd.setUTCDate(periodEnd.getUTCDate() - 1);
   const periodStart = new Date(periodEnd);
@@ -980,6 +1025,16 @@ async function fetchGbpLocationPerformance(accessToken: string, locationResource
   priorEnd.setUTCDate(priorEnd.getUTCDate() - 1);
   const priorStart = new Date(priorEnd);
   priorStart.setUTCDate(priorStart.getUTCDate() - 29);
+  return { periodStart, periodEnd, priorStart, priorEnd };
+}
+
+async function fetchGbpLocationPerformance(accessToken: string, locationResourceName: string) {
+  const locationId = locationResourceName.split("/").filter(Boolean).pop();
+  if (!locationId) {
+    return null;
+  }
+
+  const { periodStart, periodEnd, priorStart, priorEnd } = getGbpReportingWindow();
 
   const buildUrl = (start: Date, end: Date) => {
     const url = new URL(
@@ -1017,12 +1072,16 @@ async function fetchGbpLocationPerformance(accessToken: string, locationResource
       directionRequests: current.BUSINESS_DIRECTION_REQUESTS || 0,
       searches: (current.BUSINESS_IMPRESSIONS_DESKTOP_SEARCH || 0) + (current.BUSINESS_IMPRESSIONS_MOBILE_SEARCH || 0),
       mapViews: (current.BUSINESS_IMPRESSIONS_DESKTOP_MAPS || 0) + (current.BUSINESS_IMPRESSIONS_MOBILE_MAPS || 0),
+      conversations: current.BUSINESS_CONVERSATIONS || 0,
+      bookings: current.BUSINESS_BOOKINGS || 0,
       previous: {
         calls: prior.CALL_CLICKS || 0,
         websiteClicks: prior.WEBSITE_CLICKS || 0,
         directionRequests: prior.BUSINESS_DIRECTION_REQUESTS || 0,
         searches: (prior.BUSINESS_IMPRESSIONS_DESKTOP_SEARCH || 0) + (prior.BUSINESS_IMPRESSIONS_MOBILE_SEARCH || 0),
         mapViews: (prior.BUSINESS_IMPRESSIONS_DESKTOP_MAPS || 0) + (prior.BUSINESS_IMPRESSIONS_MOBILE_MAPS || 0),
+        conversations: prior.BUSINESS_CONVERSATIONS || 0,
+        bookings: prior.BUSINESS_BOOKINGS || 0,
       },
     };
   } catch (error) {
@@ -1031,6 +1090,331 @@ async function fetchGbpLocationPerformance(accessToken: string, locationResource
       error: error instanceof Error ? error.message : "Performance metrics unavailable for this location",
     };
   }
+}
+
+/** Google reports star ratings as an enum, not a number. */
+const GBP_STAR_RATINGS: Record<string, number> = { ONE: 1, TWO: 2, THREE: 3, FOUR: 4, FIVE: 5 };
+
+/**
+ * Paging caps. A long-standing client can have thousands of reviews and photos; the touch only
+ * needs recent history plus accurate totals (which Google returns on every page), so paging stops
+ * early to keep the whole sync inside the route time budget. When a cap is hit the derived counts
+ * become floors and the insight records a note saying so.
+ */
+const GBP_MAX_REVIEW_PAGES = 6;
+const GBP_REVIEW_PAGE_SIZE = 50;
+const GBP_HIGHLIGHT_LIMIT = 5;
+
+function truncateForSnapshot(value: string, maxLength = 180) {
+  const trimmed = value.trim();
+  return trimmed.length <= maxLength ? trimmed : `${trimmed.slice(0, maxLength - 1).trimEnd()}...`;
+}
+
+function isWithinWindow(value: string, start: Date, end: Date) {
+  const timestamp = new Date(value).getTime();
+  if (Number.isNaN(timestamp)) {
+    return false;
+  }
+  // `end` is a date-only boundary, so count anything up to the close of that day.
+  return timestamp >= start.getTime() && timestamp <= end.getTime() + 86_400_000 - 1;
+}
+
+function toReviewHighlight(review: JsonRecord): GbpReviewHighlight {
+  const reviewer = (review.reviewer || {}) as JsonRecord;
+  const reply = (review.reviewReply || null) as JsonRecord | null;
+  return {
+    reviewId: String(review.reviewId || review.name || ""),
+    reviewer: String(reviewer.displayName || "Anonymous"),
+    starRating: GBP_STAR_RATINGS[String(review.starRating || "")] ?? null,
+    comment: truncateForSnapshot(String(review.comment || "")),
+    createdAt: String(review.createTime || ""),
+    replied: Boolean(reply && String(reply.comment || "").trim()),
+  };
+}
+
+/**
+ * Reviews live only on the legacy v4 API, which is also the part of Business Profile access Google
+ * gates behind approval -- so this is the call most likely to fail on a connection that can already
+ * read locations and performance. Callers report the failure rather than aborting the sync.
+ */
+async function fetchGbpReviews(accessToken: string, locationPath: string, periodStart: Date, periodEnd: Date) {
+  const collected: JsonRecord[] = [];
+  let totalCount: number | null = null;
+  let averageRating: number | null = null;
+  let pageToken = "";
+  let pages = 0;
+
+  do {
+    const url = new URL(`https://mybusiness.googleapis.com/v4/${locationPath}/reviews`);
+    url.searchParams.set("pageSize", String(GBP_REVIEW_PAGE_SIZE));
+    url.searchParams.set("orderBy", "updateTime desc");
+    if (pageToken) {
+      url.searchParams.set("pageToken", pageToken);
+    }
+
+    const payload = await fetchJson(url.toString(), { headers: getBearerHeaders(accessToken) });
+    const reviews = Array.isArray(payload.reviews) ? (payload.reviews as JsonRecord[]) : [];
+    collected.push(...reviews);
+    if (typeof payload.totalReviewCount === "number") {
+      totalCount = payload.totalReviewCount;
+    }
+    if (typeof payload.averageRating === "number") {
+      averageRating = Math.round(payload.averageRating * 10) / 10;
+    }
+    pageToken = typeof payload.nextPageToken === "string" ? payload.nextPageToken : "";
+    pages += 1;
+  } while (pageToken && pages < GBP_MAX_REVIEW_PAGES);
+
+  const highlights = collected.map(toReviewHighlight);
+  const answered = highlights.filter((review) => review.replied).length;
+  // Worst rating first: an unanswered one-star is the first thing to handle on the call.
+  const unanswered = highlights
+    .filter((review) => !review.replied)
+    .sort((left, right) => (left.starRating ?? 5) - (right.starRating ?? 5));
+  const recentNegative = highlights
+    .filter((review) => review.starRating !== null && review.starRating <= 2)
+    .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+  const lastReviewAt = highlights
+    .map((review) => review.createdAt)
+    .filter(Boolean)
+    .sort((left, right) => right.localeCompare(left))[0];
+
+  return {
+    reviews: {
+      totalCount: totalCount ?? highlights.length,
+      averageRating,
+      newInPeriod: highlights.filter((review) => isWithinWindow(review.createdAt, periodStart, periodEnd)).length,
+      unansweredCount: unanswered.length,
+      responseRatePercent: highlights.length ? Math.round((answered / highlights.length) * 100) : null,
+      lastReviewAt: lastReviewAt || null,
+      unanswered: unanswered.slice(0, GBP_HIGHLIGHT_LIMIT),
+      recentNegative: recentNegative.slice(0, GBP_HIGHLIGHT_LIMIT),
+    },
+    capped: Boolean(pageToken),
+    sampleSize: highlights.length,
+  };
+}
+
+/** Posts (v4). Tells the AM whether anyone has actually been posting to the profile. */
+async function fetchGbpPosts(accessToken: string, locationPath: string, periodStart: Date, periodEnd: Date) {
+  const url = new URL(`https://mybusiness.googleapis.com/v4/${locationPath}/localPosts`);
+  url.searchParams.set("pageSize", "100");
+  const payload = await fetchJson(url.toString(), { headers: getBearerHeaders(accessToken) });
+  const posts = Array.isArray(payload.localPosts) ? (payload.localPosts as JsonRecord[]) : [];
+  const published = posts
+    .filter((post) => String(post.state || "") !== "REJECTED")
+    .map((post) => ({ createdAt: String(post.createTime || ""), summary: String(post.summary || "") }))
+    .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+
+  return {
+    countInPeriod: published.filter((post) => isWithinWindow(post.createdAt, periodStart, periodEnd)).length,
+    lastPostAt: published[0]?.createdAt || null,
+    lastPostSummary: published[0]?.summary ? truncateForSnapshot(published[0].summary) : "",
+  };
+}
+
+/** Photos (v4). Fresh photos are a standing client ask, so recency matters more than the total. */
+async function fetchGbpPhotos(accessToken: string, locationPath: string, periodStart: Date, periodEnd: Date) {
+  const url = new URL(`https://mybusiness.googleapis.com/v4/${locationPath}/media`);
+  url.searchParams.set("pageSize", "100");
+  const payload = await fetchJson(url.toString(), { headers: getBearerHeaders(accessToken) });
+  const items = Array.isArray(payload.mediaItems) ? (payload.mediaItems as JsonRecord[]) : [];
+  const dates = items
+    .map((item) => String(item.createTime || ""))
+    .filter(Boolean)
+    .sort((left, right) => right.localeCompare(left));
+
+  return {
+    totalCount: typeof payload.totalMediaItemCount === "number" ? payload.totalMediaItemCount : items.length,
+    newInPeriod: dates.filter((date) => isWithinWindow(date, periodStart, periodEnd)).length,
+    lastPhotoAt: dates[0] || null,
+  };
+}
+
+/** Q&A. An unanswered question on a listing is a lead talking to nobody. */
+async function fetchGbpQuestions(accessToken: string, locationId: string) {
+  const url = new URL(`https://mybusinessqanda.googleapis.com/v1/locations/${locationId}/questions`);
+  url.searchParams.set("pageSize", "20");
+  url.searchParams.set("answersPerQuestion", "1");
+  const payload = await fetchJson(url.toString(), { headers: getBearerHeaders(accessToken) });
+  const questions = Array.isArray(payload.questions) ? (payload.questions as JsonRecord[]) : [];
+
+  return {
+    totalCount: typeof payload.totalSize === "number" ? payload.totalSize : questions.length,
+    unansweredCount: questions.filter((question) => !Number(question.totalAnswerCount || 0)).length,
+  };
+}
+
+/**
+ * The search terms people actually typed before this profile showed up. Google publishes these
+ * monthly and never for the current month, so this reads the last complete calendar month.
+ */
+async function fetchGbpSearchKeywords(accessToken: string, locationId: string) {
+  const month = new Date();
+  month.setUTCDate(1);
+  month.setUTCMonth(month.getUTCMonth() - 1);
+  const year = month.getUTCFullYear();
+  const monthNumber = month.getUTCMonth() + 1;
+
+  const url = new URL(
+    `https://businessprofileperformance.googleapis.com/v1/locations/${locationId}/searchkeywords/impressions/monthly`,
+  );
+  url.searchParams.set("monthlyRange.start_month.year", String(year));
+  url.searchParams.set("monthlyRange.start_month.month", String(monthNumber));
+  url.searchParams.set("monthlyRange.end_month.year", String(year));
+  url.searchParams.set("monthlyRange.end_month.month", String(monthNumber));
+
+  const payload = await fetchJson(url.toString(), { headers: getBearerHeaders(accessToken) });
+  const rows = Array.isArray(payload.searchKeywordsCounts) ? (payload.searchKeywordsCounts as JsonRecord[]) : [];
+
+  return rows
+    .map((row) => {
+      const insights = (row.insightsValue || {}) as JsonRecord;
+      // Low-volume terms come back as a threshold ("fewer than N") instead of an exact count.
+      const exact = insights.value;
+      const threshold = insights.threshold;
+      return {
+        term: String(row.searchKeyword || ""),
+        impressions: Number(exact ?? threshold) || null,
+        isThreshold: exact === undefined || exact === null,
+      };
+    })
+    .filter((row) => row.term)
+    .sort((left, right) => (right.impressions ?? 0) - (left.impressions ?? 0))
+    .slice(0, 10);
+}
+
+/**
+ * Listing completeness, derived from the location record itself -- no extra API call. These are the
+ * fields Map Ranking asks clients to fill in, so `missing` doubles as the client ask list.
+ */
+function buildGbpCompleteness(location: JsonRecord) {
+  const categories = (location.categories || {}) as JsonRecord;
+  const phoneNumbers = (location.phoneNumbers || {}) as JsonRecord;
+  const regularHours = (location.regularHours || {}) as JsonRecord;
+  const profile = (location.profile || {}) as JsonRecord;
+  const openInfo = (location.openInfo || {}) as JsonRecord;
+  const serviceArea = (location.serviceArea || {}) as JsonRecord;
+  const primaryCategory = (categories.primaryCategory || {}) as JsonRecord;
+  const additionalCategories = Array.isArray(categories.additionalCategories)
+    ? (categories.additionalCategories as JsonRecord[])
+    : [];
+  const serviceItems = Array.isArray(location.serviceItems) ? (location.serviceItems as JsonRecord[]) : [];
+  const primaryCategoryName = String(primaryCategory.displayName || primaryCategory.name || "").trim();
+
+  const checks: Array<{ label: string; filled: boolean }> = [
+    { label: "Website link", filled: Boolean(String(location.websiteUri || "").trim()) },
+    { label: "Primary phone number", filled: Boolean(String(phoneNumbers.primaryPhone || "").trim()) },
+    { label: "Primary category", filled: Boolean(primaryCategoryName) },
+    { label: "Additional categories", filled: additionalCategories.length > 0 },
+    { label: "Business hours", filled: Array.isArray(regularHours.periods) && regularHours.periods.length > 0 },
+    { label: "Business description", filled: Boolean(String(profile.description || "").trim()) },
+    {
+      label: "Address or service area",
+      filled: Boolean(location.storefrontAddress) || Boolean(serviceArea.businessType || serviceArea.places),
+    },
+    { label: "Services list", filled: serviceItems.length > 0 },
+  ];
+
+  const filled = checks.filter((check) => check.filled).length;
+
+  return {
+    percent: Math.round((filled / checks.length) * 100),
+    missing: checks.filter((check) => !check.filled).map((check) => check.label),
+    primaryCategory: primaryCategoryName,
+    additionalCategoryCount: additionalCategories.length,
+    serviceItemCount: serviceItems.length,
+    openState: String(openInfo.status || ""),
+  };
+}
+
+/**
+ * Pulls everything about one listing that is not a raw performance counter. Each API is fetched
+ * independently and a failure becomes a note rather than an exception: the Business Profile APIs are
+ * approved and quota'd separately, so losing reviews must not also cost us posts, photos, or Q&A.
+ */
+async function fetchGbpProfileInsights(accessToken: string, location: JsonRecord): Promise<GbpProfileInsight> {
+  const locationId = String(location.name || "").split("/").filter(Boolean).pop() || "";
+  const accountResourceName = String(location.accountResourceName || "");
+  const locationPath = accountResourceName && locationId ? `${accountResourceName}/locations/${locationId}` : "";
+  const { periodStart, periodEnd } = getGbpReportingWindow();
+
+  const insight: GbpProfileInsight = {
+    locationId,
+    locationName: String(location.title || ""),
+    periodStart: formatIsoDate(periodStart),
+    periodEnd: formatIsoDate(periodEnd),
+    reviews: null,
+    posts: null,
+    photos: null,
+    questions: null,
+    searchKeywords: [],
+    completeness: buildGbpCompleteness(location),
+    notes: [],
+  };
+
+  const describe = (error: unknown) => (error instanceof Error ? error.message : "unknown error");
+
+  if (!locationId) {
+    insight.notes.push("This location has no resource id, so no listing data could be read for it.");
+    return insight;
+  }
+
+  if (!locationPath) {
+    insight.notes.push(
+      "Reviews, posts, and photos need the owning Business Profile account id, which this location is missing -- re-run the sync to repopulate it.",
+    );
+  }
+
+  // These hit five independent Google APIs, so they run together: a location would otherwise cost
+  // five round trips, and a tenant with dozens of locations would blow the sync route's budget.
+  // allSettled keeps the per-API isolation -- one rejected API only costs us that one block.
+  const [reviewResult, postResult, photoResult, questionResult, keywordResult] = await Promise.allSettled([
+    locationPath ? fetchGbpReviews(accessToken, locationPath, periodStart, periodEnd) : Promise.resolve(null),
+    locationPath ? fetchGbpPosts(accessToken, locationPath, periodStart, periodEnd) : Promise.resolve(null),
+    locationPath ? fetchGbpPhotos(accessToken, locationPath, periodStart, periodEnd) : Promise.resolve(null),
+    fetchGbpQuestions(accessToken, locationId),
+    fetchGbpSearchKeywords(accessToken, locationId),
+  ]);
+
+  if (reviewResult.status === "fulfilled") {
+    if (reviewResult.value) {
+      insight.reviews = reviewResult.value.reviews;
+      if (reviewResult.value.capped) {
+        insight.notes.push(
+          `Only the ${reviewResult.value.sampleSize} most recent reviews were read, so the reply rate and unanswered count cover that sample rather than the full history.`,
+        );
+      }
+    }
+  } else {
+    insight.notes.push(`Reviews could not be read: ${describe(reviewResult.reason)}`);
+  }
+
+  if (postResult.status === "fulfilled") {
+    insight.posts = postResult.value;
+  } else {
+    insight.notes.push(`Profile posts could not be read: ${describe(postResult.reason)}`);
+  }
+
+  if (photoResult.status === "fulfilled") {
+    insight.photos = photoResult.value;
+  } else {
+    insight.notes.push(`Photos could not be read: ${describe(photoResult.reason)}`);
+  }
+
+  if (questionResult.status === "fulfilled") {
+    insight.questions = questionResult.value;
+  } else {
+    insight.notes.push(`Questions and answers could not be read: ${describe(questionResult.reason)}`);
+  }
+
+  if (keywordResult.status === "fulfilled") {
+    insight.searchKeywords = keywordResult.value;
+  } else {
+    insight.notes.push(`Search keywords could not be read: ${describe(keywordResult.reason)}`);
+  }
+
+  return insight;
 }
 
 function getLast28DaysRange() {
@@ -2269,6 +2653,7 @@ async function testGoogleBusinessProfileConnection(
   // 1. Account Management API -- the gate: nothing else works without it.
   const accountsHost = "mybusinessaccountmanagement.googleapis.com";
   let firstAccountName = "";
+  let firstLocationPath = "";
   {
     const { response, payload } = await fetchWithStatus(`https://${accountsHost}/v1/accounts`, accessToken);
     if (response.ok) {
@@ -2305,6 +2690,7 @@ async function testGoogleBusinessProfileConnection(
     if (response.ok) {
       const locations = Array.isArray(payload.locations) ? (payload.locations as JsonRecord[]) : [];
       firstLocationId = String(locations[0]?.name || "").split("/").filter(Boolean).pop() || "";
+      firstLocationPath = firstLocationId ? `${firstAccountName}/locations/${firstLocationId}` : "";
       checks.push({
         api: "Business Information API",
         endpoint: infoHost,
@@ -2376,6 +2762,76 @@ async function testGoogleBusinessProfileConnection(
       endpoint: performanceHost,
       status: "skipped",
       detail: "No location was available to sample metrics for.",
+    });
+  }
+
+  // 4. Legacy v4 API -- the ONLY source of reviews, posts, and photos, and approved separately
+  // from the v1 APIs above. A connection can pass checks 1-3 and still fail here.
+  const legacyHost = "mybusiness.googleapis.com";
+  if (firstLocationPath) {
+    const url = new URL(`https://${legacyHost}/v4/${firstLocationPath}/reviews`);
+    url.searchParams.set("pageSize", "1");
+    const { response, payload } = await fetchWithStatus(url.toString(), accessToken);
+    if (response.ok) {
+      const total = typeof payload.totalReviewCount === "number" ? payload.totalReviewCount : 0;
+      checks.push({
+        api: "My Business API (reviews, posts, photos)",
+        endpoint: legacyHost,
+        status: "ok",
+        httpStatus: response.status,
+        detail: `Reviews are readable (${formatSummaryCount("review", total)} on the sampled location).`,
+      });
+    } else {
+      const { message, googleStatus } = extractGoogleError(payload, response.status);
+      checks.push({
+        api: "My Business API (reviews, posts, photos)",
+        endpoint: legacyHost,
+        status: "failed",
+        httpStatus: response.status,
+        detail: message,
+        approvalBlocked: looksLikeApprovalBlock(response.status, message, googleStatus),
+      });
+    }
+  } else {
+    checks.push({
+      api: "My Business API (reviews, posts, photos)",
+      endpoint: legacyHost,
+      status: "skipped",
+      detail: "No account/location pair was available to sample reviews for.",
+    });
+  }
+
+  // 5. Q&A API -- unanswered questions on the listing.
+  const qandaHost = "mybusinessqanda.googleapis.com";
+  if (firstLocationId) {
+    const url = new URL(`https://${qandaHost}/v1/locations/${firstLocationId}/questions`);
+    url.searchParams.set("pageSize", "1");
+    const { response, payload } = await fetchWithStatus(url.toString(), accessToken);
+    if (response.ok) {
+      checks.push({
+        api: "Q&A API",
+        endpoint: qandaHost,
+        status: "ok",
+        httpStatus: response.status,
+        detail: "Listing questions are readable for the sampled location.",
+      });
+    } else {
+      const { message, googleStatus } = extractGoogleError(payload, response.status);
+      checks.push({
+        api: "Q&A API",
+        endpoint: qandaHost,
+        status: "failed",
+        httpStatus: response.status,
+        detail: message,
+        approvalBlocked: looksLikeApprovalBlock(response.status, message, googleStatus),
+      });
+    }
+  } else {
+    checks.push({
+      api: "Q&A API",
+      endpoint: qandaHost,
+      status: "skipped",
+      detail: "No location was available to sample questions for.",
     });
   }
 

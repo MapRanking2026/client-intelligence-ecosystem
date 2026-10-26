@@ -243,6 +243,7 @@ async function generateClaudeSections(
                       })),
                     })),
                     gbpPerformance: prepPack.seoPerformance.gbpPerformance,
+                    gbpProfiles: prepPack.seoPerformance.gbpProfiles,
                     checkinBusinesses: prepPack.seoPerformance.checkinBusinesses,
                     notes: prepPack.seoPerformance.notes,
                   }
@@ -302,6 +303,7 @@ async function generatePresentationAids(
       strategicAction: prepPack?.strategicAction,
       adsPerformance: prepPack?.adsPerformance,
       gbpPerformance: prepPack?.seoPerformance?.gbpPerformance,
+      gbpProfiles: prepPack?.seoPerformance?.gbpProfiles,
     },
     null,
     2,

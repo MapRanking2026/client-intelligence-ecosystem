@@ -5,6 +5,7 @@ import type {
   AdsPerformancePack,
   BusinessScorecard,
   ClientParticipation,
+  GbpProfileInsight,
   HeatmapComparison,
   HeatmapGrid,
   IssueSolutionItem,
@@ -425,6 +426,91 @@ function ProfileEvidenceBlock({ profile }: { profile: RankTrackerProfileEvidence
   );
 }
 
+function formatListingDate(value: string | null) {
+  if (!value) {
+    return "never";
+  }
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "unknown" : date.toLocaleDateString();
+}
+
+/** Listing health for one matched Business Profile location: reviews first, then everything else. */
+function GbpProfileBlock({ profile }: { profile: GbpProfileInsight }) {
+  const reviews = profile.reviews;
+  const completeness = profile.completeness;
+
+  return (
+    <div className="space-y-3 rounded-2xl border border-white/8 bg-black/20 p-4">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <p className="text-sm font-semibold text-white">{profile.locationName || profile.locationId}</p>
+        <p className="text-[11px] uppercase tracking-[0.2em] text-slate-400">
+          Listing health -- {profile.periodStart} to {profile.periodEnd}
+        </p>
+      </div>
+
+      {reviews ? (
+        <div className="grid grid-cols-2 gap-2 text-sm text-slate-200 sm:grid-cols-4">
+          <span>
+            Rating: {reviews.averageRating ?? "—"}
+            {reviews.totalCount === null ? "" : ` (${reviews.totalCount} reviews)`}
+          </span>
+          <span>New in period: {reviews.newInPeriod ?? "—"}</span>
+          <span className={reviews.unansweredCount ? "text-amber-200" : undefined}>
+            Unanswered: {reviews.unansweredCount ?? "—"}
+          </span>
+          <span>Reply rate: {reviews.responseRatePercent === null ? "—" : `${reviews.responseRatePercent}%`}</span>
+        </div>
+      ) : null}
+
+      <div className="grid grid-cols-2 gap-2 text-sm text-slate-300 sm:grid-cols-4">
+        {profile.posts ? (
+          <span>
+            Posts: {profile.posts.countInPeriod ?? "—"} (last {formatListingDate(profile.posts.lastPostAt)})
+          </span>
+        ) : null}
+        {profile.photos ? (
+          <span>
+            New photos: {profile.photos.newInPeriod ?? "—"} (last {formatListingDate(profile.photos.lastPhotoAt)})
+          </span>
+        ) : null}
+        {profile.questions ? (
+          <span className={profile.questions.unansweredCount ? "text-amber-200" : undefined}>
+            Q&amp;A unanswered: {profile.questions.unansweredCount ?? "—"} of {profile.questions.totalCount ?? "—"}
+          </span>
+        ) : null}
+        {completeness ? <span>Listing complete: {completeness.percent === null ? "—" : `${completeness.percent}%`}</span> : null}
+      </div>
+
+      {completeness?.missing.length ? (
+        <p className="text-sm text-amber-100">Missing from the listing: {completeness.missing.join(", ")}</p>
+      ) : null}
+
+      {reviews?.unanswered.length ? (
+        <div className="space-y-1">
+          <p className="text-[11px] uppercase tracking-[0.2em] text-slate-400">Needs a reply</p>
+          {reviews.unanswered.map((review) => (
+            <p key={review.reviewId} className="text-sm text-slate-200">
+              <span className="font-semibold">{review.starRating ?? "?"}★ {review.reviewer}</span>
+              {review.comment ? ` — ${review.comment}` : ""}
+            </p>
+          ))}
+        </div>
+      ) : null}
+
+      {profile.searchKeywords.length ? (
+        <div className="space-y-1">
+          <p className="text-[11px] uppercase tracking-[0.2em] text-slate-400">Top search terms (last full month)</p>
+          <p className="text-sm text-slate-300">
+            {profile.searchKeywords
+              .map((keyword) => `${keyword.term} (${keyword.isThreshold ? "<" : ""}${keyword.impressions ?? "—"})`)
+              .join(" · ")}
+          </p>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export function SeoPerformancePanel({ seo }: { seo: SeoPerformancePack }) {
   // Persisted prep packs can predate some of these fields, so default every
   // collection to an empty array — a missing field must never crash the page.
@@ -434,6 +520,7 @@ export function SeoPerformancePanel({ seo }: { seo: SeoPerformancePack }) {
   const heatmapGrids = seo.heatmapGrids ?? [];
   const checkinBusinesses = seo.checkinBusinesses ?? [];
   const gbpPerformance = seo.gbpPerformance ?? [];
+  const gbpProfiles = seo.gbpProfiles ?? [];
   const notes = seo.notes ?? [];
   const activeProfiles = profiles.filter((profile) => profile.status === "active");
   const inactiveProfiles = profiles.filter((profile) => profile.status === "inactive");
@@ -563,8 +650,26 @@ export function SeoPerformancePanel({ seo }: { seo: SeoPerformancePack }) {
                 <span>
                   Searches: {row.searches} ({row.previous.searches} prior)
                 </span>
+                {row.conversations === undefined ? null : (
+                  <span>
+                    Messages: {row.conversations} ({row.previous.conversations ?? 0} prior)
+                  </span>
+                )}
+                {row.bookings === undefined ? null : (
+                  <span>
+                    Bookings: {row.bookings} ({row.previous.bookings ?? 0} prior)
+                  </span>
+                )}
               </div>
             </div>
+          ))}
+        </div>
+      ) : null}
+
+      {gbpProfiles.length ? (
+        <div className="space-y-3">
+          {gbpProfiles.map((profile) => (
+            <GbpProfileBlock key={profile.locationId} profile={profile} />
           ))}
         </div>
       ) : null}

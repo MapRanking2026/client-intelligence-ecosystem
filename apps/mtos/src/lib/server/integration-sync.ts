@@ -420,6 +420,10 @@ function dropUndefinedDeep<T>(value: T): T {
   return value;
 }
 
+/** Firestore's hard per-document ceiling, and the point at which a snapshot is worth a warning. */
+const FIRESTORE_DOCUMENT_LIMIT_BYTES = 1_048_576;
+const SNAPSHOT_SIZE_WARNING_BYTES = Math.floor(FIRESTORE_DOCUMENT_LIMIT_BYTES * 0.8);
+
 async function saveIntegrationSnapshot(
   context: TenantContext,
   providerId: IntegrationProviderId,
@@ -438,7 +442,25 @@ async function saveIntegrationSnapshot(
 
   // Strip undefined before the write -- a single unset optional field (e.g. a
   // contact with no email) would otherwise reject the entire snapshot.
-  await db.doc(integrationSnapshotPath(context.tenantId, providerId)).set(dropUndefinedDeep(snapshot));
+  const document = dropUndefinedDeep(snapshot);
+
+  // Firestore caps a document at 1MiB and reports an overflow only as a raw INVALID_ARGUMENT with
+  // a byte count, which says nothing about which provider or which part of the payload grew. A
+  // snapshot holds whatever an upstream API returned, so this is a live risk on every provider:
+  // check it here and name the provider, so the next overflow is diagnosable from the message.
+  const approximateBytes = Buffer.byteLength(JSON.stringify(document), "utf8");
+  if (approximateBytes > SNAPSHOT_SIZE_WARNING_BYTES) {
+    console.warn(
+      `${providerId} snapshot is ${approximateBytes} bytes, close to Firestore's ${FIRESTORE_DOCUMENT_LIMIT_BYTES}-byte document limit. Narrow what the sync stores before it overflows.`,
+    );
+  }
+  if (approximateBytes > FIRESTORE_DOCUMENT_LIMIT_BYTES) {
+    throw new Error(
+      `The ${getIntegrationDefinition(providerId).name} snapshot is ${approximateBytes} bytes, over Firestore's ${FIRESTORE_DOCUMENT_LIMIT_BYTES}-byte document limit, so it was not saved. The sync is storing more per record than it needs to -- narrow the stored payload.`,
+    );
+  }
+
+  await db.doc(integrationSnapshotPath(context.tenantId, providerId)).set(document);
 }
 
 async function getConnectedRecord(context: TenantContext, providerId: IntegrationProviderId) {
@@ -808,6 +830,24 @@ async function syncClickUp(context: TenantContext, record: IntegrationConnection
   } satisfies SyncExecutionResult;
 }
 
+/**
+ * The only location fields anything reads back out of the snapshot: the resource name (which
+ * carries the id), the title used for name matching, and the three fields the client-mapping
+ * picker shows. The full Google location record is 50-100x this -- categories, hours, service
+ * items, addresses -- and is needed only while the sync runs, to derive listing completeness.
+ * Storing the fat record for every location (twice, since locationsByClient repeats it) pushed
+ * this snapshot past Firestore's 1MB per-document ceiling, so only this projection is written.
+ */
+function toSlimGbpLocation(location: JsonRecord): JsonRecord {
+  return {
+    name: String(location.name || ""),
+    title: String(location.title || ""),
+    storeCode: String(location.storeCode || ""),
+    websiteUri: String(location.websiteUri || ""),
+    accountName: String(location.accountName || ""),
+  };
+}
+
 function matchLocationsToClients(clients: ClientRecord[], locations: Array<Record<string, unknown>>) {
   const byClient: Record<string, Array<Record<string, unknown>>> = {};
 
@@ -961,8 +1001,14 @@ async function syncGoogleBusinessProfile(context: TenantContext, record: Integra
         name: account.accountName || "Unknown account",
         type: account.type || "UNKNOWN",
       })),
-      locations,
-      locationsByClient,
+      // Slimmed at the write boundary: matching and completeness above ran on the full records.
+      locations: locations.map(toSlimGbpLocation),
+      locationsByClient: Object.fromEntries(
+        Object.entries(locationsByClient).map(([matchedClientId, matched]) => [
+          matchedClientId,
+          matched.map(toSlimGbpLocation),
+        ]),
+      ),
       performance: performance.filter((entry): entry is NonNullable<typeof entry> => Boolean(entry)),
       profileInsights,
     },

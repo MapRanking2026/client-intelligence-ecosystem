@@ -10,7 +10,7 @@
  *
  * Run with: npm run check:api-errors
  */
-import { describeApiError } from "@/src/lib/server/integration-sync";
+import { describeApiError, describeBodylessGoogleError } from "@/src/lib/server/integration-sync";
 
 let failures = 0;
 
@@ -83,6 +83,30 @@ check(
 );
 check("error is an array", describeApiError({ error: ["nope"] }, 400), "Request failed with status 400");
 check("blank strings are not messages", describeApiError({ error: "   ", message: "  " }, 400), "Request failed with status 400");
+
+// A connection test is only worth the click if a failure says something. The Q&A probe returned a
+// 404 whose body Google left empty, and the test reported "Request failed with status 404" -- a
+// status code dressed up as an explanation. These pin what a bodyless error says instead.
+check(
+  "bodyless 404 names both causes",
+  describeBodylessGoogleError(404, ""),
+  /not enabled for this Google Cloud project[\s\S]+not one this API serves/,
+);
+check(
+  "bodyless 500 does not invent a cause",
+  describeBodylessGoogleError(500, ""),
+  "Google returned 500 with an empty body, so it gave no reason.",
+);
+check(
+  "unparseable body is carried, not dropped",
+  describeBodylessGoogleError(502, "<html>\n  <title>Error 502 (Server Error)</title>\n</html>"),
+  "Google returned 502 with a body that is not the usual JSON error: <html> <title>Error 502 (Server Error)</title> </html>",
+);
+check(
+  "a long unparseable body is trimmed",
+  describeBodylessGoogleError(503, "x".repeat(500)),
+  `Google returned 503 with a body that is not the usual JSON error: ${"x".repeat(160)}`,
+);
 
 if (failures) {
   console.error(`\n${failures} check(s) failed.`);

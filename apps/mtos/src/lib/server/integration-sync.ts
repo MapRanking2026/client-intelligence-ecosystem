@@ -3009,8 +3009,41 @@ async function fetchWithStatus(url: string, accessToken: string, init?: RequestI
     ...init,
     headers: { ...getBearerHeaders(accessToken), ...(init?.headers as Record<string, string> | undefined) },
   });
-  const payload = (await response.json().catch(() => ({}))) as JsonRecord;
+  const raw = await response.text();
+  let payload: JsonRecord = {};
+  if (raw.trim()) {
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      if (parsed && typeof parsed === "object") {
+        payload = parsed as JsonRecord;
+      }
+    } catch {
+      // Deliberately swallowed: the synthesized error below carries the unparsed body instead.
+    }
+  }
+  if (!response.ok && !extractGoogleError(payload, response.status).messageFromGoogle) {
+    // An error Google answers with no usable JSON leaves the caller holding a bare status code,
+    // which is how "Request failed with status 404" came to be the whole of what the Q&A probe
+    // could say. Carry the body, or the absence of one, instead of discarding it.
+    payload = { error: { message: describeBodylessGoogleError(response.status, raw) } };
+  }
   return { response, payload };
+}
+
+/**
+ * What to say when Google answers an error without the usual `{ error: { message } }`. The 404 note
+ * is deliberately two-sided: a bodyless 404 from a Business Profile API does not on its own
+ * distinguish a project that lacks the API from a location that API will not serve.
+ */
+export function describeBodylessGoogleError(httpStatus: number, raw: string): string {
+  const excerpt = raw.trim().replace(/\s+/g, " ").slice(0, 160);
+  if (excerpt) {
+    return `Google returned ${httpStatus} with a body that is not the usual JSON error: ${excerpt}`;
+  }
+  if (httpStatus === 404) {
+    return "Google returned 404 with no explanation at all. Two causes produce that here: the API is not enabled for this Google Cloud project, or the sampled location is not one this API serves. Enabling the API in the console rules out the first.";
+  }
+  return `Google returned ${httpStatus} with an empty body, so it gave no reason.`;
 }
 
 /**
@@ -3031,6 +3064,8 @@ function extractGoogleError(payload: JsonRecord, httpStatus: number) {
   return {
     message: message || `Request failed with status ${httpStatus}`,
     googleStatus,
+    // Whether Google itself said anything, as opposed to the fallback above standing in for it.
+    messageFromGoogle: Boolean(message),
   };
 }
 

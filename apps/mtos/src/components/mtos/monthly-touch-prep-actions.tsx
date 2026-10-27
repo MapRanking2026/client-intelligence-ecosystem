@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useTransition } from "react";
-import { LoaderCircle, RefreshCw, Sparkles } from "lucide-react";
+import { useEffect, useState, useTransition } from "react";
+import { CheckCircle2, Circle, LoaderCircle, RefreshCw, Sparkles } from "lucide-react";
 
 import { readJsonResponse } from "@/src/lib/api/read-json-response";
 
@@ -53,6 +53,18 @@ function formatPreparedAt(value?: string) {
   }).format(date);
 }
 
+/**
+ * The steps Generate actually runs, in order. Named rather than counted: "step 2 of 2" says
+ * nothing, while "Building the live call guide" tells the AM what is happening and roughly how
+ * much is left. Each is a separate request -- see runPrepare.
+ */
+const GENERATE_STEPS = ["Preparing data and writing the prep pack", "Building the live call guide"];
+const REFRESH_STEPS = ["Refreshing the data behind this touch"];
+
+function formatElapsed(seconds: number): string {
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+}
+
 async function postTouchAction(touchId: string, action: string): Promise<PrepareTouchResponse> {
   const response = await fetch(`/api/monthly-touches/${touchId}`, {
     method: "POST",
@@ -81,11 +93,29 @@ export function MonthlyTouchPrepActions({
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
   const [activeAction, setActiveAction] = useState<"prepare" | "prepare_and_generate" | null>(null);
-  const [phase, setPhase] = useState<string | null>(null);
+  const [stepIndex, setStepIndex] = useState(0);
+  const [elapsed, setElapsed] = useState(0);
+
+  const steps = activeAction === "prepare" ? REFRESH_STEPS : GENERATE_STEPS;
+
+  // A ticking clock is the cheapest honest proof the request is still alive. These runs last
+  // minutes, and without it a spinner alone is indistinguishable from a hung page.
+  useEffect(() => {
+    if (!activeAction) {
+      return;
+    }
+    const startedAt = Date.now();
+    const timer = window.setInterval(() => {
+      setElapsed(Math.floor((Date.now() - startedAt) / 1000));
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [activeAction]);
 
   function runPrepare(action: "prepare" | "prepare_and_generate") {
     startTransition(async () => {
       setError(null);
+      setElapsed(0);
+      setStepIndex(0);
       setActiveAction(action);
 
       try {
@@ -96,10 +126,9 @@ export function MonthlyTouchPrepActions({
           // on top of the dashboard pulls, and together they ran past the 300s function ceiling
           // and were killed mid-run -- the AM saw a JSON parse error and got nothing. Split, each
           // half has its own budget, and the prep pack survives a failure in the second half.
-          setPhase("Preparing data and writing the prep pack…");
           await postTouchAction(touchId, "prepare_with_ai");
 
-          setPhase("Building the live call guide…");
+          setStepIndex(1);
           try {
             await postTouchAction(touchId, "generate_call_guide");
           } catch (guideError) {
@@ -116,7 +145,6 @@ export function MonthlyTouchPrepActions({
         setError(caught instanceof Error ? caught.message : "Unable to prepare this monthly touch");
       } finally {
         setActiveAction(null);
-        setPhase(null);
       }
     });
   }
@@ -172,7 +200,43 @@ export function MonthlyTouchPrepActions({
         </button>
       </div>
 
-      {phase ? <p className="text-sm text-slate-300">{phase}</p> : null}
+      {activeAction ? (
+        <div className="space-y-3 rounded-[20px] border border-[#d7f5ec]/15 bg-[#d7f5ec]/5 p-4">
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-sm font-medium text-[#d7f5ec]">{steps[stepIndex]}…</p>
+            <span className="shrink-0 font-mono text-xs text-slate-300" aria-live="off">
+              {formatElapsed(elapsed)}
+            </span>
+          </div>
+
+          {/* Indeterminate: the server reports no percentage, and inventing one would be a lie
+              that stalls at 90%. The stripe moving is the signal. */}
+          <div className="h-1.5 overflow-hidden rounded-full bg-black/30">
+            <div className="mtos-indeterminate h-full w-1/3 rounded-full bg-[#2dd4bf]" />
+          </div>
+
+          <ul className="space-y-1.5">
+            {steps.map((step, index) => (
+              <li key={step} className="flex items-center gap-2 text-xs">
+                {index < stepIndex ? (
+                  <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-[#2dd4bf]" />
+                ) : index === stepIndex ? (
+                  <LoaderCircle className="h-3.5 w-3.5 shrink-0 animate-spin text-[#2dd4bf]" />
+                ) : (
+                  <Circle className="h-3.5 w-3.5 shrink-0 text-slate-600" />
+                )}
+                <span className={index <= stepIndex ? "text-slate-200" : "text-slate-500"}>{step}</span>
+              </li>
+            ))}
+          </ul>
+
+          <p className="text-xs text-slate-400">
+            This reads every connected dashboard and then writes with AI, so a few minutes is
+            normal. Keep this tab open — the page reloads itself when it finishes.
+          </p>
+        </div>
+      ) : null}
+
       {error ? <p className="text-sm text-rose-300">{error}</p> : null}
       {!error && claudeStatus === "failed" && claudeError ? (
         <p className="text-sm text-amber-200">{claudeError}</p>

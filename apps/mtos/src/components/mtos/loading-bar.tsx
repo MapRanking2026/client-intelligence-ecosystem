@@ -83,8 +83,12 @@ export function LoadingBarProvider({ children }: { children: ReactNode }) {
           done();
         }
       };
-      // Safety net: never leave the bar stuck if a request hangs.
-      const safety = window.setTimeout(clear, 45000);
+      // Safety net for a request that never settles at all. It has to sit ABOVE the longest
+      // request the app makes, not below it: at 45s it fired in the middle of every Generate,
+      // completing the bar and hiding it while the work was still running -- which is exactly
+      // when the AM most needs to see that something is happening. Preparing a touch and building
+      // the call guide each get the platform's full 300s, so this clears only well past that.
+      const safety = window.setTimeout(clear, 310000);
       let p: Promise<Response>;
       try {
         p = orig(...args);

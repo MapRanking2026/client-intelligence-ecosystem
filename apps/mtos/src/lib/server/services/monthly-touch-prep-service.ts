@@ -1749,12 +1749,14 @@ async function buildPrepPack(
   const gbpPerformance = extractGbpPerformanceRows(rawSnapshots.get("google-business-profile"), client.id);
   const gbpProfiles = extractGbpProfileInsights(rawSnapshots.get("google-business-profile"), client.id);
   const snapshotCheckins = extractCheckinBusinesses(rawSnapshots.get("map-checkins"), client.id);
-  const { profiles, keywordHistory, heatmapGrids, checkinBusinesses } = await fetchLiveRankTrackerEvidence(
-    context,
-    client,
-    snapshotMatches,
-    snapshotCheckins,
-  );
+  // Two different vendors, no shared data: running them back to back cost the sum of the slower
+  // one and ClickUp for no reason. Live pull of the client's ClickUp business folder (Client's
+  // Book) and project chat channel now overlaps the Rank Tracker evidence.
+  const [rankTrackerEvidence, clickupContext] = await Promise.all([
+    fetchLiveRankTrackerEvidence(context, client, snapshotMatches, snapshotCheckins),
+    fetchClickupClientContext(context, client.name),
+  ]);
+  const { profiles, keywordHistory, heatmapGrids, checkinBusinesses } = rankTrackerEvidence;
   const matchedBusinesses = profiles.length ? profiles.map((profile) => profile.business) : snapshotMatches;
 
   const businessScorecard = buildBusinessScorecard(
@@ -1778,8 +1780,6 @@ async function buildPrepPack(
   const strategicAction = buildStrategicActionStatus(client);
   const clientParticipation = buildClientParticipation(client);
   const issuesAndSolutions = buildIssuesWithSolutions(client, openCommitments);
-  // Live pull of the client's ClickUp business folder (Client's Book) and project chat channel.
-  const clickupContext = await fetchClickupClientContext(context, client.name);
 
   const dataGaps = buildDataGaps(seoPerformance, businessScorecard, strategicAction, clientParticipation);
   if (clickupContext?.notes.length) {
@@ -1857,15 +1857,26 @@ export async function prepareMonthlyTouch(
   }
 
   const openCommitments = commitments.filter((commitment) => commitment.status !== "Completed");
-  const prepPack = await buildPrepPack(
-    context,
-    client,
-    touch,
-    openCommitments,
-    opportunities,
-    integrationSources,
-    rawSnapshots,
-  );
+
+  // Three independent stretches of I/O that used to run one after another, so prep cost their
+  // sum. None reads the others' output -- the prep pack hits the dashboards and ClickUp, the
+  // format rotation reads this client's touch history, and lead verification reads GoHighLevel --
+  // and all three must finish before generation, so prep now costs the slowest rather than the
+  // total. Lead verification stays non-fatal and still persists its own per-client review.
+  const prepStartedAt = Date.now();
+  const [prepPack, meetingFormatResult, leadVerification] = await Promise.all([
+    buildPrepPack(context, client, touch, openCommitments, opportunities, integrationSources, rawSnapshots),
+    resolveMeetingFormat(context, client.id, touch.id),
+    runLeadVerification(context, client.id).catch((error) => {
+      console.warn(
+        `Lead verification during prep failed for ${client.id}: ${
+          error instanceof Error ? error.message : "unknown error"
+        }`,
+      );
+      return undefined;
+    }),
+  ]);
+  console.info(`[prep] ${client.id}: data gathering took ${Math.round((Date.now() - prepStartedAt) / 1000)}s`);
   const env = getServerEnv();
 
   let executiveBrief = buildExecutiveBrief(
@@ -1895,30 +1906,19 @@ export async function prepareMonthlyTouch(
   // Meeting variety / copilot: rotate the format so no two touches feel identical,
   // note how this one differs, and give the client one or two decisions to co-own.
   // Resolved before generation so the LLM can shape the touch to this month's angle.
-  const { format: meetingFormat, previous: previousTouch } = await resolveMeetingFormat(context, client.id, touch.id);
+  const { format: meetingFormat, previous: previousTouch } = meetingFormatResult;
   const keywordTerms = (prepPack.seoPerformance.keywordScanHistory ?? []).map((entry) => entry.keyword);
   const decisionsTogether = buildDecisionsTogether(client, meetingFormat, opportunities, keywordTerms);
   const varietyContext = buildVarietyContext(meetingFormat, previousTouch, decisionsTogether);
   const varietyNote = varietyContext.varietyNote;
 
-  // Lead & call verification runs as a non-fatal gated step: it vets the leads the
-  // client received and reconciles the counts. It runs BEFORE generation because the
-  // vetted GoHighLevel lead and call picture is primary evidence for the brief's
-  // lead-quality and funnel reasoning -- generating first would hide it from the
-  // model. A failure here still must never block prep. runLeadVerification also
-  // persists the per-client review used by the client card and the dedicated page.
-  let leadVerification: LeadVerificationReview | undefined;
-  try {
-    leadVerification = await runLeadVerification(context, client.id);
-  } catch (error) {
-    console.warn(
-      `Lead verification during prep failed for ${client.id}: ${
-        error instanceof Error ? error.message : "unknown error"
-      }`,
-    );
-  }
+  // Lead & call verification was awaited above, alongside the prep pack: it vets the leads the
+  // client received and reconciles the counts, and its vetted GoHighLevel lead and call picture
+  // is primary evidence for the brief's lead-quality and funnel reasoning, so it must be in hand
+  // BEFORE generation -- generating first would hide it from the model.
 
   if (options.includeClaude && hasAnyLlmProvider(env)) {
+    const generationStartedAt = Date.now();
     try {
       const claudeOutput = await generateClaudeTouchOutput(
         context,
@@ -1950,6 +1950,11 @@ export async function prepareMonthlyTouch(
         errorMessage: error instanceof Error ? error.message : "AI generation failed",
       };
     }
+    // Paired with the gathering timer above: between them the logs say which half of prep is
+    // slow on a given account, which is the thing guesswork keeps getting wrong.
+    console.info(
+      `[prep] ${client.id}: model generation took ${Math.round((Date.now() - generationStartedAt) / 1000)}s (${claudeState.status})`,
+    );
   }
 
   const derivedOpportunities = buildOpportunities(client, opportunities);

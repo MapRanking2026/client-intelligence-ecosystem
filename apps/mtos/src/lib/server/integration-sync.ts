@@ -1182,6 +1182,17 @@ const GBP_STAR_RATINGS: Record<string, number> = { ONE: 1, TWO: 2, THREE: 3, FOU
  * early to keep the whole sync inside the route time budget. When a cap is hit the derived counts
  * become floors and the insight records a note saying so.
  */
+/**
+ * How many Business Profile accounts the connection test will look through to find a location to
+ * sample.
+ *
+ * One is not enough, and on an agency (MCC) connection it is close to guaranteed to be wrong: the
+ * manager account itself holds no locations, which sit in the location groups below it. The real
+ * connection here lists 15 accounts and syncs 236 locations, yet sampling accounts[0] found none
+ * and skipped every later probe. The scan stops at the first account that has a location, so the
+ * usual cost is one or two requests; the cap only bounds the pathological case.
+ */
+const GBP_TEST_MAX_ACCOUNTS_SCANNED = 25;
 const GBP_MAX_REVIEW_PAGES = 6;
 const GBP_REVIEW_PAGE_SIZE = 50;
 const GBP_HIGHLIGHT_LIMIT = 5;
@@ -3071,13 +3082,13 @@ async function testGoogleBusinessProfileConnection(
 
   // 1. Account Management API -- the gate: nothing else works without it.
   const accountsHost = "mybusinessaccountmanagement.googleapis.com";
-  let firstAccountName = "";
+  let accountNames: string[] = [];
   let firstLocationPath = "";
   {
     const { response, payload } = await fetchWithStatus(`https://${accountsHost}/v1/accounts`, accessToken);
     if (response.ok) {
       const accounts = Array.isArray(payload.accounts) ? (payload.accounts as JsonRecord[]) : [];
-      firstAccountName = String(accounts[0]?.name || "");
+      accountNames = accounts.map((account) => String(account.name || "")).filter(Boolean);
       checks.push({
         api: "Account Management API",
         endpoint: accountsHost,
@@ -3101,25 +3112,47 @@ async function testGoogleBusinessProfileConnection(
   // 2. Business Information API -- lists a client's locations. Needs an account to query under.
   const infoHost = "mybusinessbusinessinformation.googleapis.com";
   let firstLocationId = "";
-  if (firstAccountName) {
-    const url = new URL(`https://${infoHost}/v1/${firstAccountName}/locations`);
-    url.searchParams.set("pageSize", "1");
-    url.searchParams.set("readMask", "name,title");
-    const { response, payload } = await fetchWithStatus(url.toString(), accessToken);
-    if (response.ok) {
+  if (accountNames.length) {
+    // Walk accounts until one yields a location, instead of sampling accounts[0] and giving up.
+    // A connection with 15 accounts whose first happens to be empty left every later probe with
+    // nothing to sample, so the three APIs that actually fail in production -- reviews, posts and
+    // photos, and Q&A -- were never exercised and the test reported green. The sync itself reads
+    // locations across all accounts, so a probe that reads only the first is not representative
+    // of it. Bounded so a large agency connection cannot turn the test into its own slow request.
+    let response: Awaited<ReturnType<typeof fetchWithStatus>>["response"] | undefined;
+    let payload: JsonRecord = {};
+    let sampledTitle = "";
+    let scanned = 0;
+
+    for (const accountName of accountNames.slice(0, GBP_TEST_MAX_ACCOUNTS_SCANNED)) {
+      scanned += 1;
+      const url = new URL(`https://${infoHost}/v1/${accountName}/locations`);
+      url.searchParams.set("pageSize", "1");
+      url.searchParams.set("readMask", "name,title");
+      ({ response, payload } = await fetchWithStatus(url.toString(), accessToken));
+      if (!response.ok) {
+        break;
+      }
       const locations = Array.isArray(payload.locations) ? (payload.locations as JsonRecord[]) : [];
-      firstLocationId = String(locations[0]?.name || "").split("/").filter(Boolean).pop() || "";
-      firstLocationPath = firstLocationId ? `${firstAccountName}/locations/${firstLocationId}` : "";
+      if (locations.length) {
+        firstLocationId = String(locations[0]?.name || "").split("/").filter(Boolean).pop() || "";
+        firstLocationPath = firstLocationId ? `${accountName}/locations/${firstLocationId}` : "";
+        sampledTitle = String(locations[0]?.title || "untitled");
+        break;
+      }
+    }
+
+    if (response && response.ok) {
       checks.push({
         api: "Business Information API",
         endpoint: infoHost,
         status: "ok",
         httpStatus: response.status,
-        detail: locations.length
-          ? `Locations are readable (sampled "${String(locations[0]?.title || "untitled")}").`
-          : "Reachable, but this account has no locations yet.",
+        detail: firstLocationId
+          ? `Locations are readable (sampled "${sampledTitle}").`
+          : `Reachable, but no locations were found in the ${formatSummaryCount("account", scanned)} checked.`,
       });
-    } else {
+    } else if (response) {
       const { message, googleStatus } = extractGoogleError(payload, response.status);
       checks.push({
         api: "Business Information API",
@@ -3128,6 +3161,15 @@ async function testGoogleBusinessProfileConnection(
         httpStatus: response.status,
         detail: message,
         approvalBlocked: looksLikeApprovalBlock(response.status, message, googleStatus),
+      });
+    } else {
+      // Unreachable while accountNames is non-empty, but recorded rather than dropped: a silent
+      // gap here is what let the summary speak for probes that never ran.
+      checks.push({
+        api: "Business Information API",
+        endpoint: infoHost,
+        status: "skipped",
+        detail: "No account could be queried for locations.",
       });
     }
   } else {
@@ -3389,7 +3431,11 @@ export async function testIntegrationConnection(
   }
 
   const runnableChecks = checks.filter((check) => check.status !== "skipped");
-  const ok = runnableChecks.length > 0 && runnableChecks.every((check) => check.status === "ok");
+  const skipped = checks.filter((check) => check.status === "skipped");
+  // A skipped probe proves nothing, so it cannot count toward a pass. Treating "not run" as "fine"
+  // is how this test reported "every API responded successfully" while the three APIs that were
+  // actually failing in production had never been called.
+  const ok = runnableChecks.length > 0 && runnableChecks.every((check) => check.status === "ok") && !skipped.length;
   const blocked = checks.find((check) => check.approvalBlocked);
   const firstFailure = checks.find((check) => check.status === "failed");
 
@@ -3401,6 +3447,10 @@ export async function testIntegrationConnection(
     summary = `Not approved yet — the ${blocked.api} returned Google's "API not enabled / not allowlisted" response ("${blocked.detail}"). The access request has not been granted for this project.`;
   } else if (firstFailure) {
     summary = `The ${firstFailure.api} did not respond successfully: ${firstFailure.detail}`;
+  } else if (runnableChecks.length && skipped.length) {
+    summary = `Partly tested — ${formatSummaryCount("API", runnableChecks.length)} responded, but ${skipped
+      .map((check) => check.api)
+      .join(", ")} could not be tested, so this says nothing about whether those work. ${skipped[0].detail}`;
   } else {
     summary = "No API probes could be run for this connection.";
   }

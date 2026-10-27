@@ -474,11 +474,6 @@ function GbpProfileBlock({ profile }: { profile: GbpProfileInsight }) {
             New photos: {profile.photos.newInPeriod ?? "—"} (last {formatListingDate(profile.photos.lastPhotoAt)})
           </span>
         ) : null}
-        {profile.questions ? (
-          <span className={profile.questions.unansweredCount ? "text-amber-200" : undefined}>
-            Q&amp;A unanswered: {profile.questions.unansweredCount ?? "—"} of {profile.questions.totalCount ?? "—"}
-          </span>
-        ) : null}
         {completeness ? <span>Listing complete: {completeness.percent === null ? "—" : `${completeness.percent}%`}</span> : null}
       </div>
 

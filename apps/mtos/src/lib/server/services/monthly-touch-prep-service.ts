@@ -497,7 +497,7 @@ function extractGbpPerformanceRows(payload: JsonRecord | undefined, clientId: st
 }
 
 /**
- * Listing health (reviews, posts, photos, Q&A, completeness) for the locations matched to this
+ * Listing health (reviews, posts, photos, completeness) for the locations matched to this
  * client. Shape-checked field by field because the snapshot is whatever the last sync wrote --
  * a sync from before listing data was pulled simply yields nothing here.
  */
@@ -534,7 +534,6 @@ function extractGbpProfileInsights(payload: JsonRecord | undefined, clientId: st
       const reviews = (row.reviews || null) as JsonRecord | null;
       const posts = (row.posts || null) as JsonRecord | null;
       const photos = (row.photos || null) as JsonRecord | null;
-      const questions = (row.questions || null) as JsonRecord | null;
       const completeness = (row.completeness || null) as JsonRecord | null;
 
       return {
@@ -566,12 +565,6 @@ function extractGbpProfileInsights(payload: JsonRecord | undefined, clientId: st
               totalCount: coerceNumber(photos.totalCount),
               newInPeriod: coerceNumber(photos.newInPeriod),
               lastPhotoAt: typeof photos.lastPhotoAt === "string" ? photos.lastPhotoAt : null,
-            }
-          : null,
-        questions: questions
-          ? {
-              totalCount: coerceNumber(questions.totalCount),
-              unansweredCount: coerceNumber(questions.unansweredCount),
             }
           : null,
         searchKeywords: (Array.isArray(row.searchKeywords) ? (row.searchKeywords as JsonRecord[]) : []).map(
@@ -805,12 +798,6 @@ function buildGbpListingNotes(gbpProfiles: GbpProfileInsight[]) {
     if (profile.photos && !profile.photos.newInPeriod) {
       notes.push(
         `No new photos were added to "${label}" in the last 30 days (last photo ${formatReviewAge(profile.photos.lastPhotoAt)}) -- fresh photos are a standing client ask.`,
-      );
-    }
-
-    if (profile.questions?.unansweredCount) {
-      notes.push(
-        `"${label}" has ${profile.questions.unansweredCount} unanswered question${profile.questions.unansweredCount === 1 ? "" : "s"} on the listing.`,
       );
     }
 

@@ -1323,19 +1323,12 @@ async function fetchGbpPhotos(accessToken: string, locationPath: string, periodS
   };
 }
 
-/** Q&A. An unanswered question on a listing is a lead talking to nobody. */
-async function fetchGbpQuestions(accessToken: string, locationId: string) {
-  const url = new URL(`https://mybusinessqanda.googleapis.com/v1/locations/${locationId}/questions`);
-  url.searchParams.set("pageSize", "20");
-  url.searchParams.set("answersPerQuestion", "1");
-  const payload = await fetchJson(url.toString(), { headers: getBearerHeaders(accessToken) });
-  const questions = Array.isArray(payload.questions) ? (payload.questions as JsonRecord[]) : [];
-
-  return {
-    totalCount: typeof payload.totalSize === "number" ? payload.totalSize : questions.length,
-    unansweredCount: questions.filter((question) => !Number(question.totalAnswerCount || 0)).length,
-  };
-}
+// Listing Q&A used to be read here, from mybusinessqanda.googleapis.com. Google discontinued that
+// API on 3 November 2025 with no replacement, so there is no way to read a listing's questions any
+// more and nothing to re-enable in the console: the service is gone, not switched off. Please do
+// not add it back -- it answers every request with an error, which cost this sync a failed call per
+// location and put "Questions and answers could not be read" on every listing for a year.
+// https://developers.google.com/my-business/content/sunset-dates
 
 /**
  * The search terms people actually typed before this profile showed up. Google publishes these
@@ -1423,7 +1416,7 @@ function buildGbpCompleteness(location: JsonRecord) {
 /**
  * Pulls everything about one listing that is not a raw performance counter. Each API is fetched
  * independently and a failure becomes a note rather than an exception: the Business Profile APIs are
- * approved and quota'd separately, so losing reviews must not also cost us posts, photos, or Q&A.
+ * approved and quota'd separately, so losing reviews must not also cost us posts or photos.
  */
 async function fetchGbpProfileInsights(accessToken: string, location: JsonRecord): Promise<GbpProfileInsight> {
   const locationId = String(location.name || "").split("/").filter(Boolean).pop() || "";
@@ -1439,7 +1432,6 @@ async function fetchGbpProfileInsights(accessToken: string, location: JsonRecord
     reviews: null,
     posts: null,
     photos: null,
-    questions: null,
     searchKeywords: [],
     completeness: buildGbpCompleteness(location),
     notes: [],
@@ -1458,14 +1450,13 @@ async function fetchGbpProfileInsights(accessToken: string, location: JsonRecord
     );
   }
 
-  // These hit five independent Google APIs, so they run together: a location would otherwise cost
-  // five round trips, and a tenant with dozens of locations would blow the sync route's budget.
+  // These hit four independent Google APIs, so they run together: a location would otherwise cost
+  // four round trips, and a tenant with dozens of locations would blow the sync route's budget.
   // allSettled keeps the per-API isolation -- one rejected API only costs us that one block.
-  const [reviewResult, postResult, photoResult, questionResult, keywordResult] = await Promise.allSettled([
+  const [reviewResult, postResult, photoResult, keywordResult] = await Promise.allSettled([
     locationPath ? fetchGbpReviews(accessToken, locationPath, periodStart, periodEnd) : Promise.resolve(null),
     locationPath ? fetchGbpPosts(accessToken, locationPath, periodStart, periodEnd) : Promise.resolve(null),
     locationPath ? fetchGbpPhotos(accessToken, locationPath, periodStart, periodEnd) : Promise.resolve(null),
-    fetchGbpQuestions(accessToken, locationId),
     fetchGbpSearchKeywords(accessToken, locationId),
   ]);
 
@@ -1492,12 +1483,6 @@ async function fetchGbpProfileInsights(accessToken: string, location: JsonRecord
     insight.photos = photoResult.value;
   } else {
     insight.notes.push(`Photos could not be read: ${describe(photoResult.reason)}`);
-  }
-
-  if (questionResult.status === "fulfilled") {
-    insight.questions = questionResult.value;
-  } else {
-    insight.notes.push(`Questions and answers could not be read: ${describe(questionResult.reason)}`);
   }
 
   if (keywordResult.status === "fulfilled") {
@@ -3150,8 +3135,8 @@ async function testGoogleBusinessProfileConnection(
   if (accountNames.length) {
     // Walk accounts until one yields a location, instead of sampling accounts[0] and giving up.
     // A connection with 15 accounts whose first happens to be empty left every later probe with
-    // nothing to sample, so the three APIs that actually fail in production -- reviews, posts and
-    // photos, and Q&A -- were never exercised and the test reported green. The sync itself reads
+    // nothing to sample, so the APIs that actually fail in production -- reviews, posts and
+    // photos -- were never exercised and the test reported green. The sync itself reads
     // locations across all accounts, so a probe that reads only the first is not representative
     // of it. Bounded so a large agency connection cannot turn the test into its own slow request.
     let response: Awaited<ReturnType<typeof fetchWithStatus>>["response"] | undefined;
@@ -3297,39 +3282,10 @@ async function testGoogleBusinessProfileConnection(
     });
   }
 
-  // 5. Q&A API -- unanswered questions on the listing.
-  const qandaHost = "mybusinessqanda.googleapis.com";
-  if (firstLocationId) {
-    const url = new URL(`https://${qandaHost}/v1/locations/${firstLocationId}/questions`);
-    url.searchParams.set("pageSize", "1");
-    const { response, payload } = await fetchWithStatus(url.toString(), accessToken);
-    if (response.ok) {
-      checks.push({
-        api: "Q&A API",
-        endpoint: qandaHost,
-        status: "ok",
-        httpStatus: response.status,
-        detail: "Listing questions are readable for the sampled location.",
-      });
-    } else {
-      const { message, googleStatus } = extractGoogleError(payload, response.status);
-      checks.push({
-        api: "Q&A API",
-        endpoint: qandaHost,
-        status: "failed",
-        httpStatus: response.status,
-        detail: message,
-        approvalBlocked: looksLikeApprovalBlock(response.status, message, googleStatus),
-      });
-    }
-  } else {
-    checks.push({
-      api: "Q&A API",
-      endpoint: qandaHost,
-      status: "skipped",
-      detail: "No location was available to sample questions for.",
-    });
-  }
+  // The Q&A API was probed here as a fifth check until Google discontinued it on 3 November 2025.
+  // It answers every request with an error now, so testing it could only ever report a failure the
+  // console cannot fix -- an amber line next to four green ones, for a service that no longer
+  // exists. MTOS no longer reads listing Q&A at all.
 
   return checks;
 }

@@ -139,7 +139,7 @@ export interface GbpReviewHighlight {
 
 /**
  * Everything the Business Profile APIs tell us about a client's listing beyond the raw
- * performance counters: review health, posting cadence, photo freshness, Q&A, the search
+ * performance counters: review health, posting cadence, photo freshness, the search
  * terms that surfaced the profile, and how complete the listing itself is. Every block is
  * nullable because each one comes from a different Google API, and a client's connection may
  * have access to some but not all of them -- a block that could not be read is null and the
@@ -173,10 +173,6 @@ export interface GbpProfileInsight {
     totalCount: number | null;
     newInPeriod: number | null;
     lastPhotoAt: string | null;
-  } | null;
-  questions: {
-    totalCount: number | null;
-    unansweredCount: number | null;
   } | null;
   /** Top search terms that put this profile in front of someone, highest impressions first. */
   searchKeywords: { term: string; impressions: number | null; isThreshold: boolean }[];
@@ -278,7 +274,7 @@ export interface SeoPerformancePack {
   checkinBusinesses: MapCheckinBusinessSummary[];
   gbpPerformance: GbpPerformanceSnapshot[];
   /**
-   * Listing health from the Business Profile APIs (reviews, posts, photos, Q&A, completeness).
+   * Listing health from the Business Profile APIs (reviews, posts, photos, completeness).
    * Optional: prep packs persisted before GBP listing data was pulled omit it.
    */
   gbpProfiles?: GbpProfileInsight[];

@@ -3,6 +3,8 @@
 import { useState, useTransition } from "react";
 import { LoaderCircle, RefreshCw, Sparkles } from "lucide-react";
 
+import { readJsonResponse } from "@/src/lib/api/read-json-response";
+
 interface MonthlyTouchPrepActionsProps {
   touchId: string;
   preparedAt?: string;
@@ -51,6 +53,23 @@ function formatPreparedAt(value?: string) {
   }).format(date);
 }
 
+async function postTouchAction(touchId: string, action: string): Promise<PrepareTouchResponse> {
+  const response = await fetch(`/api/monthly-touches/${touchId}`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({ action }),
+  });
+  const payload = await readJsonResponse<PrepareTouchResponse>(response);
+
+  if (!response.ok) {
+    throw new Error(payload?.error || "Unable to prepare this monthly touch");
+  }
+
+  return payload;
+}
+
 export function MonthlyTouchPrepActions({
   touchId,
   preparedAt,
@@ -62,6 +81,7 @@ export function MonthlyTouchPrepActions({
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
   const [activeAction, setActiveAction] = useState<"prepare" | "prepare_and_generate" | null>(null);
+  const [phase, setPhase] = useState<string | null>(null);
 
   function runPrepare(action: "prepare" | "prepare_and_generate") {
     startTransition(async () => {
@@ -69,17 +89,26 @@ export function MonthlyTouchPrepActions({
       setActiveAction(action);
 
       try {
-        const response = await fetch(`/api/monthly-touches/${touchId}`, {
-          method: "POST",
-          headers: {
-            "content-type": "application/json",
-          },
-          body: JSON.stringify({ action }),
-        });
-        const payload = (await response.json()) as PrepareTouchResponse;
+        if (action === "prepare") {
+          await postTouchAction(touchId, "prepare");
+        } else {
+          // Two requests rather than one. The prep pack and the call guide are a model call each
+          // on top of the dashboard pulls, and together they ran past the 300s function ceiling
+          // and were killed mid-run -- the AM saw a JSON parse error and got nothing. Split, each
+          // half has its own budget, and the prep pack survives a failure in the second half.
+          setPhase("Preparing data and writing the prep pack…");
+          await postTouchAction(touchId, "prepare_with_ai");
 
-        if (!response.ok) {
-          throw new Error(payload.error || "Unable to prepare this monthly touch");
+          setPhase("Building the live call guide…");
+          try {
+            await postTouchAction(touchId, "generate_call_guide");
+          } catch (guideError) {
+            const detail =
+              guideError instanceof Error ? guideError.message : "the call guide could not be built";
+            throw new Error(
+              `${detail} The preparation itself was saved -- reload, then use "Regenerate guide only" lower down to retry just the guide.`,
+            );
+          }
         }
 
         globalThis.location.reload();
@@ -87,6 +116,7 @@ export function MonthlyTouchPrepActions({
         setError(caught instanceof Error ? caught.message : "Unable to prepare this monthly touch");
       } finally {
         setActiveAction(null);
+        setPhase(null);
       }
     });
   }
@@ -142,6 +172,7 @@ export function MonthlyTouchPrepActions({
         </button>
       </div>
 
+      {phase ? <p className="text-sm text-slate-300">{phase}</p> : null}
       {error ? <p className="text-sm text-rose-300">{error}</p> : null}
       {!error && claudeStatus === "failed" && claudeError ? (
         <p className="text-sm text-amber-200">{claudeError}</p>

@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { LoaderCircle, Sparkles, MonitorPlay, ArrowUpRight } from "lucide-react";
 
+import { readJsonResponse } from "@/src/lib/api/read-json-response";
 import type { CallGuide, CallGuideSection } from "@/src/lib/mtos-data";
 
 interface CallGuideActionsProps {
@@ -64,8 +65,8 @@ export function CallGuideActions({ touchId, clientId, callGuide, screenOverrides
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ action: "generate_call_guide" }),
         });
-        const payload = (await response.json()) as CallGuideResponse;
-        if (!response.ok) throw new Error(payload.error || "Unable to generate the call guide");
+        const payload = await readJsonResponse<CallGuideResponse>(response);
+        if (!response.ok) throw new Error(payload?.error || "Unable to generate the call guide");
         globalThis.location.reload();
       } catch (caught) {
         setError(caught instanceof Error ? caught.message : "Unable to generate the call guide");

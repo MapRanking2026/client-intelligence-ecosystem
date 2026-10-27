@@ -59,6 +59,7 @@ const stakeholderMapSchema = z.object({
 
 const touchRequestSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("prepare") }),
+  z.object({ action: z.literal("prepare_with_ai") }),
   z.object({ action: z.literal("prepare_and_generate") }),
   z.object({ action: z.literal("generate_call_guide") }),
   z.object({ action: z.literal("analyze_transcript"), transcript: z.string().min(1) }),
@@ -144,6 +145,13 @@ export async function POST(
     switch (payload.action) {
       case "prepare":
         result = await prepareMonthlyTouch(context, touchId, { includeClaude: false });
+        break;
+      case "prepare_with_ai":
+        // Half of what Generate used to do in one request. The prep pack and the call guide are
+        // each a full model call on top of the dashboard pulls, and together they ran past the
+        // 300s function ceiling and were killed mid-run. Split across two requests each half gets
+        // its own budget, and a failure in the second half leaves the prep pack already saved.
+        result = await prepareMonthlyTouch(context, touchId, { includeClaude: true });
         break;
       case "prepare_and_generate":
         // One Generate action produces both halves of the workspace: the preparation

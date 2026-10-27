@@ -60,6 +60,12 @@ interface AdapterParams {
   temperature: number;
   apiKey: string;
   model: string;
+  /**
+   * Deadline for this provider attempt, shared by every request the adapter makes -- so an
+   * adapter's own retry (OpenAI's temperature fallback, Gemini's 503 backoff) spends the same
+   * budget rather than doubling it.
+   */
+  signal: AbortSignal;
 }
 
 /** Resolve the API key + model for a provider, or null when it isn't configured. */
@@ -111,6 +117,7 @@ function resolveChain(env: ServerEnv, preferred?: LlmProvider): LlmProvider[] {
 async function callAnthropic(params: AdapterParams): Promise<string> {
   const response = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
+    signal: params.signal,
     headers: {
       "content-type": "application/json",
       "x-api-key": params.apiKey,
@@ -145,6 +152,7 @@ async function callOpenAI(params: AdapterParams): Promise<string> {
   const postOpenAI = async (body: Record<string, unknown>) => {
     const response = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
+      signal: params.signal,
       headers: {
         "content-type": "application/json",
         authorization: `Bearer ${params.apiKey}`,
@@ -191,6 +199,7 @@ async function callGemini(params: AdapterParams): Promise<string> {
   const attempt = async () => {
     const response = await fetch(endpoint, {
       method: "POST",
+      signal: params.signal,
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
         systemInstruction: { parts: [{ text: params.system }] },
@@ -267,11 +276,22 @@ async function callLlmCore<T>(
   }
 
   const errors: string[] = [];
+  const chainStartedAt = Date.now();
+
   for (const provider of chain) {
     const config = providerConfig(env, provider);
     if (!config) {
       continue;
     }
+
+    const remaining = LLM_CHAIN_BUDGET_MS - (Date.now() - chainStartedAt);
+    if (remaining < LLM_MIN_USEFUL_ATTEMPT_MS) {
+      errors.push(`${provider}: not tried, the generation budget was already spent`);
+      break;
+    }
+
+    const attemptTimeoutMs = Math.min(LLM_ATTEMPT_TIMEOUT_MS, remaining);
+    const attemptStartedAt = Date.now();
     try {
       const text = await ADAPTERS[provider]({
         system,
@@ -280,10 +300,14 @@ async function callLlmCore<T>(
         temperature,
         apiKey: config.apiKey,
         model: config.model,
+        signal: AbortSignal.timeout(attemptTimeoutMs),
       });
+      console.info(`[llm] ${provider} answered in ${elapsedSeconds(attemptStartedAt)}s`);
       return { data: transform(text), provider, model: config.model };
     } catch (error) {
-      errors.push(`${provider}: ${error instanceof Error ? error.message : "unknown error"}`);
+      const reason = describeLlmFailure(error, attemptTimeoutMs);
+      console.warn(`[llm] ${provider} failed after ${elapsedSeconds(attemptStartedAt)}s: ${reason}`);
+      errors.push(`${provider}: ${reason}`);
     }
   }
 

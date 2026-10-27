@@ -105,6 +105,38 @@ export function hasAnyLlmProvider(env: ServerEnv): boolean {
   return configuredLlmProviders(env).length > 0;
 }
 
+/**
+ * Time limits for generation.
+ *
+ * These exist because a monthly touch Generate was killed at Vercel's 300s ceiling while the
+ * logs showed data gathering finishing in 12 seconds -- the remaining ~288 were one model call
+ * with nothing bounding it. Without a deadline a single unresponsive provider consumes the whole
+ * function, and the failover chain below never gets to prove itself: the fallbacks are only
+ * reachable if the first provider gives up in time.
+ *
+ * The chain budget sits under the 300s ceiling so the caller keeps room to persist what it has
+ * and answer, rather than being killed holding a finished result.
+ */
+const LLM_ATTEMPT_TIMEOUT_MS = 100_000;
+const LLM_CHAIN_BUDGET_MS = 230_000;
+/** Below this, starting another provider only burns the remainder without plausibly finishing. */
+const LLM_MIN_USEFUL_ATTEMPT_MS = 15_000;
+
+function elapsedSeconds(since: number): number {
+  return Math.round((Date.now() - since) / 1000);
+}
+
+/**
+ * `AbortSignal.timeout` rejects with a bare "signal timed out", which in a failover summary reads
+ * like a bug rather than a slow provider. Say which it was and how long we waited.
+ */
+function describeLlmFailure(error: unknown, timeoutMs: number): string {
+  if (error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError")) {
+    return `no response within ${Math.round(timeoutMs / 1000)}s`;
+  }
+  return error instanceof Error ? error.message : "unknown error";
+}
+
 /** Build the ordered chain to try: the preferred provider first, then the default order. */
 function resolveChain(env: ServerEnv, preferred?: LlmProvider): LlmProvider[] {
   const configured = configuredLlmProviders(env);

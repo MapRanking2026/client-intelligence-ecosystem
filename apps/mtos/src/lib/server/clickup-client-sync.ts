@@ -90,6 +90,16 @@ const HEALTH_DROPDOWN_BANDS: { match: string[]; score: number }[] = [
 
 const HEALTH_FIELD_NAMES = ["Health", "Health Score", "Client Health", "⭐ Health", "⭐️ Health"];
 
+/** ClickUp's task endpoints return at most 100 tasks per page. */
+const CLICKUP_TASK_PAGE_SIZE = 100;
+/**
+ * An upper bound on paging, not an intended limit: the fetch pages until ClickUp returns a short
+ * page. A truncated fetch is worse than a failed one here, because the sync treats the tasks it
+ * loaded as the full set and prunes synced-client entries for everything it did not see -- so
+ * exhausting this bound throws rather than silently returning a partial roster.
+ */
+const CLICKUP_MAX_TASK_PAGES = 100;
+
 /**
  * Reads a genuinely numeric 0-100 custom field, or null when the field is absent, empty, or holds
  * something that is not a score (a dropdown orderindex, a task relation). Never invents a fallback.
@@ -510,6 +520,31 @@ async function resolveManagerIdentity(context: TenantContext) {
   };
 }
 
+/**
+ * Pages a ClickUp task endpoint until it returns a short page. `buildUrl` receives the zero-based
+ * page number and returns the URL for it.
+ */
+async function fetchAllClickUpTaskPages(
+  accessToken: string,
+  label: string,
+  buildUrl: (page: number) => string,
+): Promise<ClickUpTask[]> {
+  const tasks: ClickUpTask[] = [];
+
+  for (let page = 0; page < CLICKUP_MAX_TASK_PAGES; page += 1) {
+    const payload = await fetchJson(buildUrl(page), { headers: getBearerHeaders(accessToken) });
+    const pageTasks = Array.isArray(payload.tasks) ? (payload.tasks as ClickUpTask[]) : [];
+    tasks.push(...pageTasks);
+    if (pageTasks.length < CLICKUP_TASK_PAGE_SIZE) {
+      return tasks;
+    }
+  }
+
+  throw new Error(
+    `ClickUp returned more than ${CLICKUP_MAX_TASK_PAGES * CLICKUP_TASK_PAGE_SIZE} tasks for ${label}; refusing to sync a truncated roster`,
+  );
+}
+
 async function fetchClickUpTrackerTasks(
   record: IntegrationConnectionRecord,
   listId?: string,
@@ -523,21 +558,13 @@ async function fetchClickUpTrackerTasks(
 
   const baseUrl = definition.defaultApiBaseUrl || "https://api.clickup.com/api/v2";
   const configuredListId = listId || process.env.CLICKUP_HEALTH_TRACKER_LIST_ID || record.metadata?.healthTrackerListId;
-  const tasks: ClickUpTask[] = [];
 
   if (configuredListId) {
-    for (let page = 0; page < 5; page += 1) {
-      const payload = await fetchJson(
-        `${baseUrl}/list/${configuredListId}/task?include_closed=true&subtasks=true&page=${page}`,
-        { headers: getBearerHeaders(accessToken) },
-      );
-      const pageTasks = Array.isArray(payload.tasks) ? (payload.tasks as ClickUpTask[]) : [];
-      tasks.push(...pageTasks);
-      if (pageTasks.length < 100) {
-        break;
-      }
-    }
-    return tasks;
+    return fetchAllClickUpTaskPages(
+      accessToken,
+      `list ${configuredListId}`,
+      (page) => `${baseUrl}/list/${configuredListId}/task?include_closed=true&subtasks=true&page=${page}`,
+    );
   }
 
   const teamsPayload = await fetchJson(`${baseUrl}/team`, {
@@ -552,19 +579,12 @@ async function fetchClickUpTrackerTasks(
     throw new Error("No authorized ClickUp workspace was returned for this connection");
   }
 
-  for (let page = 0; page < 5; page += 1) {
-    const payload = await fetchJson(
+  return fetchAllClickUpTaskPages(
+    accessToken,
+    `workspace ${selectedTeam.id}`,
+    (page) =>
       `${baseUrl}/team/${selectedTeam.id}/task?include_closed=true&subtasks=true&page=${page}&order_by=updated`,
-      { headers: getBearerHeaders(accessToken) },
-    );
-    const pageTasks = Array.isArray(payload.tasks) ? (payload.tasks as ClickUpTask[]) : [];
-    tasks.push(...pageTasks);
-    if (pageTasks.length < 100) {
-      break;
-    }
-  }
-
-  return tasks;
+  );
 }
 
 async function saveExternalMapping(record: ExternalRecordMappingRecord) {

@@ -209,6 +209,9 @@ a { color: inherit; text-decoration: none; }
 .chip.info { color: var(--info); background: var(--info-bg); border-color: transparent; }
 .sig-dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
 .sig-dot.good { background: var(--good); } .sig-dot.watch { background: var(--watch); } .sig-dot.risk { background: var(--risk); }
+/* "muted" marks a client whose health has never been assessed -- a neutral absence, not a verdict. */
+.sig-dot.muted { background: var(--slate-400); opacity: 0.55; }
+.chip.muted { color: var(--slate-400); background: var(--surface-2); border-color: var(--hair); }
 
 .trend { display: inline-flex; align-items: center; gap: 3px; font-weight: 650; font-size: 0.78rem; }
 .trend.up { color: var(--good); } .trend.down { color: var(--risk); } .trend.flat { color: var(--slate-400); }
@@ -240,6 +243,8 @@ a { color: inherit; text-decoration: none; }
 .insight.watch .insight-icon { background: var(--watch-bg); color: var(--watch); }
 .insight.good .insight-icon { background: var(--good-bg); color: var(--good); }
 .insight.info .insight-icon { background: var(--info-bg); color: var(--info); }
+.insight.muted::before { background: var(--hair-strong); }
+.insight.muted .insight-icon { background: var(--surface-2); color: var(--slate-400); }
 
 .tbl { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
 .tbl th { text-align: left; font-size: 0.66rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--slate-400); font-weight: 700; padding: 0 14px 11px; }

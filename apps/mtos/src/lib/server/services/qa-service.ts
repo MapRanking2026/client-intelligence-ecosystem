@@ -37,10 +37,22 @@ function average(values: number[]) {
   return Math.round(values.reduce((sum, value) => sum + value, 0) / values.length);
 }
 
+/**
+ * Health and relationship can be unassessed. Where they are, QA figures use a neutral midpoint
+ * rather than treating the absence as a zero -- a missing score previously drove every unassessed
+ * client to "At Risk" / "High", which is a verdict the data does not support.
+ */
+const NEUTRAL_SCORE = 65;
+
+function assessedOrNeutral(value: number | null) {
+  return value ?? NEUTRAL_SCORE;
+}
+
 function sentimentScoreFromClient(client: ClientRecord) {
-  if (client.healthScore >= 85) return 90;
-  if (client.healthScore >= 70) return 76;
-  if (client.healthScore >= 55) return 62;
+  const health = assessedOrNeutral(client.healthScore);
+  if (health >= 85) return 90;
+  if (health >= 70) return 76;
+  if (health >= 55) return 62;
   return 44;
 }
 
@@ -53,6 +65,11 @@ function sentimentLabel(score: number) {
 
 function retentionRiskFromClient(client: ClientRecord, averageQaScore: number | null) {
   const qaPenalty = averageQaScore !== null && averageQaScore < 75;
+  // With no assessed health, QA is the only evidence there is -- so judge on it alone instead of
+  // letting a missing score imply high risk.
+  if (client.healthScore === null) {
+    return qaPenalty ? "High" : "Moderate";
+  }
   if (client.healthScore < 60 || qaPenalty) return "High";
   if (client.healthScore < 80) return "Moderate";
   return "Low";
@@ -77,7 +94,7 @@ export async function getQaClientIndexView(context: TenantContext) {
     const clientTouches = touches.filter((touch) => touch.clientId === client.id).sort(sortTouchesNewestFirst);
     const touchSummaries = clientTouches.map((touch) => {
       const overallScore = overallScoreFromScorecard(touch.qaReview?.scorecard);
-      const derivedSentimentScore = Math.max(35, Math.min(98, Math.round((client.relationshipScore + client.healthScore) / 2 + (overallScore !== null ? (overallScore - 75) / 3 : 0))));
+      const derivedSentimentScore = Math.max(35, Math.min(98, Math.round((assessedOrNeutral(client.relationshipScore) + assessedOrNeutral(client.healthScore)) / 2 + (overallScore !== null ? (overallScore - 75) / 3 : 0))));
       return {
         id: touch.id,
         touchDate: client.touchDate,
@@ -143,6 +160,6 @@ export async function getQaMeetingDetailView(context: TenantContext, touchId: st
     client,
     touch,
     overallScore,
-    sentimentScore: Math.max(35, Math.min(98, Math.round((client.relationshipScore + client.healthScore) / 2 + (overallScore !== null ? (overallScore - 75) / 3 : 0)))),
+    sentimentScore: Math.max(35, Math.min(98, Math.round((assessedOrNeutral(client.relationshipScore) + assessedOrNeutral(client.healthScore)) / 2 + (overallScore !== null ? (overallScore - 75) / 3 : 0)))),
   };
 }

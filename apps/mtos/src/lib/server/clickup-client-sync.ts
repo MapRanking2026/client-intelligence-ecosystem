@@ -60,12 +60,83 @@ function toSlug(value: string) {
   return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
 }
 
-function mapScoreTone(score: number): ClientRecord["tone"] {
+function mapScoreTone(score: number | null): ClientRecord["tone"] {
+  if (score === null) return "unknown";
   if (score >= 90) return "excellent";
   if (score >= 75) return "healthy";
   if (score >= 60) return "needs_attention";
   if (score >= 40) return "at_risk";
   return "critical";
+}
+
+/**
+ * ClickUp's "⭐ Health" field is a three-option dropdown (Good / Neutral / Risk), not a 0-100 score.
+ * The REST API reports a dropdown's selection as its orderindex, so reading the field as a number
+ * previously yielded 0, 1 or 2 -- scores that all fell into the "critical" band, which is why a
+ * client marked "Good" (orderindex 0) showed up as critical. Match on the option NAME instead, and
+ * treat an unset dropdown as not assessed rather than as a default score.
+ *
+ * The numbers here are band representatives chosen to land in the matching mapScoreTone band; they
+ * are not measurements, and nothing should present them as precise.
+ */
+const HEALTH_DROPDOWN_BANDS: { match: string[]; score: number }[] = [
+  { match: ["good", "healthy", "green"], score: 80 },
+  { match: ["neutral", "ok", "watching", "yellow"], score: 65 },
+  // 45 lands in mapScoreTone's "at_risk" band, matching what the option actually says. "critical"
+  // stays reserved for a stronger signal than a three-state label can carry.
+  { match: ["risk", "at risk", "bad", "red"], score: 45 },
+  { match: ["critical", "churning"], score: 30 },
+];
+
+const HEALTH_FIELD_NAMES = ["Health", "Health Score", "Client Health", "⭐ Health", "⭐️ Health"];
+
+/**
+ * Reads a genuinely numeric 0-100 custom field, or null when the field is absent, empty, or holds
+ * something that is not a score (a dropdown orderindex, a task relation). Never invents a fallback.
+ */
+function getTaskOptionalScore(task: ClickUpTask, fieldNames: string[]): number | null {
+  for (const fieldName of fieldNames) {
+    const field = getCustomFieldRaw(task, fieldName);
+    if (!field) {
+      continue;
+    }
+    const { value } = field;
+    if (typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 100) {
+      return Math.round(value);
+    }
+    if (typeof value === "string" && value.trim()) {
+      const numeric = Number(value.replace(/[^0-9.-]/g, ""));
+      if (Number.isFinite(numeric) && numeric >= 0 && numeric <= 100) {
+        return Math.round(numeric);
+      }
+    }
+  }
+
+  return null;
+}
+
+/** Exported so the dropdown mapping can be verified against real ClickUp payload shapes. */
+export function getTaskHealthScore(task: ClickUpTask): number | null {
+  for (const fieldName of HEALTH_FIELD_NAMES) {
+    const label = normalizeToken(stringifyCustomFieldValue(task, fieldName));
+    if (!label) {
+      continue;
+    }
+
+    const band = HEALTH_DROPDOWN_BANDS.find((candidate) => candidate.match.includes(label));
+    if (band) {
+      return band.score;
+    }
+
+    // A workspace that swaps the dropdown for a real numeric field should still work, but only a
+    // plausible 0-100 score is accepted -- never a bare orderindex dressed up as a score.
+    const numeric = Number(label.replace(/[^0-9.-]/g, ""));
+    if (Number.isFinite(numeric) && numeric >= 3 && numeric <= 100) {
+      return Math.round(numeric);
+    }
+  }
+
+  return null;
 }
 
 function formatDateLabel(value?: string | null) {
@@ -288,27 +359,12 @@ function splitList(value: string) {
 function serializeTaskToClient(task: ClickUpTask, managerName: string): ClientRecord {
   const name = task.name?.trim() || "Unnamed Client";
   const taskManagerName = getTaskManagerValue(task) || managerName;
-  const healthScore = Math.max(
-    0,
-    Math.min(
-      100,
-      getTaskCustomNumber(task, ["Health", "Health Score", "Client Health"], 72),
-    ),
-  );
-  const relationshipScore = Math.max(
-    0,
-    Math.min(
-      100,
-      getTaskCustomNumber(task, ["Relationship", "Relationship Score"], healthScore),
-    ),
-  );
-  const growthReadiness = Math.max(
-    0,
-    Math.min(
-      100,
-      getTaskCustomNumber(task, ["Growth Readiness", "Growth Score"], Math.round((healthScore + relationshipScore) / 2)),
-    ),
-  );
+  const healthScore = getTaskHealthScore(task);
+  // ClickUp's "Relationship" field is a task-relation, not a score, and there is no growth field at
+  // all. Both previously fell back to healthScore, which made all three numbers identical for every
+  // client and presented a single three-state label as three independent measurements.
+  const relationshipScore = getTaskOptionalScore(task, ["Relationship Score", "Relationship Health"]);
+  const growthReadiness = getTaskOptionalScore(task, ["Growth Readiness", "Growth Score"]);
   const location = getTaskCustomText(task, ["Location", "Market", "City"]);
   const industry = getTaskCustomText(task, ["Industry", "Vertical"], "Unknown");
   const sentiment = getTaskCustomText(task, ["Sentiment", "Client Sentiment"], "Neutral");
@@ -364,8 +420,9 @@ function buildMonthlyTouchRecord(task: ClickUpTask, client: ClientRecord, existi
     id: client.touchId,
     clientId: client.id,
     status: existing?.status || "Preparing",
-    readinessScore: existing?.readinessScore ?? Math.max(client.healthScore, 65),
-    confidenceScore: existing?.confidenceScore ?? Math.max(client.relationshipScore, 65),
+    // A touch starts at a neutral readiness when the client has no assessed score to seed it from.
+    readinessScore: existing?.readinessScore ?? Math.max(client.healthScore ?? 65, 65),
+    confidenceScore: existing?.confidenceScore ?? Math.max(client.relationshipScore ?? 65, 65),
     executiveBrief:
       existing?.executiveBrief ||
       client.summary ||

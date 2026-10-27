@@ -2,30 +2,16 @@ import Link from "next/link";
 import { ArrowRight } from "lucide-react";
 
 import { Preview } from "@/src/components/mtos/preview";
-import type { ClientRecord, HealthTone } from "@/src/lib/mtos-data";
-
-const TONE_CLASS: Record<HealthTone, "good" | "watch" | "risk"> = {
-  excellent: "good",
-  healthy: "good",
-  needs_attention: "watch",
-  at_risk: "risk",
-  critical: "risk",
-};
-const TONE_LABEL: Record<HealthTone, string> = {
-  excellent: "Excellent",
-  healthy: "Healthy",
-  needs_attention: "Needs attention",
-  at_risk: "At risk",
-  critical: "Critical",
-};
+import type { ClientRecord } from "@/src/lib/mtos-data";
+import { TONE_CLASS, TONE_LABEL, formatScore } from "@/src/lib/health-display";
 
 /** A client name that links to the profile and previews key facts on hover. */
 export function ClientHint({ client, label }: { client: ClientRecord; label?: string }) {
   const tone = TONE_CLASS[client.tone];
-  const stats: [string, number][] = [
-    ["Health", client.healthScore],
-    ["Rel.", client.relationshipScore],
-    ["Growth", client.growthReadiness],
+  const stats: [string, string][] = [
+    ["Health", formatScore(client.healthScore)],
+    ["Rel.", formatScore(client.relationshipScore)],
+    ["Growth", formatScore(client.growthReadiness)],
   ];
 
   return (

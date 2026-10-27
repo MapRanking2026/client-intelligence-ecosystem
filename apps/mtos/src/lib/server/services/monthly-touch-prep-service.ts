@@ -1152,10 +1152,12 @@ function buildDataGaps(
 
 function buildWins(client: ClientRecord, sources: MonthlyTouchPrepPack["integrationSources"]) {
   const wins = [
-    client.relationshipScore >= 80
+    client.relationshipScore !== null && client.relationshipScore >= 80
       ? `Relationship strength remains solid at ${client.relationshipScore}.`
       : "",
-    client.healthScore >= 80 ? `Overall account health is stable at ${client.healthScore}.` : "",
+    client.healthScore !== null && client.healthScore >= 80
+      ? `Overall account health is stable at ${client.healthScore}.`
+      : "",
     sources.find((source) => source.providerId === "clickup")
       ? "Client context was refreshed from ClickUp before this touch."
       : "",
@@ -1250,7 +1252,9 @@ function buildExecutiveBrief(
     : "No synced integration snapshots are available yet, so this prep pack is using Monthly Touch OS client and workflow data only.";
 
   const openingParagraph = [
-    `${client.name} enters this monthly touch with a health score of ${client.healthScore} and relationship score of ${client.relationshipScore}.`,
+    client.healthScore !== null || client.relationshipScore !== null
+      ? `${client.name} enters this monthly touch with a health score of ${client.healthScore ?? "not set"} and relationship score of ${client.relationshipScore ?? "not set"}.`
+      : `${client.name} has no health or relationship score recorded yet, so this touch should establish one.`,
     overdueCount
       ? `${overdueCount} overdue commitment${overdueCount === 1 ? "" : "s"} need explicit review before moving into growth planning.`
       : "No overdue commitments are currently blocking the conversation, which creates space for strategy and follow-through.",
@@ -1437,7 +1441,11 @@ function computeReadinessScore(
 }
 
 function computeConfidenceScore(client: ClientRecord, hasClaudeOutput: boolean) {
-  const score = Math.round(client.relationshipScore * 0.65 + client.healthScore * 0.35 + (hasClaudeOutput ? 3 : 0));
+  // Unassessed scores contribute a neutral midpoint rather than a zero, so an unassessed client does
+  // not read as low-confidence purely for lacking a ClickUp health label.
+  const relationship = client.relationshipScore ?? 65;
+  const health = client.healthScore ?? 65;
+  const score = Math.round(relationship * 0.65 + health * 0.35 + (hasClaudeOutput ? 3 : 0));
   return clamp(score, 55, 98);
 }
 

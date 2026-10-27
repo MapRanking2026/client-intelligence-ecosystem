@@ -16,29 +16,14 @@ import { Linkified, Callout } from "@/src/components/mtos/annotate";
 import { ClientHint } from "@/src/components/mtos/client-hint";
 import { resolveTenantContext } from "@/src/lib/auth/resolve-tenant-context";
 import { getCommandCenterView } from "@/src/lib/server/services/command-center-service";
-import type { ClientRecord, HealthTone } from "@/src/lib/mtos-data";
-
-const TONE_CLASS: Record<HealthTone, "good" | "watch" | "risk"> = {
-  excellent: "good",
-  healthy: "good",
-  needs_attention: "watch",
-  at_risk: "risk",
-  critical: "risk",
-};
-const TONE_LABEL: Record<HealthTone, string> = {
-  excellent: "Excellent",
-  healthy: "Healthy",
-  needs_attention: "Needs attention",
-  at_risk: "At risk",
-  critical: "Critical",
-};
-const SEVERITY: Record<HealthTone, number> = {
-  critical: 0,
-  at_risk: 1,
-  needs_attention: 2,
-  healthy: 3,
-  excellent: 4,
-};
+import type { ClientRecord } from "@/src/lib/mtos-data";
+import {
+  TONE_CLASS,
+  TONE_LABEL,
+  TONE_SEVERITY,
+  averageScore,
+  needsAttention,
+} from "@/src/lib/health-display";
 
 function initials(name: string) {
   return name
@@ -95,23 +80,26 @@ export default async function CommandCenterPage() {
   }
   const { snapshot, clients, commitments } = view;
 
-  const needAttention = clients.filter((c) => SEVERITY[c.tone] <= 2);
-  const priority = [...clients].sort((a, b) => SEVERITY[a.tone] - SEVERITY[b.tone]).slice(0, 4);
+  const needAttention = clients.filter((c) => needsAttention(c.tone));
+  const priority = [...clients]
+    .sort((a, b) => TONE_SEVERITY[a.tone] - TONE_SEVERITY[b.tone])
+    .slice(0, 4);
+  const unassessed = clients.filter((c) => c.tone === "unknown").length;
   const upcoming = [...clients]
     .sort((a, b) => Date.parse(a.touchDate) - Date.parse(b.touchDate))
     .slice(0, 4);
   const openCommitments = commitments.filter((c) => c.status !== "Completed");
   const overdue = commitments.filter((c) => c.status === "Overdue").length;
-  const avgGrowth = Math.round(
-    clients.reduce((sum, c) => sum + c.growthReadiness, 0) / Math.max(clients.length, 1),
-  );
+  // Averages only the clients that actually have a score. Dividing by the whole book treated every
+  // unscored client as a zero and dragged the portfolio figure toward nothing.
+  const avgGrowth = averageScore(clients.map((c) => c.growthReadiness));
 
   const stats = [
     { label: "Active clients", value: String(clients.length), sub: "in your book", icon: <Users /> },
     {
       label: "Need attention",
       value: String(needAttention.length),
-      sub: "flagged today",
+      sub: unassessed ? `${unassessed} health not set` : "flagged today",
       icon: <ShieldAlert />,
       tone: "risk" as const,
     },
@@ -122,7 +110,13 @@ export default async function CommandCenterPage() {
       icon: <BadgeCheck />,
       tone: overdue > 0 ? ("risk" as const) : undefined,
     },
-    { label: "Avg growth score", value: `${avgGrowth}`, sub: "portfolio", icon: <TrendingUp />, tone: "good" as const },
+    {
+      label: "Avg growth score",
+      value: avgGrowth.value === null ? "—" : String(avgGrowth.value),
+      sub: avgGrowth.counted ? `across ${avgGrowth.counted} scored` : "not scored yet",
+      icon: <TrendingUp />,
+      tone: avgGrowth.value === null ? undefined : ("good" as const),
+    },
   ];
 
   return (
@@ -149,7 +143,7 @@ export default async function CommandCenterPage() {
         <div className="card glow" style={{ minWidth: 230, padding: "18px 20px" }}>
           <div className="stat-label">Portfolio health</div>
           <div className="mt-3 flex items-center gap-4">
-            <Gauge value={avgGrowth} />
+            <Gauge value={avgGrowth.value ?? 0} />
             <div>
               <div className="text-[0.78rem]" style={{ color: "var(--slate-400)" }}>
                 Avg growth score
@@ -210,7 +204,7 @@ export default async function CommandCenterPage() {
               return (
                 <div key={c.id} className={`insight ${tone}`}>
                   <div className="insight-icon">
-                    <PriorityIcon tone={tone} />
+                    <PriorityIcon tone={tone === "muted" ? "watch" : tone} />
                   </div>
                   <div className="min-w-0">
                     <div className="mb-2 flex flex-wrap items-center gap-2">

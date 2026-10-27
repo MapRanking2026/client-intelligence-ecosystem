@@ -4,22 +4,8 @@ import { useState } from "react";
 import Link from "next/link";
 import { ArrowUpRight } from "lucide-react";
 
-import type { ClientRecord, HealthTone } from "@/src/lib/mtos-data";
-
-const TONE_CLASS: Record<HealthTone, "good" | "watch" | "risk"> = {
-  excellent: "good",
-  healthy: "good",
-  needs_attention: "watch",
-  at_risk: "risk",
-  critical: "risk",
-};
-const TONE_LABEL: Record<HealthTone, string> = {
-  excellent: "Excellent",
-  healthy: "Healthy",
-  needs_attention: "Needs attention",
-  at_risk: "At risk",
-  critical: "Critical",
-};
+import type { ClientRecord } from "@/src/lib/mtos-data";
+import { TONE_CLASS, TONE_LABEL, formatScore, needsAttention } from "@/src/lib/health-display";
 
 function initials(name: string) {
   return name
@@ -41,8 +27,8 @@ export function ClientRoster({ clients }: { clients: ClientRecord[] }) {
   const [filter, setFilter] = useState<(typeof FILTERS)[number]["key"]>("all");
 
   const shown = clients.filter((c) => {
-    if (filter === "attention") return ["needs_attention", "at_risk", "critical"].includes(c.tone);
-    if (filter === "growth") return c.growthReadiness >= 75;
+    if (filter === "attention") return needsAttention(c.tone);
+    if (filter === "growth") return c.growthReadiness !== null && c.growthReadiness >= 75;
     return true;
   });
 
@@ -108,13 +94,13 @@ export function ClientRoster({ clients }: { clients: ClientRecord[] }) {
                   <div>
                     <div className="muted text-[0.68rem]">Health</div>
                     <div className="text-[1.05rem] font-bold" style={{ color: "var(--text)" }}>
-                      {c.healthScore}
+                      {formatScore(c.healthScore)}
                     </div>
                   </div>
                   <div>
                     <div className="muted text-[0.68rem]">Growth</div>
                     <div className="text-[1.05rem] font-bold" style={{ color: "var(--text)" }}>
-                      {c.growthReadiness}
+                      {formatScore(c.growthReadiness)}
                     </div>
                   </div>
                 </div>

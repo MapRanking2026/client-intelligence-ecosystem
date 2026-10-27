@@ -1,5 +1,16 @@
 export type Confidence = "High" | "Medium" | "Low";
-export type HealthTone = "excellent" | "healthy" | "needs_attention" | "at_risk" | "critical";
+/**
+ * "unknown" is a real state, not a default: most ClickUp Health Tracker rows have no health value
+ * set, and rendering those as "needs_attention" made 181 unassessed clients look like they had been
+ * assessed and found wanting. Anything deriving a judgement from health must handle it.
+ */
+export type HealthTone =
+  | "excellent"
+  | "healthy"
+  | "needs_attention"
+  | "at_risk"
+  | "critical"
+  | "unknown";
 
 export interface EvidenceItem {
   label: string;
@@ -438,9 +449,15 @@ export interface ClientRecord {
   lifecycleStage: string;
   touchId: string;
   touchDate: string;
-  healthScore: number;
-  relationshipScore: number;
-  growthReadiness: number;
+  /**
+   * null means "not assessed", which is distinct from a low score. ClickUp's Health Tracker carries
+   * a three-state label (Good / Neutral / Risk), so a stored number is the band's representative
+   * value, not a measured score. Relationship and growth have no ClickUp source at all and stay
+   * null until something actually measures them.
+   */
+  healthScore: number | null;
+  relationshipScore: number | null;
+  growthReadiness: number | null;
   tone: HealthTone;
   summary: string;
   topRisks: string[];

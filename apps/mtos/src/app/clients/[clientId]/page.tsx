@@ -30,40 +30,33 @@ import { resolveTenantContext } from "@/src/lib/auth/resolve-tenant-context";
 import { getClientMappingView } from "@/src/lib/server/services/client-mappings-service";
 import { getClientWorkspaceView } from "@/src/lib/server/services/clients-service";
 import { getStoredLeadVerification } from "@/src/lib/server/services/lead-verification-service";
-import type { HealthTone } from "@/src/lib/mtos-data";
-
-const TONE_CLASS: Record<HealthTone, "good" | "watch" | "risk"> = {
-  excellent: "good",
-  healthy: "good",
-  needs_attention: "watch",
-  at_risk: "risk",
-  critical: "risk",
-};
-const TONE_LABEL: Record<HealthTone, string> = {
-  excellent: "Excellent",
-  healthy: "Healthy",
-  needs_attention: "Needs attention",
-  at_risk: "At risk",
-  critical: "Critical",
-};
+import {
+  TONE_CLASS,
+  TONE_LABEL,
+  type ToneClass,
+  formatScore,
+  scoreToneClass,
+} from "@/src/lib/health-display";
 
 function initials(name: string) {
   return name.split(" ").filter(Boolean).slice(0, 2).map((w) => w[0]).join("").toUpperCase();
 }
 
-function ScoreStat({ label, value, tone }: { label: string; value: number; tone?: "good" | "watch" | "risk" }) {
+/** A score that may not exist. An absent score shows an em dash and an empty bar, never a zero. */
+function ScoreStat({ label, value }: { label: string; value: number | null }) {
+  const tone: ToneClass = scoreToneClass(value);
   return (
     <div style={{ padding: "14px 16px", borderRadius: 14, border: "1px solid var(--hair)", background: "var(--surface-2)" }}>
       <div className="flex items-center justify-between">
         <span className="stat-label">{label}</span>
-        {tone ? <span className={`sig-dot ${tone}`} /> : null}
+        {value === null ? null : <span className={`sig-dot ${tone}`} />}
       </div>
       <div className="mt-2.5 flex items-center gap-3">
         <span className="stat-val" style={{ fontSize: "1.6rem" }}>
-          {value}
+          {formatScore(value)}
         </span>
-        <div className={`bar ${tone && tone !== "good" ? tone : ""}`} style={{ flex: 1 }}>
-          <i style={{ width: `${Math.min(value, 100)}%` }} />
+        <div className={`bar ${tone === "watch" || tone === "risk" ? tone : ""}`} style={{ flex: 1 }}>
+          <i style={{ width: value === null ? "0%" : `${Math.min(value, 100)}%` }} />
         </div>
       </div>
     </div>
@@ -452,9 +445,9 @@ export default async function ClientWorkspacePage({
         </div>
 
         <div className="mt-5 grid grid-cols-2 gap-3.5 lg:grid-cols-4">
-          <ScoreStat label="Health" value={client.healthScore} tone={client.healthScore >= 75 ? "good" : client.healthScore >= 60 ? "watch" : "risk"} />
-          <ScoreStat label="Relationship" value={client.relationshipScore} tone={client.relationshipScore >= 75 ? "good" : client.relationshipScore >= 60 ? "watch" : "risk"} />
-          <ScoreStat label="Growth readiness" value={client.growthReadiness} tone={client.growthReadiness >= 75 ? "good" : client.growthReadiness >= 60 ? "watch" : "risk"} />
+          <ScoreStat label="Health" value={client.healthScore} />
+          <ScoreStat label="Relationship" value={client.relationshipScore} />
+          <ScoreStat label="Growth readiness" value={client.growthReadiness} />
           <div style={{ padding: "14px 16px", borderRadius: 14, border: "1px solid var(--hair)", background: "var(--surface-2)" }}>
             <div className="stat-label">Next touch</div>
             <div className="mt-2.5 text-[1.15rem] font-bold" style={{ color: "var(--info)" }}>

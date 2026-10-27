@@ -12,7 +12,8 @@
     "bootstrap:map-ranking": "tsx scripts/bootstrap-map-ranking.ts",
     "import:prompts": "tsx scripts/import-prompt-library.ts",
     "publish:prompts": "tsx scripts/publish-prompts.ts",
-    "check:prompt-store": "tsx scripts/check-prompt-store.ts"
+    "check:prompt-store": "tsx scripts/check-prompt-store.ts",
+    "check:health-mapping": "tsx scripts/check-clickup-health-mapping.ts"
   },
   "dependencies": {
     "@cie/engine": "*",

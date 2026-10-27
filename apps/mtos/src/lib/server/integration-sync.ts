@@ -500,16 +500,50 @@ function getBearerHeaders(accessToken: string, extra?: Record<string, string>) {
   };
 }
 
+/**
+ * Turns an error body into a sentence worth showing an AM.
+ *
+ * Google reports failures as `{ error: { code, message, status } }` -- an OBJECT. The previous
+ * check tested `typeof payload.error === "string"`, which never matches that shape, and there is no
+ * top-level `message` either, so every Google failure collapsed to "Request failed with status
+ * 403". That is the one case where Google actually tells you what to do: a disabled API names the
+ * API and the project, and a missing grant says so. The prep pack showed the status and dropped the
+ * reason, which left "Reviews could not be read: Request failed with status 403" on the call sheet
+ * and nothing to act on.
+ */
+export function describeApiError(payload: JsonRecord, status: number): string {
+  const error = payload.error;
+
+  if (error && typeof error === "object" && !Array.isArray(error)) {
+    const nested = error as JsonRecord;
+    const message = typeof nested.message === "string" ? nested.message.trim() : "";
+    // `status` is Google's symbolic reason (PERMISSION_DENIED, SERVICE_DISABLED, NOT_FOUND); it
+    // survives truncation of the long message and is what a search actually matches on.
+    const reason = typeof nested.status === "string" ? nested.status.trim() : "";
+    if (message) {
+      return reason ? `${message} (${reason})` : message;
+    }
+    if (reason) {
+      return `${reason} (status ${status})`;
+    }
+  }
+
+  if (typeof error === "string" && error.trim()) {
+    return error.trim();
+  }
+  if (typeof payload.message === "string" && payload.message.trim()) {
+    return payload.message.trim();
+  }
+
+  return `Request failed with status ${status}`;
+}
+
 async function fetchJson(url: string, init?: RequestInit) {
   const response = await fetch(url, init);
   const payload = (await response.json().catch(() => ({}))) as JsonRecord;
 
   if (!response.ok) {
-    const message =
-      (typeof payload.error === "string" && payload.error) ||
-      (typeof payload.message === "string" && payload.message) ||
-      `Request failed with status ${response.status}`;
-    throw new Error(message);
+    throw new Error(describeApiError(payload, response.status));
   }
 
   return payload;

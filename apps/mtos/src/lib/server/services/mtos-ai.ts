@@ -117,7 +117,13 @@ export function hasAnyLlmProvider(env: ServerEnv): boolean {
  * The chain budget sits under the 300s ceiling so the caller keeps room to persist what it has
  * and answer, rather than being killed holding a finished result.
  */
-const LLM_ATTEMPT_TIMEOUT_MS = 100_000;
+/**
+ * Generous on purpose: the prep pack asks for up to 8000 output tokens, and a genuinely long
+ * generation at that size can legitimately run well over a minute. This has to cut off hangs
+ * without cutting off real work, so it sits above any plausible honest completion -- and still
+ * leaves most of a second attempt inside the chain budget.
+ */
+const LLM_ATTEMPT_TIMEOUT_MS = 150_000;
 const LLM_CHAIN_BUDGET_MS = 230_000;
 /** Below this, starting another provider only burns the remainder without plausibly finishing. */
 const LLM_MIN_USEFUL_ATTEMPT_MS = 15_000;

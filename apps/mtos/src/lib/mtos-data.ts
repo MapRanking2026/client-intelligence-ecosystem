@@ -276,8 +276,48 @@ export interface SeoPerformancePack {
   notes: string[];
 }
 
+/**
+ * Local Services Ads reports a different shape than search/social: advertisers are billed per
+ * charged lead, there is no CTR or click-through conversion rate, and Google returns the prior
+ * period alongside the current one. These are the LSA-only numbers that do not fit the generic
+ * channel fields on AdsPerformancePack.
+ */
+export interface LsaPerformanceDetail {
+  accountId: string;
+  businessName: string;
+  currencyCode: string;
+  /** Leads Google actually billed for, and the same figure for the preceding period. */
+  chargedLeads: number | null;
+  previousChargedLeads: number | null;
+  previousSpend: number | null;
+  phoneCalls: number | null;
+  previousPhoneCalls: number | null;
+  /** Calls that connected -- the gap against phoneCalls is missed demand the client controls. */
+  connectedPhoneCalls: number | null;
+  previousConnectedPhoneCalls: number | null;
+  /** Google's own 0-1 score for how reliably the business answers LSA phone leads. */
+  phoneLeadResponsiveness: number | null;
+  averageWeeklyBudget: number | null;
+  averageFiveStarRating: number | null;
+  totalReviews: number | null;
+  /** Lead-level breakdown aggregated from the detailed lead report; null when it could not be read. */
+  leadMix: {
+    total: number;
+    charged: number;
+    notCharged: number;
+    phoneCalls: number;
+    messages: number;
+    bookings: number;
+    disputed: number;
+    /** True when paging stopped early, so the mix describes a sample rather than the full period. */
+    capped: boolean;
+    topCategories: { category: string; count: number }[];
+  } | null;
+  notes: string[];
+}
+
 export interface AdsPerformancePack {
-  channel: "Google Ads" | "Meta Ads";
+  channel: "Google Ads" | "Google LSA" | "Meta Ads";
   connected: boolean;
   spend: number | null;
   leads: number | null;
@@ -285,6 +325,8 @@ export interface AdsPerformancePack {
   ctr: number | null;
   conversionRate: number | null;
   benchmarkNote: string;
+  /** Present only on the Google LSA channel. */
+  lsa?: LsaPerformanceDetail | null;
 }
 
 export interface StrategicActionStatus {
@@ -433,6 +475,7 @@ export interface ClientRecord {
     googleBusinessProfile?: string[];
     gohighlevel?: string[];
     googleAds?: string[];
+    googleLsa?: string[];
   };
   participationChecklist?: {
     offersProvided: boolean;

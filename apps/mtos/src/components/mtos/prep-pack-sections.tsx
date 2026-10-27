@@ -10,6 +10,7 @@ import type {
   HeatmapGrid,
   IssueSolutionItem,
   KeywordScanHistory,
+  LsaPerformanceDetail,
   RankTrackerProfileEvidence,
   ScorecardMetric,
   SeoPerformancePack,
@@ -687,6 +688,58 @@ export function SeoPerformancePanel({ seo }: { seo: SeoPerformancePack }) {
   );
 }
 
+/**
+ * Local Services is billed per charged lead, so its tile reports charged-lead volume against the
+ * prior period plus the answer rate and dispute mix -- the numbers an AM has to speak to -- rather
+ * than the spend/clicks framing the other ad channels use.
+ */
+function LsaChannelDetail({ detail }: { detail: LsaPerformanceDetail }) {
+  const answered =
+    detail.phoneCalls !== null && detail.connectedPhoneCalls !== null && detail.phoneCalls > 0
+      ? Math.round((detail.connectedPhoneCalls / detail.phoneCalls) * 100)
+      : null;
+
+  return (
+    <div className="mt-3 space-y-2 border-t border-white/8 pt-3">
+      <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-300">
+        {detail.chargedLeads !== null ? (
+          <span>
+            Charged leads {detail.chargedLeads}
+            {detail.previousChargedLeads !== null ? ` (prev ${detail.previousChargedLeads})` : ""}
+          </span>
+        ) : null}
+        {detail.phoneCalls !== null ? <span>Calls {detail.phoneCalls}</span> : null}
+        {answered !== null ? <span>Answered {answered}%</span> : null}
+        {detail.averageWeeklyBudget !== null ? <span>Weekly budget ${detail.averageWeeklyBudget}</span> : null}
+      </div>
+
+      {detail.leadMix ? (
+        <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-400">
+          <span>
+            Mix: {detail.leadMix.phoneCalls} call / {detail.leadMix.messages} message /{" "}
+            {detail.leadMix.bookings} booking
+          </span>
+          <span>Not charged {detail.leadMix.notCharged}</span>
+          <span>Disputed {detail.leadMix.disputed}</span>
+        </div>
+      ) : null}
+
+      {detail.leadMix?.topCategories.length ? (
+        <p className="text-xs text-slate-400">
+          Top job types: {detail.leadMix.topCategories.map((entry) => `${entry.category} (${entry.count})`).join(", ")}
+        </p>
+      ) : null}
+
+      {detail.averageFiveStarRating !== null ? (
+        <p className="text-xs text-slate-400">
+          LSA rating {detail.averageFiveStarRating.toFixed(1)}
+          {detail.totalReviews !== null ? ` across ${detail.totalReviews} reviews` : ""}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
 export function AdsPerformancePanel({ ads }: { ads: AdsPerformancePack[] }) {
   return (
     <div className="grid gap-3 sm:grid-cols-2">
@@ -700,6 +753,10 @@ export function AdsPerformancePanel({ ads }: { ads: AdsPerformancePack[] }) {
           ) : (
             <p className="mt-2 text-sm text-slate-400">{channel.benchmarkNote}</p>
           )}
+          {channel.connected && channel.lsa ? <LsaChannelDetail detail={channel.lsa} /> : null}
+          {channel.connected && channel.lsa ? (
+            <p className="mt-3 text-sm text-slate-300">{channel.benchmarkNote}</p>
+          ) : null}
         </div>
       ))}
     </div>

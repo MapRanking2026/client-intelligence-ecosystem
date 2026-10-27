@@ -18,6 +18,7 @@ import type {
   CommitmentRecord,
   GbpProfileInsight,
   GbpReviewHighlight,
+  LsaPerformanceDetail,
 } from "@/src/lib/mtos-data";
 import {
   getIntegrationConnection,
@@ -1709,6 +1710,344 @@ async function syncGoogleAds(context: TenantContext, record: IntegrationConnecti
   } satisfies SyncExecutionResult;
 }
 
+/**
+ * Local Services Ads reporting lives on its own API, not in the Google Ads API, and is queried at
+ * the manager (MCC) level: one call returns every LSA account linked under the manager. That is why
+ * this works for clients who run LSA without a Google Ads campaign account of their own -- the LSA
+ * account only has to be linked to the agency manager account. Unlike the Google Ads API it needs
+ * no developer token, and it uses the same `adwords` OAuth scope the Google Ads provider requests.
+ */
+const LSA_API_BASE = "https://localservices.googleapis.com/v1";
+const LSA_LEAD_PAGE_SIZE = 200;
+/** Detailed lead reports are per-lead, so a busy manager account can page for a long time. */
+const LSA_MAX_LEAD_PAGES = 10;
+const LSA_MAX_LEAD_CATEGORIES = 5;
+
+function buildLsaSearchUrl(
+  path: string,
+  managerCustomerId: string,
+  periodStart: Date,
+  periodEnd: Date,
+  pageSize: number,
+  pageToken?: string,
+) {
+  const url = new URL(`${LSA_API_BASE}/${path}:search`);
+  url.searchParams.set("query", `manager_customer_id:${managerCustomerId}`);
+  const startParts = toGoogleDateParts(periodStart);
+  const endParts = toGoogleDateParts(periodEnd);
+  url.searchParams.set("startDate.year", String(startParts.year));
+  url.searchParams.set("startDate.month", String(startParts.month));
+  url.searchParams.set("startDate.day", String(startParts.day));
+  url.searchParams.set("endDate.year", String(endParts.year));
+  url.searchParams.set("endDate.month", String(endParts.month));
+  url.searchParams.set("endDate.day", String(endParts.day));
+  url.searchParams.set("pageSize", String(pageSize));
+  if (pageToken) {
+    url.searchParams.set("pageToken", pageToken);
+  }
+  return url.toString();
+}
+
+async function fetchLsaAccountReports(
+  accessToken: string,
+  managerCustomerId: string,
+  periodStart: Date,
+  periodEnd: Date,
+) {
+  const reports: JsonRecord[] = [];
+  let pageToken: string | undefined;
+
+  do {
+    const payload = (await fetchJson(
+      buildLsaSearchUrl("accountReports", managerCustomerId, periodStart, periodEnd, 100, pageToken),
+      { headers: getBearerHeaders(accessToken) },
+    )) as JsonRecord;
+    const page = Array.isArray(payload.accountReports) ? (payload.accountReports as JsonRecord[]) : [];
+    reports.push(...page);
+    pageToken = payload.nextPageToken ? String(payload.nextPageToken) : undefined;
+  } while (pageToken && reports.length < 500);
+
+  return reports;
+}
+
+/**
+ * Detailed lead reports carry consumer PII (phone numbers, names, emails on the phone/message/booking
+ * sub-records). Nothing downstream needs an individual consumer, so leads are aggregated per account
+ * here and the PII is dropped before anything is written to the snapshot.
+ */
+async function fetchLsaLeadMixByAccount(
+  accessToken: string,
+  managerCustomerId: string,
+  periodStart: Date,
+  periodEnd: Date,
+) {
+  const byAccount = new Map<
+    string,
+    {
+      total: number;
+      charged: number;
+      notCharged: number;
+      phoneCalls: number;
+      messages: number;
+      bookings: number;
+      disputed: number;
+      categories: Map<string, number>;
+    }
+  >();
+
+  let pageToken: string | undefined;
+  let pages = 0;
+  let capped = false;
+
+  do {
+    const payload = (await fetchJson(
+      buildLsaSearchUrl(
+        "detailedLeadReports",
+        managerCustomerId,
+        periodStart,
+        periodEnd,
+        LSA_LEAD_PAGE_SIZE,
+        pageToken,
+      ),
+      { headers: getBearerHeaders(accessToken) },
+    )) as JsonRecord;
+
+    const page = Array.isArray(payload.detailedLeadReports)
+      ? (payload.detailedLeadReports as JsonRecord[])
+      : [];
+
+    for (const lead of page) {
+      const accountId = String(lead.accountId || "");
+      if (!accountId) {
+        continue;
+      }
+      const bucket =
+        byAccount.get(accountId) ||
+        {
+          total: 0,
+          charged: 0,
+          notCharged: 0,
+          phoneCalls: 0,
+          messages: 0,
+          bookings: 0,
+          disputed: 0,
+          categories: new Map<string, number>(),
+        };
+
+      bucket.total += 1;
+      if (String(lead.chargeStatus || "") === "CHARGED") {
+        bucket.charged += 1;
+      } else if (String(lead.chargeStatus || "") === "NOT_CHARGED") {
+        bucket.notCharged += 1;
+      }
+
+      switch (String(lead.leadType || "")) {
+        case "PHONE_CALL":
+          bucket.phoneCalls += 1;
+          break;
+        case "MESSAGE":
+          bucket.messages += 1;
+          break;
+        case "BOOKING":
+          bucket.bookings += 1;
+          break;
+        default:
+          break;
+      }
+
+      // Google documents disputeStatus as a free-text string rather than an enum, so treat anything
+      // other than an explicit "no dispute" value as a dispute having been raised.
+      const disputeStatus = String(lead.disputeStatus || "").toUpperCase();
+      if (disputeStatus && !disputeStatus.includes("NO_DISPUTE") && disputeStatus !== "DISPUTE_STATUS_UNSPECIFIED") {
+        bucket.disputed += 1;
+      }
+
+      const category = String(lead.leadCategory || "").trim();
+      if (category) {
+        bucket.categories.set(category, (bucket.categories.get(category) || 0) + 1);
+      }
+
+      byAccount.set(accountId, bucket);
+    }
+
+    pageToken = payload.nextPageToken ? String(payload.nextPageToken) : undefined;
+    pages += 1;
+    if (pageToken && pages >= LSA_MAX_LEAD_PAGES) {
+      capped = true;
+      break;
+    }
+  } while (pageToken);
+
+  const result = new Map<string, LsaPerformanceDetail["leadMix"]>();
+  for (const [accountId, bucket] of byAccount) {
+    result.set(accountId, {
+      total: bucket.total,
+      charged: bucket.charged,
+      notCharged: bucket.notCharged,
+      phoneCalls: bucket.phoneCalls,
+      messages: bucket.messages,
+      bookings: bucket.bookings,
+      disputed: bucket.disputed,
+      capped,
+      topCategories: [...bucket.categories.entries()]
+        .sort((left, right) => right[1] - left[1])
+        .slice(0, LSA_MAX_LEAD_CATEGORIES)
+        .map(([category, count]) => ({ category, count })),
+    });
+  }
+
+  return { leadMixByAccount: result, capped };
+}
+
+function toLsaNumber(value: unknown) {
+  if (value === null || value === undefined || value === "") {
+    return null;
+  }
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function roundLsaMoney(value: number | null) {
+  return value === null ? null : Math.round(value * 100) / 100;
+}
+
+async function syncGoogleLsa(context: TenantContext, record: IntegrationConnectionRecord, origin?: string) {
+  const refreshedRecord = await maybeRefreshConnection(context, record, origin);
+  const credentials = getIntegrationCredentials(refreshedRecord);
+  const accessToken = credentials.accessToken;
+  const managerCustomerId = normalizeGoogleAdsCustomerId(
+    credentials.managerCustomerId ||
+      refreshedRecord.externalAccountId ||
+      process.env.GOOGLE_ADS_MCC_ID ||
+      "",
+  );
+
+  if (!accessToken) {
+    throw new Error("Google LSA access token is missing");
+  }
+  if (!managerCustomerId) {
+    throw new Error(
+      "Google LSA manager (MCC) customer ID is missing -- Local Services reporting is only queryable at the manager level",
+    );
+  }
+
+  const { periodStart, periodEnd } = getGbpReportingWindow();
+  const accountReports = await fetchLsaAccountReports(
+    accessToken,
+    managerCustomerId,
+    periodStart,
+    periodEnd,
+  );
+
+  const accounts = accountReports
+    .map((report) => ({
+      accountId: String(report.accountId || ""),
+      businessName: String(report.businessName || "Unnamed LSA account"),
+      currencyCode: String(report.currencyCode || ""),
+      report,
+    }))
+    .filter((account) => account.accountId);
+
+  // One manager-level call covers every linked account, so the lead mix is fetched once and bucketed
+  // rather than re-queried per client. A failure here still leaves the account-level totals usable.
+  let leadMixByAccount = new Map<string, LsaPerformanceDetail["leadMix"]>();
+  let leadMixNote = "";
+  if (accounts.length) {
+    try {
+      const leadMix = await fetchLsaLeadMixByAccount(
+        accessToken,
+        managerCustomerId,
+        periodStart,
+        periodEnd,
+      );
+      leadMixByAccount = leadMix.leadMixByAccount;
+    } catch (error) {
+      leadMixNote =
+        error instanceof Error
+          ? `Lead-level detail unavailable: ${error.message}`
+          : "Lead-level detail unavailable";
+    }
+  }
+
+  const clients = await listFirestoreClients(context.tenantId);
+  const lsaByClient: Record<string, JsonRecord> = {};
+  let matchedCount = 0;
+
+  for (const client of clients) {
+    const manualIds = new Set(client.integrationMappings?.googleLsa || []);
+    const match = accounts.find(
+      (account) => namesLikelyMatch(client.name, account.businessName) || manualIds.has(account.accountId),
+    );
+    if (!match) {
+      continue;
+    }
+
+    matchedCount += 1;
+    const report = match.report;
+    const spend = roundLsaMoney(toLsaNumber(report.currentPeriodTotalCost));
+    const chargedLeads = toLsaNumber(report.currentPeriodChargedLeads);
+    const leadMix = leadMixByAccount.get(match.accountId) ?? null;
+    const notes: string[] = [];
+    if (leadMixNote) {
+      notes.push(leadMixNote);
+    }
+    if (leadMix?.capped) {
+      notes.push(
+        `Lead-level mix is a sample of the most recent ${LSA_MAX_LEAD_PAGES * LSA_LEAD_PAGE_SIZE} leads across the manager account, not the full period.`,
+      );
+    }
+
+    lsaByClient[client.id] = {
+      accountId: match.accountId,
+      businessName: match.businessName,
+      currencyCode: match.currencyCode,
+      spend,
+      previousSpend: roundLsaMoney(toLsaNumber(report.previousPeriodTotalCost)),
+      chargedLeads,
+      previousChargedLeads: toLsaNumber(report.previousPeriodChargedLeads),
+      phoneCalls: toLsaNumber(report.currentPeriodPhoneCalls),
+      previousPhoneCalls: toLsaNumber(report.previousPeriodPhoneCalls),
+      connectedPhoneCalls: toLsaNumber(report.currentPeriodConnectedPhoneCalls),
+      previousConnectedPhoneCalls: toLsaNumber(report.previousPeriodConnectedPhoneCalls),
+      phoneLeadResponsiveness: toLsaNumber(report.phoneLeadResponsiveness),
+      averageWeeklyBudget: roundLsaMoney(toLsaNumber(report.averageWeeklyBudget)),
+      averageFiveStarRating: toLsaNumber(report.averageFiveStarRating),
+      totalReviews: toLsaNumber(report.totalReview),
+      costPerChargedLead:
+        spend !== null && chargedLeads ? Math.round((spend / chargedLeads) * 100) / 100 : null,
+      leadMix,
+      notes,
+    };
+  }
+
+  const counts = createEmptyCounts();
+  counts.fetched = accounts.length;
+  counts.created = Object.keys(lsaByClient).length;
+
+  const summary = accounts.length
+    ? `${formatSummaryCount("LSA account", accounts.length)} listed under manager ${managerCustomerId}, ${formatSummaryCount("account", matchedCount)} matched to MTOS clients${leadMixNote ? " (account totals only -- lead detail unavailable)" : ""}`
+    : `No Local Services accounts are linked under manager ${managerCustomerId}`;
+
+  return {
+    summary,
+    counts,
+    snapshotPayload: {
+      managerCustomerId,
+      window: {
+        start: periodStart.toISOString().slice(0, 10),
+        end: periodEnd.toISOString().slice(0, 10),
+      },
+      // Slim index for the client-mapping picker; the full report stays out of the snapshot.
+      accountIndex: accounts.map((account) => ({
+        accountId: account.accountId,
+        businessName: account.businessName,
+        currencyCode: account.currencyCode,
+      })),
+      lsaByClient,
+    },
+  } satisfies SyncExecutionResult;
+}
+
 function getArrayCount(payload: JsonRecord, keys: string[]) {
   for (const key of keys) {
     const value = payload[key];
@@ -2609,8 +2948,8 @@ async function runProviderSync(
       return syncRotatingTokenProvider(context, "map-checkins", record, origin);
     case "gohighlevel":
       return syncGoHighLevel(context, record, origin);
-    case "google-ads":
-      return syncGoogleAds(context, record, origin);
+    case "google-lsa":
+      return syncGoogleLsa(context, record, origin);
     default:
       throw new Error(`${getIntegrationDefinition(providerId).name} sync is not implemented in this slice`);
   }
@@ -2885,9 +3224,114 @@ async function testGoogleBusinessProfileConnection(
 }
 
 /**
+ * Probes the two Local Services endpoints the LSA sync depends on. Both are queried at the manager
+ * (MCC) level, so the common failure is not a bad token but a client's LSA account not being linked
+ * under the manager account -- which shows up here as an empty account list rather than an error.
+ */
+async function testGoogleLsaConnection(
+  context: TenantContext,
+  record: IntegrationConnectionRecord,
+  origin?: string,
+): Promise<IntegrationConnectionTestCheck[]> {
+  const refreshedRecord = await maybeRefreshConnection(context, record, origin);
+  const credentials = getIntegrationCredentials(refreshedRecord);
+  const accessToken = credentials.accessToken;
+  if (!accessToken) {
+    throw new Error("Google LSA access token is missing. Reconnect the integration, then test again.");
+  }
+
+  const managerCustomerId = normalizeGoogleAdsCustomerId(
+    credentials.managerCustomerId ||
+      refreshedRecord.externalAccountId ||
+      process.env.GOOGLE_ADS_MCC_ID ||
+      "",
+  );
+
+  const host = "localservices.googleapis.com";
+  if (!managerCustomerId) {
+    return [
+      {
+        api: "Local Services API",
+        endpoint: host,
+        status: "failed",
+        detail:
+          "No manager (MCC) customer ID is configured. Local Services reporting can only be queried at the manager level -- set GOOGLE_ADS_MCC_ID.",
+      },
+    ];
+  }
+
+  const { periodStart, periodEnd } = getGbpReportingWindow();
+  const checks: IntegrationConnectionTestCheck[] = [];
+
+  // 1. Account reports -- the gate, and the check that proves the manager link is readable.
+  {
+    const { response, payload } = await fetchWithStatus(
+      buildLsaSearchUrl("accountReports", managerCustomerId, periodStart, periodEnd, 10),
+      accessToken,
+    );
+    if (response.ok) {
+      const reports = Array.isArray(payload.accountReports) ? (payload.accountReports as JsonRecord[]) : [];
+      checks.push({
+        api: "Local Services account reports",
+        endpoint: host,
+        status: "ok",
+        httpStatus: response.status,
+        detail: reports.length
+          ? `${formatSummaryCount("LSA account", reports.length)} linked under manager ${managerCustomerId}.`
+          : `The API responded, but no LSA accounts are linked under manager ${managerCustomerId}. Link each client's Local Services account to the manager account so its data can be pulled.`,
+      });
+    } else {
+      const { message, googleStatus } = extractGoogleError(payload, response.status);
+      checks.push({
+        api: "Local Services account reports",
+        endpoint: host,
+        status: "failed",
+        httpStatus: response.status,
+        detail: message,
+        approvalBlocked: looksLikeApprovalBlock(response.status, message, googleStatus),
+      });
+    }
+  }
+
+  // 2. Detailed lead reports -- the charged/disputed lead mix. Enabled with the same API, but probed
+  // separately because the sync degrades to account totals when only this call fails.
+  {
+    const { response, payload } = await fetchWithStatus(
+      buildLsaSearchUrl("detailedLeadReports", managerCustomerId, periodStart, periodEnd, 10),
+      accessToken,
+    );
+    if (response.ok) {
+      const leads = Array.isArray(payload.detailedLeadReports)
+        ? (payload.detailedLeadReports as JsonRecord[])
+        : [];
+      checks.push({
+        api: "Local Services detailed lead reports",
+        endpoint: host,
+        status: "ok",
+        httpStatus: response.status,
+        detail: `Lead-level detail is readable (${formatSummaryCount("lead", leads.length)} in the sampled page).`,
+      });
+    } else {
+      const { message, googleStatus } = extractGoogleError(payload, response.status);
+      checks.push({
+        api: "Local Services detailed lead reports",
+        endpoint: host,
+        status: "failed",
+        httpStatus: response.status,
+        detail: message,
+        approvalBlocked: looksLikeApprovalBlock(response.status, message, googleStatus),
+      });
+    }
+  }
+
+  return checks;
+}
+
+/**
  * Runs a live, read-only connection test against a provider and summarises whether its APIs are
- * actually reachable. Currently implemented for Google Business Profile, whose access is gated behind
- * a Google approval/allowlisting step -- the test surfaces exactly that state.
+ * actually reachable. Implemented for the Google providers whose access depends on something outside
+ * MTOS -- a Google approval/allowlisting step, or an account link under the agency manager account --
+ * so the test surfaces exactly that state.
  */
 export async function testIntegrationConnection(
   context: TenantContext,
@@ -2901,6 +3345,9 @@ export async function testIntegrationConnection(
     case "google-business-profile":
       checks = await testGoogleBusinessProfileConnection(context, record, origin);
       break;
+    case "google-lsa":
+      checks = await testGoogleLsaConnection(context, record, origin);
+      break;
     default:
       throw new Error(
         `Connection testing is not available for ${getIntegrationDefinition(providerId).name} yet.`,
@@ -2912,10 +3359,10 @@ export async function testIntegrationConnection(
   const blocked = checks.find((check) => check.approvalBlocked);
   const firstFailure = checks.find((check) => check.status === "failed");
 
+  const providerName = getIntegrationDefinition(providerId).name;
   let summary: string;
   if (ok) {
-    summary =
-      "Connected and approved — every Business Profile API MTOS uses responded successfully, so client data can be pulled.";
+    summary = `Connected and approved — every ${providerName} API MTOS uses responded successfully, so client data can be pulled.`;
   } else if (blocked) {
     summary = `Not approved yet — the ${blocked.api} returned Google's "API not enabled / not allowlisted" response ("${blocked.detail}"). The access request has not been granted for this project.`;
   } else if (firstFailure) {

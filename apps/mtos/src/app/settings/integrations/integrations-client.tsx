@@ -54,9 +54,10 @@ interface IntegrationMutationResponse {
   error?: string;
 }
 
-// Providers whose live access is gated behind an external approval/allowlisting step, where a
+// Providers whose live access depends on something configured outside MTOS -- a Google
+// approval/allowlisting step, or an account link under the agency manager account -- where a
 // read-only "test connection" probe is worth surfacing in the UI.
-const testableProviderIds = new Set<string>(["google-business-profile"]);
+const testableProviderIds = new Set<string>(["google-business-profile", "google-lsa"]);
 
 const authModeMeta = {
   oauth: {

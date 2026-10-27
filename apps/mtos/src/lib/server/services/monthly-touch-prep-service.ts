@@ -15,6 +15,7 @@ import type {
   IssueSolutionItem,
   KeywordScanHistory,
   LeadVerificationReview,
+  LsaPerformanceDetail,
   MapCheckinBusinessSummary,
   MonthlyTouchPrepPack,
   MonthlyTouchRecord,
@@ -246,6 +247,8 @@ const providerLabels: Record<string, string> = {
   "rank-tracker": "Rank Tracker",
   "map-checkins": "Map Check-ins",
   gohighlevel: "GoHighLevel",
+  "google-ads": "Google Ads",
+  "google-lsa": "Google Local Services Ads",
 };
 
 const LEAD_QUALITY_QUESTIONS = [
@@ -330,6 +333,17 @@ function summarizeSnapshot(snapshot: IntegrationSnapshotRecord) {
     const locations = Array.isArray(payload.locations) ? payload.locations : [];
     if (locations.length) {
       bullets.push(`${locations.length} locations available for reference`);
+    }
+  }
+
+  if (snapshot.providerId === "google-lsa") {
+    const accounts = Array.isArray(payload.accountIndex) ? payload.accountIndex : [];
+    const window = payload.window as { start?: string; end?: string } | undefined;
+    if (accounts.length) {
+      bullets.push(`${accounts.length} Local Services accounts linked to the manager account`);
+    }
+    if (window?.start && window?.end) {
+      bullets.push(`Reporting window ${window.start} to ${window.end}`);
     }
   }
 
@@ -875,10 +889,120 @@ function buildSeoPerformance(
   };
 }
 
+function coerceOptionalNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+/**
+ * Reshapes one client's slice of the Local Services snapshot. The snapshot holds whatever the last
+ * sync wrote, so every field is coerced rather than trusted.
+ */
+function extractLsaDetail(lsa: JsonRecord): LsaPerformanceDetail {
+  const rawMix = lsa.leadMix && typeof lsa.leadMix === "object" ? (lsa.leadMix as JsonRecord) : null;
+
+  return {
+    accountId: String(lsa.accountId || ""),
+    businessName: String(lsa.businessName || ""),
+    currencyCode: String(lsa.currencyCode || ""),
+    chargedLeads: coerceOptionalNumber(lsa.chargedLeads),
+    previousChargedLeads: coerceOptionalNumber(lsa.previousChargedLeads),
+    previousSpend: coerceOptionalNumber(lsa.previousSpend),
+    phoneCalls: coerceOptionalNumber(lsa.phoneCalls),
+    previousPhoneCalls: coerceOptionalNumber(lsa.previousPhoneCalls),
+    connectedPhoneCalls: coerceOptionalNumber(lsa.connectedPhoneCalls),
+    previousConnectedPhoneCalls: coerceOptionalNumber(lsa.previousConnectedPhoneCalls),
+    phoneLeadResponsiveness: coerceOptionalNumber(lsa.phoneLeadResponsiveness),
+    averageWeeklyBudget: coerceOptionalNumber(lsa.averageWeeklyBudget),
+    averageFiveStarRating: coerceOptionalNumber(lsa.averageFiveStarRating),
+    totalReviews: coerceOptionalNumber(lsa.totalReviews),
+    leadMix: rawMix
+      ? {
+          total: Number(rawMix.total) || 0,
+          charged: Number(rawMix.charged) || 0,
+          notCharged: Number(rawMix.notCharged) || 0,
+          phoneCalls: Number(rawMix.phoneCalls) || 0,
+          messages: Number(rawMix.messages) || 0,
+          bookings: Number(rawMix.bookings) || 0,
+          disputed: Number(rawMix.disputed) || 0,
+          capped: Boolean(rawMix.capped),
+          topCategories: Array.isArray(rawMix.topCategories)
+            ? (rawMix.topCategories as JsonRecord[]).map((entry) => ({
+                category: String(entry.category || ""),
+                count: Number(entry.count) || 0,
+              }))
+            : [],
+        }
+      : null,
+    notes: Array.isArray(lsa.notes) ? (lsa.notes as unknown[]).map((note) => String(note)) : [],
+  };
+}
+
+/**
+ * AM-facing reading of the LSA numbers. LSA is billed per charged lead, so the questions that matter
+ * are whether charged-lead volume moved, whether the business is answering the calls it paid for, and
+ * whether leads worth disputing were disputed.
+ */
+function buildLsaBenchmarkNote(detail: LsaPerformanceDetail, spend: number | null): string {
+  const statements: string[] = [];
+
+  if (detail.chargedLeads !== null && detail.previousChargedLeads !== null) {
+    const delta = detail.chargedLeads - detail.previousChargedLeads;
+    if (delta === 0) {
+      statements.push(`Charged leads held flat at ${detail.chargedLeads} versus the prior period.`);
+    } else {
+      statements.push(
+        `Charged leads ${delta > 0 ? "rose" : "fell"} from ${detail.previousChargedLeads} to ${detail.chargedLeads} versus the prior period.`,
+      );
+    }
+  }
+
+  if (detail.phoneCalls !== null && detail.connectedPhoneCalls !== null && detail.phoneCalls > 0) {
+    const missed = detail.phoneCalls - detail.connectedPhoneCalls;
+    if (missed > 0) {
+      statements.push(
+        `${missed} of ${detail.phoneCalls} LSA calls did not connect -- that is paid demand the client is not answering.`,
+      );
+    }
+  }
+
+  if (detail.phoneLeadResponsiveness !== null && detail.phoneLeadResponsiveness < 0.8) {
+    statements.push(
+      `Google rates phone responsiveness at ${Math.round(detail.phoneLeadResponsiveness * 100)}%, which suppresses LSA ranking until it improves.`,
+    );
+  }
+
+  if (detail.leadMix) {
+    const { total, notCharged, disputed } = detail.leadMix;
+    if (total > 0 && notCharged > 0) {
+      statements.push(`${notCharged} of ${total} leads in the period were not charged.`);
+    }
+    if (disputed > 0) {
+      statements.push(`${disputed} lead${disputed === 1 ? " was" : "s were"} disputed.`);
+    }
+  }
+
+  if (detail.averageWeeklyBudget !== null && spend !== null) {
+    statements.push(`Average weekly budget is $${detail.averageWeeklyBudget}; period spend was $${spend}.`);
+  }
+
+  statements.push(...detail.notes);
+
+  return statements.length
+    ? statements.join(" ")
+    : "Local Services is connected -- review charged leads and cost per charged lead against the client's close rate.";
+}
+
 function buildAdsPerformanceFromSnapshots(rawSnapshots: Map<string, JsonRecord>, clientId: string): AdsPerformancePack[] {
   const googleAdsSnapshot = rawSnapshots.get("google-ads");
   const adsByClient = (googleAdsSnapshot?.adsByClient || {}) as JsonRecord;
   const googleAds = (adsByClient[clientId] || null) as JsonRecord | null;
+
+  const lsaSnapshot = rawSnapshots.get("google-lsa");
+  const lsaByClient = (lsaSnapshot?.lsaByClient || {}) as JsonRecord;
+  const lsaRaw = (lsaByClient[clientId] || null) as JsonRecord | null;
+  const lsaConnected = Boolean(lsaRaw && !lsaRaw.error);
+  const lsaDetail = lsaConnected && lsaRaw ? extractLsaDetail(lsaRaw) : null;
+  const lsaSpend = lsaRaw ? coerceOptionalNumber(lsaRaw.spend) : null;
 
   return [
     {
@@ -893,6 +1017,24 @@ function buildAdsPerformanceFromSnapshots(rawSnapshots: Map<string, JsonRecord>,
         googleAds && typeof googleAds.error === "string"
           ? googleAds.error
           : "Use Google Ads spend, CTR, and CPL alongside lead quality to judge whether paid search is producing profitable opportunities.",
+    },
+    {
+      channel: "Google LSA",
+      connected: lsaConnected,
+      spend: lsaSpend,
+      leads: lsaDetail?.chargedLeads ?? null,
+      costPerLead: lsaRaw ? coerceOptionalNumber(lsaRaw.costPerChargedLead) : null,
+      // Local Services has no impression-to-click funnel, so CTR and click conversion rate do not
+      // exist for this channel; the equivalent signals live on `lsa`.
+      ctr: null,
+      conversionRate: null,
+      benchmarkNote:
+        lsaRaw && typeof lsaRaw.error === "string"
+          ? lsaRaw.error
+          : lsaDetail
+            ? buildLsaBenchmarkNote(lsaDetail, lsaSpend)
+            : "Connect Google Local Services Ads and link this client's LSA account to the agency manager account to pull charged leads and cost per lead.",
+      lsa: lsaDetail,
     },
     {
       channel: "Meta Ads",

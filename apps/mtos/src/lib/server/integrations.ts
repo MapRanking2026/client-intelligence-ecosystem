@@ -87,6 +87,7 @@ const syncEnabledProviders = new Set<IntegrationProviderId>([
   "map-checkins",
   "gohighlevel",
   "google-ads",
+  "google-lsa",
 ]);
 
 const rotatingTokenFields: IntegrationFieldDefinition[] = [
@@ -255,6 +256,31 @@ const providerDefinitions: ProviderDefinition[] = [
     highlight: "Campaign, spend, and conversion context for local monthly touches.",
     capabilities: ["Campaign reporting", "Spend trend analysis", "Lead source attribution"],
     defaultApiBaseUrl: "https://googleads.googleapis.com",
+    fields: [],
+    oauth: {
+      authUrl: "https://accounts.google.com/o/oauth2/v2/auth",
+      tokenUrl: "https://oauth2.googleapis.com/token",
+      scopes: ["https://www.googleapis.com/auth/adwords"],
+      clientIdEnv: "GOOGLE_INTEGRATIONS_CLIENT_ID",
+      clientSecretEnv: "GOOGLE_INTEGRATIONS_CLIENT_SECRET",
+      transport: "standard_form",
+      refreshStrategy: "standard_form",
+      accessType: "offline",
+      prompt: "consent",
+      extraAuthorizeParams: { include_granted_scopes: "true" },
+    },
+  },
+  {
+    id: "google-lsa",
+    name: "Google Local Services Ads",
+    shortName: "Google LSA",
+    category: "analytics",
+    authMode: "oauth",
+    description:
+      "Connect Local Services Ads so MTOS can pull charged leads, lead mix, and disputes for clients running LSA with or without a Google Ads account.",
+    highlight: "Charged-lead volume, cost per lead, and phone responsiveness for local service clients.",
+    capabilities: ["Charged lead reporting", "Lead type and dispute mix", "Budget and responsiveness tracking"],
+    defaultApiBaseUrl: "https://localservices.googleapis.com",
     fields: [],
     oauth: {
       authUrl: "https://accounts.google.com/o/oauth2/v2/auth",

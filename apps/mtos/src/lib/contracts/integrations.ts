@@ -3,6 +3,7 @@ export const integrationProviderIds = [
   "google-business-profile",
   "google-search-console",
   "google-ads",
+  "google-lsa",
   "meta-ads",
   "google-analytics",
   "google-calendar",

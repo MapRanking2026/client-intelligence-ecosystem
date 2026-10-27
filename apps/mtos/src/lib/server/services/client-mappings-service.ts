@@ -13,7 +13,13 @@ import {
 
 type JsonRecord = Record<string, unknown>;
 
-export type MappingProviderId = "rankTracker" | "mapCheckins" | "googleBusinessProfile" | "gohighlevel" | "googleAds";
+export type MappingProviderId =
+  | "rankTracker"
+  | "mapCheckins"
+  | "googleBusinessProfile"
+  | "gohighlevel"
+  | "googleAds"
+  | "googleLsa";
 
 export interface MappingCandidate {
   id: string;
@@ -173,6 +179,27 @@ export async function getClientMappingView(
     manualIds: mappings.googleAds || [],
   });
 
+  const googleLsaPayload = await readSnapshotPayload(context.tenantId, "google-lsa");
+  const googleLsaAccounts = Array.isArray(googleLsaPayload?.accountIndex)
+    ? (googleLsaPayload!.accountIndex as JsonRecord[])
+    : [];
+  providers.push({
+    providerId: "googleLsa",
+    label: "Google Local Services Ads",
+    note: googleLsaAccounts.length
+      ? "Charged lead and cost data for newly pinned LSA accounts appears after the next Google LSA sync."
+      : "No Local Services account list yet -- connect and run a Google LSA sync in Settings > Integrations to load candidates. Each client's LSA account must be linked to the agency manager account.",
+    candidates: googleLsaAccounts.map((account) => ({
+      id: String(account.accountId || ""),
+      label: String(account.businessName || "Unnamed LSA account"),
+      detail: String(account.currencyCode || ""),
+    })),
+    autoMatchedIds: googleLsaAccounts
+      .filter((account) => namesLikelyMatch(client.name, String(account.businessName || "")))
+      .map((account) => String(account.accountId || "")),
+    manualIds: mappings.googleLsa || [],
+  });
+
   return {
     clientId: client.id,
     clientName: client.name,
@@ -180,7 +207,14 @@ export async function getClientMappingView(
   };
 }
 
-const mappingKeys: MappingProviderId[] = ["rankTracker", "mapCheckins", "googleBusinessProfile", "gohighlevel", "googleAds"];
+const mappingKeys: MappingProviderId[] = [
+  "rankTracker",
+  "mapCheckins",
+  "googleBusinessProfile",
+  "gohighlevel",
+  "googleAds",
+  "googleLsa",
+];
 
 export async function saveClientMappings(
   context: TenantContext,

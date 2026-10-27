@@ -3,10 +3,12 @@
 import { useEffect, useState, useTransition } from "react";
 import {
   CheckCircle2,
+  FileText,
   Gauge,
   LoaderCircle,
   Mail,
   Plus,
+  RefreshCw,
   ShieldCheck,
   Sparkles,
   Ticket,
@@ -84,6 +86,52 @@ interface ClickUpMemberOption {
 interface ClickUpBusinessOption {
   id: string;
   name: string;
+}
+
+/** Mirrors MeetingTranscriptLookup from the meeting-transcript service. */
+interface TranscriptLookup {
+  status:
+    | "loaded"
+    | "not_connected"
+    | "needs_reconsent"
+    | "no_calendar_event"
+    | "artifact_not_ready"
+    | "no_transcript"
+    | "doc_unreadable"
+    | "failed";
+  reason: string;
+  transcript?: string;
+  doc?: { id: string; title: string; url: string };
+  matchedBy?: "calendar_attachment" | "title_and_time";
+  sections?: { fullNotes: boolean; transcript: boolean };
+}
+
+/**
+ * Whether the AM can clear this themselves by reconnecting Google, versus states where the
+ * right move is simply to wait or to paste by hand.
+ */
+const RECONNECT_STATUSES = new Set(["not_connected", "needs_reconsent"]);
+
+/**
+ * Ask the server for this touch's Gemini transcript. The endpoint reports expected outcomes as
+ * a status rather than an error, so only a genuinely unreachable service lands in the catch.
+ */
+async function requestTranscript(touchId: string): Promise<TranscriptLookup> {
+  try {
+    const response = await fetch(`/api/monthly-touches/${touchId}/transcript`);
+    const payload = (await response.json()) as { data?: TranscriptLookup; error?: string };
+    return (
+      payload.data || {
+        status: "failed",
+        reason: payload.error || "Couldn't reach the transcript service. Paste the transcript below instead.",
+      }
+    );
+  } catch {
+    return {
+      status: "failed",
+      reason: "Couldn't reach the transcript service. Paste the transcript below instead.",
+    };
+  }
 }
 
 // Native <option> elements don't reliably honor Tailwind classes across browsers,
@@ -271,6 +319,13 @@ export function PostMeetingWorkflow({ touchId, postMeeting, qaReview }: PostMeet
   const [approveEmail, setApproveEmail] = useState(postMeeting?.clientEmail?.status === "approved");
   const [victorNote, setVictorNote] = useState("");
 
+  // Automatic transcript retrieval. The Gemini notes Doc for the call is fetched when this step
+  // opens so the usual case needs no paste at all; everything else degrades to the manual paste
+  // this step has always supported, which is still the only option for Zoom calls, for touches
+  // with no calendar event, and for recaps typed from memory.
+  const [transcriptLookup, setTranscriptLookup] = useState<TranscriptLookup | null>(null);
+  const [isFetchingTranscript, setIsFetchingTranscript] = useState(false);
+
   // Client Intelligence: editable Risk Register + Stakeholder Map entries (present when at risk).
   const clientIntelligence = postMeeting?.clientIntelligence;
   const [riskEntry, setRiskEntry] = useState<RiskRegisterEntry>(() => clientIntelligence?.riskRegister || {});
@@ -344,6 +399,50 @@ export function PostMeetingWorkflow({ touchId, postMeeting, qaReview }: PostMeet
   ].filter((value) => value === "Yes").length;
   const derivedRiskTier =
     riskFlagCount >= 6 ? "Critical" : riskFlagCount >= 4 ? "High" : riskFlagCount >= 2 ? "Medium" : riskFlagCount === 1 ? "Low" : "Healthy";
+
+  const alreadyAnalyzed = postMeeting?.status === "draft_ready" || postMeeting?.status === "approved";
+
+  /**
+   * Run a lookup and reflect it in the UI.
+   *
+   * `overwrite` is what separates the two callers: the fetch on open must never replace text
+   * the AM has typed, while an explicit re-fetch is them asking for exactly that.
+   */
+  async function loadTranscript({ overwrite }: { overwrite: boolean }) {
+    setIsFetchingTranscript(true);
+    try {
+      const lookup = await requestTranscript(touchId);
+      setTranscriptLookup(lookup);
+      if (lookup.status === "loaded" && lookup.transcript) {
+        const fetched = lookup.transcript;
+        setTranscript((current) => (overwrite || !current.trim() ? fetched : current));
+      }
+    } finally {
+      setIsFetchingTranscript(false);
+    }
+  }
+
+  // Fetch on open, for a touch that hasn't been analyzed and has nothing saved yet. One read per
+  // visit -- no polling and nothing stale, since the Doc is read at the moment the AM looks at it.
+  const shouldAutoFetchTranscript = !alreadyAnalyzed && !(postMeeting?.transcript || "").trim();
+  useEffect(() => {
+    if (!shouldAutoFetchTranscript) return;
+    let cancelled = false;
+    (async () => {
+      setIsFetchingTranscript(true);
+      const lookup = await requestTranscript(touchId);
+      if (cancelled) return;
+      setTranscriptLookup(lookup);
+      if (lookup.status === "loaded" && lookup.transcript) {
+        const fetched = lookup.transcript;
+        setTranscript((current) => (current.trim() ? current : fetched));
+      }
+      setIsFetchingTranscript(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [touchId, shouldAutoFetchTranscript]);
 
   // Load the real ClickUp members for the assignee dropdown. Only needed while the
   // AM is still editing (before decisions are applied).
@@ -438,7 +537,7 @@ export function PostMeetingWorkflow({ touchId, postMeeting, qaReview }: PostMeet
     });
   }
 
-  const analysisReady = postMeeting?.status === "draft_ready" || postMeeting?.status === "approved";
+  const analysisReady = alreadyAnalyzed;
   const decisionsApplied = postMeeting?.status === "approved";
 
   return (
@@ -449,10 +548,69 @@ export function PostMeetingWorkflow({ touchId, postMeeting, qaReview }: PostMeet
           Step 1 -- Meeting transcript
         </p>
         <p className="mt-1 text-sm text-slate-300">
-          Paste the meeting transcript (from Gemini notes, Zoom, or a manual recap) to generate the
-          internal recap, draft follow-up tickets, and a client email draft -- all grounded only in
-          what was actually said.
+          For a Google Meet touch, Gemini&apos;s full notes and the verbatim transcript load
+          automatically as two labelled sections -- the analysis treats the transcript as the
+          source of truth and the notes only as a cross-check. Edit either, or replace the lot
+          with your own paste (Zoom, or a manual recap): the recap, draft follow-up tickets, and
+          client email draft are grounded only in what&apos;s in this box.
         </p>
+
+        {/* Retrieval status. Every outcome says what happened and what to do next, because the
+            manual paste below stays available in all of them. */}
+        {!analysisReady ? (
+          <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2">
+            {isFetchingTranscript ? (
+              <span className="inline-flex items-center gap-2 text-xs text-slate-400">
+                <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
+                Looking for this meeting&apos;s Gemini transcript...
+              </span>
+            ) : (
+              <button
+                type="button"
+                onClick={() => loadTranscript({ overwrite: true })}
+                className="inline-flex items-center gap-2 rounded-full border border-white/12 bg-white/5 px-3 py-1.5 text-xs font-semibold text-slate-200 transition hover:bg-white/10"
+              >
+                <RefreshCw className="h-3.5 w-3.5" />
+                {transcriptLookup?.status === "loaded" ? "Re-fetch transcript" : "Fetch transcript"}
+              </button>
+            )}
+            {transcriptLookup?.doc ? (
+              <a
+                href={transcriptLookup.doc.url}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1.5 text-xs text-slate-400 underline decoration-white/20 transition hover:text-slate-200"
+              >
+                <FileText className="h-3.5 w-3.5" />
+                Open the notes Doc
+              </a>
+            ) : null}
+            {RECONNECT_STATUSES.has(transcriptLookup?.status || "") ? (
+              <a
+                href="/settings/integrations"
+                className="inline-flex items-center gap-1.5 text-xs font-semibold text-amber-200 underline decoration-amber-200/40 transition hover:text-amber-100"
+              >
+                <ShieldCheck className="h-3.5 w-3.5" />
+                Reconnect Google Meet
+              </a>
+            ) : null}
+          </div>
+        ) : null}
+
+        {!analysisReady && transcriptLookup && !isFetchingTranscript ? (
+          <p
+            className={
+              transcriptLookup.status === "loaded"
+                ? "mt-2 text-xs leading-5 text-emerald-200/90"
+                : transcriptLookup.status === "failed"
+                  ? "mt-2 text-xs leading-5 text-rose-300/90"
+                  : "mt-2 text-xs leading-5 text-amber-200/90"
+            }
+          >
+            {transcriptLookup.reason}
+          </p>
+        ) : null}
+
         <textarea
           value={transcript}
           onChange={(event) => setTranscript(event.target.value)}
@@ -465,7 +623,7 @@ export function PostMeetingWorkflow({ touchId, postMeeting, qaReview }: PostMeet
           <button
             type="button"
             onClick={() => run("analyze_transcript", { action: "analyze_transcript", transcript })}
-            disabled={isPending || transcript.trim().length < 40}
+            disabled={isPending || isFetchingTranscript || transcript.trim().length < 40}
             style={{ color: "#0d1625" }}
             className="mt-3 inline-flex items-center gap-2 rounded-full border border-[#d7f5ec]/20 bg-[#d7f5ec] px-4 py-2 text-sm font-semibold text-[#0d1625] transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-60"
           >

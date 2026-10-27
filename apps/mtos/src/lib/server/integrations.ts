@@ -370,15 +370,28 @@ const providerDefinitions: ProviderDefinition[] = [
     shortName: "Meet",
     category: "communications",
     authMode: "oauth",
-    description: "Authorize access to meeting link and schedule context so MTOS can surface Google Meet details alongside touch prep workflows.",
-    highlight: "Meeting link visibility tied to scheduled calendar events.",
-    capabilities: ["Meet link visibility", "Scheduled touch context", "Meeting timeline"],
+    description: "Authorize access to meeting link, schedule context, and the Gemini notes Doc so MTOS can load a touch's transcript without a manual paste.",
+    highlight: "Meet link visibility plus automatic transcript retrieval after the call.",
+    capabilities: [
+      "Meet link visibility",
+      "Scheduled touch context",
+      "Meeting timeline",
+      "Gemini transcript retrieval",
+    ],
     defaultApiBaseUrl: "https://meet.googleapis.com",
     fields: [],
     oauth: {
       authUrl: "https://accounts.google.com/o/oauth2/v2/auth",
       tokenUrl: "https://oauth2.googleapis.com/token",
-      scopes: ["https://www.googleapis.com/auth/calendar.readonly"],
+      // The transcript lives in a Gemini notes Doc that the calendar event points at via
+      // `attachments[]`, so this one connection needs all three reads: calendar to find the
+      // event and its attachment, Drive to resolve/read the file (including shortcuts and
+      // Docs a teammate hosted), and Docs to pull the Transcript TAB on its own.
+      scopes: [
+        "https://www.googleapis.com/auth/calendar.readonly",
+        "https://www.googleapis.com/auth/drive.readonly",
+        "https://www.googleapis.com/auth/documents.readonly",
+      ],
       clientIdEnv: "GOOGLE_INTEGRATIONS_CLIENT_ID",
       clientSecretEnv: "GOOGLE_INTEGRATIONS_CLIENT_SECRET",
       transport: "standard_form",
@@ -967,6 +980,27 @@ function deriveConnectionStatus(
   return record.status;
 }
 
+/**
+ * Scopes a provider definition now requires that this connection was never granted.
+ *
+ * A connection stores `scopes: provider.oauth.scopes` as they stood when it was authorized
+ * (see completeOAuthCallback), so widening a provider's scopes does NOT widen the tokens
+ * already on file -- those keep working for the old scopes and 403 on anything new. Comparing
+ * the stored list against the current definition is what tells the UI to ask for re-consent.
+ */
+export function getMissingIntegrationScopes(
+  providerId: IntegrationProviderId,
+  record?: IntegrationConnectionRecord,
+): string[] {
+  const provider = getProviderDefinition(providerId);
+  const required = provider.oauth?.scopes;
+  if (!record || record.status !== "connected" || !required?.length) {
+    return [];
+  }
+  const granted = new Set(record.scopes || []);
+  return required.filter((scope) => !granted.has(scope));
+}
+
 function toProviderView(
   provider: ProviderDefinition,
   record?: IntegrationConnectionRecord,
@@ -974,6 +1008,7 @@ function toProviderView(
 ): IntegrationProviderView {
   const oauthConfig = provider.authMode === "oauth" ? getOAuthClientConfig(provider) : null;
   const status = deriveConnectionStatus(provider, record);
+  const missingScopes = getMissingIntegrationScopes(provider.id, record);
 
   return {
     id: provider.id,
@@ -1006,6 +1041,8 @@ function toProviderView(
     apiBaseUrl: record?.apiBaseUrl || provider.defaultApiBaseUrl,
     endpointUrl: record?.endpointUrl,
     displayLabel: record?.displayLabel,
+    missingScopes: missingScopes.length ? missingScopes : undefined,
+    needsReconsent: missingScopes.length > 0,
     fields: provider.fields,
     capabilities: provider.capabilities,
   };

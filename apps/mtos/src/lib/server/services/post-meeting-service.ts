@@ -18,6 +18,7 @@ import { monthlyTouchPath } from "@/src/lib/server/firebase/collections";
 import { getFirebaseAdminDb } from "@/src/lib/server/firebase/admin";
 import { getServerEnv } from "@/src/lib/server/env";
 import { getIntegrationConnection, getIntegrationCredentials } from "@/src/lib/server/integrations";
+import { splitTranscriptPayload } from "@/src/lib/server/services/meeting-transcript-service";
 import { callLlmForJson, getNowIso, hasAnyLlmProvider, stripUndefinedDeep } from "@/src/lib/server/services/mtos-ai";
 import { getPromptText } from "@/src/lib/server/prompt-store";
 import { getAccountManagerIdentity } from "@/src/lib/server/services/user-service";
@@ -267,6 +268,29 @@ async function analyzeWithClaude(
   const system = await getPromptText("meeting_transcript_analysis_prompt");
   const amName = accountManagerName.trim() || client.accountManager?.trim() || "the account manager";
 
+  // The post-meeting step can supply Gemini's own Full notes alongside the verbatim dialogue.
+  // They arrive as one labelled string (so the AM edits a single box) and are split back apart
+  // here; a hand-pasted transcript has no markers and comes through whole as the transcript.
+  const { fullNotes: geminiFullNotes, transcript: verbatimTranscript } =
+    splitTranscriptPayload(transcript);
+
+  // Precedence matters: Gemini's notes are a machine summary that routinely paraphrases,
+  // attributes loosely, and states decisions more firmly than the call did. Without this the
+  // model tends to lift its phrasing wholesale, which would put Gemini's interpretation into
+  // tickets and a client-facing email as though the client had said it.
+  const sourceDirective = geminiFullNotes
+    ? [
+        "SOURCES: you are given TWO views of the same meeting. `transcript` is the verbatim",
+        "dialogue and is the ONLY source of truth -- every commitment, ticket and claim in the",
+        "client email must be grounded in it. `geminiFullNotes` is Gemini's automated summary:",
+        "use it to orient yourself, to catch something you might otherwise miss, and to check",
+        "you have not dropped a decision -- but never treat it as evidence on its own. Where the",
+        "two disagree, the transcript wins. Never quote geminiFullNotes as if someone said it,",
+        "and do not carry over a commitment that appears only there without the transcript",
+        "supporting it.",
+      ]
+    : [];
+
   const assigneeDirective = memberNames.length
     ? [
         "draftTickets items may ALSO include suggestedAssignee: the name of the ONE teammate from the",
@@ -301,6 +325,7 @@ async function analyzeWithClaude(
     `CONTEXT: Every ticket is for the client "${client.name}". Make it explicit in each ticket`,
     `description which business the work is for (name the business "${client.name}"), so whoever picks`,
     "it up knows the client without extra digging.",
+    ...sourceDirective,
     "",
     JSON.stringify(
       {
@@ -314,7 +339,10 @@ async function analyzeWithClaude(
         touchExecutiveBrief: touch.executiveBrief,
         touchWins: touch.wins,
         touchRisks: touch.risks,
-        transcript,
+        // Split so the model can weigh the two sources differently; geminiFullNotes is absent
+        // for a hand-pasted transcript, which is the common case for Zoom calls.
+        ...(geminiFullNotes ? { geminiFullNotes } : {}),
+        transcript: verbatimTranscript,
       },
       null,
       2,

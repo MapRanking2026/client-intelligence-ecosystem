@@ -102,6 +102,14 @@ export interface IntegrationProviderView {
   apiBaseUrl?: string;
   endpointUrl?: string;
   displayLabel?: string;
+  /**
+   * OAuth scopes this provider now asks for that the stored connection never granted. A
+   * connection records the scopes requested when it was authorized, so adding a scope to a
+   * provider leaves existing connections short of it until the user reconnects.
+   */
+  missingScopes?: string[];
+  /** True when `missingScopes` is non-empty -- the user must re-consent for the new scopes. */
+  needsReconsent: boolean;
   fields: IntegrationFieldDefinition[];
   capabilities: string[];
 }

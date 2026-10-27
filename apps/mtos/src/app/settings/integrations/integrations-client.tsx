@@ -13,6 +13,7 @@ import {
   MinusCircle,
   Play,
   RefreshCw,
+  ShieldAlert,
   ShieldCheck,
   Stethoscope,
   TimerReset,
@@ -562,6 +563,33 @@ export function IntegrationsClient({
                         <p className="text-xs uppercase tracking-[0.18em] text-slate-500">
                           Connected {formatIntegrationTimestamp(provider.connectedAt)}
                         </p>
+                      ) : null}
+                      {/* A live connection can still be short of a scope added since it was
+                          authorized -- Google only grants what was asked for at the time, so the
+                          token keeps refreshing and then refuses the new calls. Reconnecting is
+                          the only fix, and nothing in the status badge would reveal it. */}
+                      {provider.needsReconsent ? (
+                        <div className="rounded-2xl border border-amber-400/25 bg-amber-500/10 px-3 py-3">
+                          <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-amber-200">
+                            <ShieldAlert className="h-4 w-4" />
+                            Re-consent needed
+                          </div>
+                          <p className="mt-2 text-sm leading-6 text-amber-100/90">
+                            This connection was authorized before {provider.name} needed{" "}
+                            {provider.missingScopes?.length === 1 ? "another permission" : "more permissions"}, so
+                            Google hasn&apos;t granted{" "}
+                            {provider.missingScopes?.length === 1 ? "it" : "them"} yet. Press Reconnect
+                            below and approve the new access — until then the features that depend on
+                            it stay unavailable.
+                          </p>
+                          <ul className="mt-2 space-y-1">
+                            {(provider.missingScopes || []).map((scope) => (
+                              <li key={scope} className="font-mono text-[11px] leading-5 text-amber-200/70">
+                                {scope.replace("https://www.googleapis.com/auth/", "")}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
                       ) : null}
                       {provider.lastSyncAt ? (
                         <div className="rounded-2xl border border-white/8 bg-white/4 px-3 py-3">

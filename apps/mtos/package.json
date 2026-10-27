@@ -13,7 +13,8 @@
     "import:prompts": "tsx scripts/import-prompt-library.ts",
     "publish:prompts": "tsx scripts/publish-prompts.ts",
     "check:prompt-store": "tsx scripts/check-prompt-store.ts",
-    "check:health-mapping": "tsx scripts/check-clickup-health-mapping.ts"
+    "check:health-mapping": "tsx scripts/check-clickup-health-mapping.ts",
+    "check:transcript-parsing": "tsx scripts/check-transcript-parsing.ts"
   },
   "dependencies": {
     "@cie/engine": "*",

@@ -31,7 +31,10 @@ export function extractJsonObject(value: string): Record<string, unknown> {
 
   const match = trimmed.match(/\{[\s\S]*\}/);
   if (!match) {
-    throw new Error("Claude response did not include a JSON object");
+    // Not "Claude": any of the three providers lands here, and the failover line already names
+    // which one. Saying Claude printed "openai: Claude response did not include a JSON object"
+    // on a failure that had nothing to do with Claude.
+    throw new Error("the model's response did not include a JSON object");
   }
 
   return JSON.parse(match[0]) as Record<string, unknown>;
@@ -153,6 +156,11 @@ function resolveChain(env: ServerEnv, preferred?: LlmProvider): LlmProvider[] {
 }
 
 async function callAnthropic(params: AdapterParams): Promise<string> {
+  // No `temperature`. Anthropic removed the sampling parameters -- every current model rejects
+  // temperature/top_p/top_k with a 400, which is what took this provider down with "`temperature`
+  // is deprecated for this model" and, because Claude is tried first, took the whole prep with it.
+  // params.temperature is still honoured by the OpenAI and Gemini adapters; there is simply no
+  // longer anything to send here. Do not add it back to court the same outage.
   const response = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     signal: params.signal,
@@ -164,22 +172,31 @@ async function callAnthropic(params: AdapterParams): Promise<string> {
     body: JSON.stringify({
       model: params.model,
       max_tokens: params.maxTokens,
-      temperature: params.temperature,
       system: params.system,
       messages: [{ role: "user", content: [{ type: "text", text: params.userText }] }],
     }),
   });
   const payload = (await response.json().catch(() => ({}))) as {
     content?: Array<{ type?: string; text?: string }>;
+    stop_reason?: string;
     error?: { message?: string };
   };
   if (!response.ok) {
     throw new Error(payload.error?.message || `Claude request failed with status ${response.status}`);
   }
-  return (payload.content || [])
+  const text = (payload.content || [])
     .filter((block) => block.type === "text" && block.text)
     .map((block) => block.text || "")
     .join("\n");
+  if (!text.trim()) {
+    // Models that think before answering spend max_tokens on reasoning blocks we filter out, so a
+    // ceiling that is too low returns thinking and no text. Say that, rather than handing the
+    // caller an empty string it will fail to parse as JSON two frames later.
+    throw new Error(
+      `Claude returned no text${payload.stop_reason ? ` (stop_reason: ${payload.stop_reason})` : ""}`,
+    );
+  }
+  return text;
 }
 
 async function callOpenAI(params: AdapterParams): Promise<string> {

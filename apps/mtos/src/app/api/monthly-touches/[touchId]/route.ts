@@ -4,6 +4,7 @@ import { z } from "zod";
 import { resolveTenantContext } from "@/src/lib/auth/resolve-tenant-context";
 import { monthlyTouchWorkspaceResponse } from "@/src/lib/api/mtos-query";
 import { prepareMonthlyTouch } from "@/src/lib/server/services/monthly-touch-prep-service";
+import { generatePresentation } from "@/src/lib/server/services/presentation-service";
 import { generateLiveCallGuide } from "@/src/lib/server/services/live-call-guide-service";
 import {
   analyzePostMeetingTranscript,
@@ -62,6 +63,7 @@ const touchRequestSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("prepare_with_ai") }),
   z.object({ action: z.literal("prepare_and_generate") }),
   z.object({ action: z.literal("generate_call_guide") }),
+  z.object({ action: z.literal("generate_presentation") }),
   z.object({ action: z.literal("analyze_transcript"), transcript: z.string().min(1) }),
   z.object({
     action: z.literal("apply_post_meeting_decisions"),
@@ -167,6 +169,12 @@ export async function POST(
         break;
       case "generate_call_guide":
         result = await generateLiveCallGuide(context, touchId);
+        break;
+      case "generate_presentation":
+        // The other delivery format. Deliberately its own action rather than part of
+        // Generate: the AM picks a format after reading the prep, and building both
+        // every time would double the model spend on a deck half of them never open.
+        result = await generatePresentation(context, touchId);
         break;
       case "analyze_transcript":
         result = await analyzePostMeetingTranscript(context, touchId, payload.transcript);

@@ -34,6 +34,10 @@ export async function proxy(request: NextRequest) {
     // session OR a CRON_SECRET bearer), so they bypass the cookie gate here.
     path.startsWith("/api/engine/") ||
     path.startsWith("/_next") ||
+    // Static brand assets. The deck's logo is fetched by <img>, and a cookie gate on
+    // it returns the sign-in HTML with a 200, which renders as a broken image rather
+    // than anything that looks like an auth problem. It is a public logo either way.
+    path.startsWith("/brand/") ||
     path.startsWith("/favicon");
 
   if (isPublic) {

@@ -69,6 +69,86 @@ function formatScorecardMetric(metric?: ScorecardMetric) {
 }
 
 /**
+ * The evidence bundle a downstream module reasons over: everything the prep pack
+ * gathered plus the touch's own lists. Shared so the timed run-sheet and the
+ * client-facing deck are built from exactly the same facts -- if these two drifted
+ * apart, the deck and the guide would describe different months.
+ */
+export function buildTouchEvidence(touch: MonthlyTouchRecord) {
+  const prepPack = touch.prepPack;
+  return {
+    agenda: touch.agenda,
+    wins: touch.wins,
+    risks: touch.risks,
+    talkingPoints: touch.talkingPoints,
+    executiveBrief: touch.executiveBrief,
+    commitments: touch.commitments,
+    opportunities: touch.opportunities,
+    // Vetted leads and calls from GoHighLevel, reconciled against Google Ads and
+    // GBP, so the lead-quality section quotes real verified numbers rather than
+    // only the scorecard totals.
+    leadVerification: touch.leadVerification ?? null,
+    // The full evidence bundle: every connected source that fed the prep pack.
+    prepPack: prepPack
+      ? {
+          clientSummary: prepPack.clientSummary,
+          schedule: prepPack.schedule,
+          focusAreas: prepPack.focusAreas,
+          keyFacts: prepPack.keyFacts,
+          openCommitments: prepPack.openCommitments,
+          activeOpportunities: prepPack.activeOpportunities,
+          businessScorecard: prepPack.businessScorecard,
+          seoPerformance: prepPack.seoPerformance
+            ? {
+                // Drop raw pin arrays -- the AM reads those off the heatmap, not the guide.
+                profiles: (prepPack.seoPerformance.profiles || []).map((profile) => ({
+                  businessName: profile.business.businessName,
+                  address: profile.business.address,
+                  rating: profile.business.rating,
+                  reviews: profile.business.reviews,
+                  status: profile.status,
+                  statusNote: profile.statusNote,
+                  keywordScans: profile.keywordScans,
+                  heatmapSummary: profile.heatmapComparisons.map((comparison) => ({
+                    keyword: comparison.keyword,
+                    current: {
+                      scanDate: comparison.current.scanDate,
+                      averageRankPosition: comparison.current.averageRankPosition,
+                      shareOfLocalVoicePercent: comparison.current.shareOfLocalVoicePercent,
+                      top3Percent: comparison.current.top3Percent,
+                      topCompetitors: comparison.current.topCompetitors,
+                    },
+                    previous: comparison.previous
+                      ? {
+                          scanDate: comparison.previous.scanDate,
+                          averageRankPosition: comparison.previous.averageRankPosition,
+                          shareOfLocalVoicePercent: comparison.previous.shareOfLocalVoicePercent,
+                        }
+                      : null,
+                  })),
+                })),
+                gbpPerformance: prepPack.seoPerformance.gbpPerformance,
+                gbpProfiles: prepPack.seoPerformance.gbpProfiles,
+                checkinBusinesses: prepPack.seoPerformance.checkinBusinesses,
+                notes: prepPack.seoPerformance.notes,
+              }
+            : null,
+          adsPerformance: prepPack.adsPerformance,
+          strategicAction: prepPack.strategicAction,
+          clientParticipation: prepPack.clientParticipation,
+          issuesAndSolutions: prepPack.issuesAndSolutions,
+          leadQualityQuestions: prepPack.leadQualityQuestions,
+          recapQuestions: prepPack.recapQuestions,
+          dataGaps: prepPack.dataGaps,
+          integrationSources: prepPack.integrationSources,
+          // Client's Book intelligence + recent project chat, pulled live from ClickUp.
+          clickupContext: prepPack.clickupContext,
+        }
+      : null,
+  }
+}
+
+/**
  * Deterministic fallback: builds a timed guide straight from the prep pack so an AM always has a
  * usable, evidence-backed guide even if Claude is unavailable. Real numbers only, nothing invented.
  */
@@ -184,96 +264,23 @@ async function generateClaudeSections(
 
   const system = await getPromptText("meeting_structure_run_sheet_prompt");
 
-  const prepPack = touch.prepPack;
   const userText = [
     "Return a JSON object with a single key: sections.",
     "Each section needs: title, minutes (integer), talkingPoints (array of strings), clientPrompts (array of strings).",
     "Use only the preparation bundle below. Do not invent metrics or sources.",
     "",
     JSON.stringify(
-      {
-        agenda: touch.agenda,
-        wins: touch.wins,
-        risks: touch.risks,
-        talkingPoints: touch.talkingPoints,
-        executiveBrief: touch.executiveBrief,
-        commitments: touch.commitments,
-        opportunities: touch.opportunities,
-        // Vetted leads and calls from GoHighLevel, reconciled against Google Ads and
-        // GBP, so the lead-quality section quotes real verified numbers rather than
-        // only the scorecard totals.
-        leadVerification: touch.leadVerification ?? null,
-        // The full evidence bundle: every connected source that fed the prep pack.
-        prepPack: prepPack
-          ? {
-              clientSummary: prepPack.clientSummary,
-              schedule: prepPack.schedule,
-              focusAreas: prepPack.focusAreas,
-              keyFacts: prepPack.keyFacts,
-              openCommitments: prepPack.openCommitments,
-              activeOpportunities: prepPack.activeOpportunities,
-              businessScorecard: prepPack.businessScorecard,
-              seoPerformance: prepPack.seoPerformance
-                ? {
-                    // Drop raw pin arrays -- the AM reads those off the heatmap, not the guide.
-                    profiles: (prepPack.seoPerformance.profiles || []).map((profile) => ({
-                      businessName: profile.business.businessName,
-                      address: profile.business.address,
-                      rating: profile.business.rating,
-                      reviews: profile.business.reviews,
-                      status: profile.status,
-                      statusNote: profile.statusNote,
-                      keywordScans: profile.keywordScans,
-                      heatmapSummary: profile.heatmapComparisons.map((comparison) => ({
-                        keyword: comparison.keyword,
-                        current: {
-                          scanDate: comparison.current.scanDate,
-                          averageRankPosition: comparison.current.averageRankPosition,
-                          shareOfLocalVoicePercent: comparison.current.shareOfLocalVoicePercent,
-                          top3Percent: comparison.current.top3Percent,
-                          topCompetitors: comparison.current.topCompetitors,
-                        },
-                        previous: comparison.previous
-                          ? {
-                              scanDate: comparison.previous.scanDate,
-                              averageRankPosition: comparison.previous.averageRankPosition,
-                              shareOfLocalVoicePercent: comparison.previous.shareOfLocalVoicePercent,
-                            }
-                          : null,
-                      })),
-                    })),
-                    gbpPerformance: prepPack.seoPerformance.gbpPerformance,
-                    gbpProfiles: prepPack.seoPerformance.gbpProfiles,
-                    checkinBusinesses: prepPack.seoPerformance.checkinBusinesses,
-                    notes: prepPack.seoPerformance.notes,
-                  }
-                : null,
-              adsPerformance: prepPack.adsPerformance,
-              strategicAction: prepPack.strategicAction,
-              clientParticipation: prepPack.clientParticipation,
-              issuesAndSolutions: prepPack.issuesAndSolutions,
-              leadQualityQuestions: prepPack.leadQualityQuestions,
-              recapQuestions: prepPack.recapQuestions,
-              dataGaps: prepPack.dataGaps,
-              integrationSources: prepPack.integrationSources,
-              // Client's Book intelligence + recent project chat, pulled live from ClickUp.
-              clickupContext: prepPack.clickupContext,
-            }
-          : null,
-      },
+      buildTouchEvidence(touch),
       null,
       2,
     ),
   ].join("\n");
 
-  // A full timed run-sheet (sections x talking points x client prompts) is large;
-  // 1200 truncated the JSON mid-array, which then fails to parse. Give it headroom -- more of it
-  // now that the models think before answering and charge the thinking to this same ceiling.
-  // max_tokens is a ceiling, not a spend: headroom costs nothing unless it is used.
-  // 12000 truncated the run-sheet mid-array on the first touch prepared under the
-  // richer MT-002 brief: the guide is derived from the prep, so a longer prep means a
-  // longer guide, on top of the thinking that is charged to this same ceiling.
-  // max_tokens is a ceiling, not a spend -- headroom costs nothing unless it is used.
+  // A full timed run-sheet (sections x talking points x client prompts) is large, and the
+  // models think before answering with that thinking charged to this same ceiling. 1200,
+  // then 12000, both truncated the JSON mid-array -- most recently at position 10828 on the
+  // first touch prepared under the richer MT-002 brief, since the guide is derived from the
+  // prep. max_tokens is a ceiling, not a spend: headroom costs nothing unless it is used.
   const result = await callLlmForJson({ env, system, userText, maxTokens: 24000 });
   const parsed = callGuideSchema.parse(result.data);
   return { sections: parsed.sections, provider: result.provider, model: result.model };

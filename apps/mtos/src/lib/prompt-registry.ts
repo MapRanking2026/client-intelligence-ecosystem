@@ -26,6 +26,12 @@ export const PROMPT_BINDINGS: Record<string, PromptBinding[]> = {
       source: "src/lib/server/services/live-call-guide-service.ts",
     },
   ],
+  monthly_touch_presentation_prompt: [
+    {
+      module: "Client-facing presentation (slide deck + slideshow + .pptx export)",
+      source: "src/lib/server/services/presentation-service.ts",
+    },
+  ],
   meeting_transcript_analysis_prompt: [
     {
       module: "Post-meeting workflow (recap, commitments, tickets, follow-up email)",

@@ -567,6 +567,83 @@ export interface CallGuide {
   valueTranslations?: ValueTranslation[];
 }
 
+/**
+ * The slide shapes the Map Ranking report deck actually uses. Taken from the two
+ * approved reference decks (Sparkle Plumbing EN, Lopez ES): both are 13.33x7.5in
+ * 16:9, Arial, and build every slide out of this handful of arrangements. A fixed
+ * set rather than free-form HTML so the deck cannot drift off-brand, and so the
+ * same slide renders identically in the in-app viewer and in the exported .pptx.
+ */
+export type PresentationLayout =
+  | "cover"
+  | "agenda"
+  | "stat_callouts"
+  | "bullets"
+  | "two_column"
+  | "table"
+  | "questions"
+  | "status_list"
+  | "timeline"
+  | "closing";
+
+/** Colour role for a stat or status chip, mapped to the deck's status palette. */
+export type PresentationTone = "neutral" | "good" | "watch" | "risk";
+
+export interface PresentationStat {
+  value: string;
+  caption: string;
+  tone?: PresentationTone;
+}
+
+export interface PresentationItem {
+  label: string;
+  detail?: string;
+  /** Short chip, e.g. "IMPROVED", "IN MOTION", "NEEDS APPROVAL". */
+  status?: string;
+  tone?: PresentationTone;
+}
+
+export interface PresentationSlide {
+  layout: PresentationLayout;
+  /** Running section label, e.g. "SECTION 03 · RANKINGS ON GOOGLE MAPS". */
+  section?: string;
+  title: string;
+  subtitle?: string;
+  bullets?: string[];
+  stats?: PresentationStat[];
+  columns?: { heading: string; items: string[] }[];
+  table?: { headers: string[]; rows: string[][] };
+  items?: PresentationItem[];
+  /** Period and source, kept visible on any slide carrying numbers. */
+  footnote?: string;
+  /**
+   * Private AM guidance: talk track, the question to pause on, the decision to
+   * capture. Never rendered on the client-visible surface -- see the presenter
+   * pane in presentation-viewer.tsx and the notesSlide in the .pptx export.
+   */
+  presenterNotes?: string;
+}
+
+export interface Presentation {
+  status: "not_generated" | "generated";
+  title?: string;
+  clientName?: string;
+  /** e.g. "October 2026" or "Last 30 days to Oct 28, 2026". */
+  periodLabel?: string;
+  preparedFor?: string;
+  preparedBy?: string;
+  language?: "en" | "es";
+  /** Which of the ten experience formats this deck uses, e.g. "01 — Progress Review". */
+  experienceFormat?: string;
+  /** Why that format fits this month. Internal: never shown to the client. */
+  formatRationale?: string;
+  slides: PresentationSlide[];
+  generatedAt?: string;
+  model?: string;
+  provider?: string;
+  errorMessage?: string;
+}
+
 export type TicketDepartment = "SEO" | "Web Design" | "Ads" | "Account Manager" | "Other";
 
 export type TicketPriority = "urgent" | "high" | "normal" | "low";
@@ -1009,6 +1086,8 @@ export interface MonthlyTouchRecord {
   aiRecommendations: RecommendationItem[];
   prepPack?: MonthlyTouchPrepPack;
   callGuide?: CallGuide;
+  /** The client-facing slide deck, the alternative delivery format to the call guide. */
+  presentation?: Presentation;
   /** AM overrides for which screen each call-guide section suggests presenting (section index → screen key). */
   callGuideScreens?: Record<string, string>;
   postMeeting?: PostMeetingReview;

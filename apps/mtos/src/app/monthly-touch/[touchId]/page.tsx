@@ -9,6 +9,7 @@ import { Linkified, SmartMarkdown } from "@/src/components/mtos/annotate";
 import { SectionAdditions } from "@/src/components/mtos/section-additions";
 import { FiveQuestions, type QStep } from "@/src/components/mtos/five-questions";
 import { CallGuideActions } from "@/src/components/mtos/call-guide-actions";
+import { PresentationViewer } from "@/src/components/mtos/presentation-viewer";
 import { LeadVerificationSummary } from "@/src/components/mtos/lead-verification-summary";
 import { MonthlyTouchPrepActions } from "@/src/components/mtos/monthly-touch-prep-actions";
 import {
@@ -357,6 +358,14 @@ export default async function MonthlyTouchPage({
         subtitle="Generated with the preparation above. Walk it top to bottom during the call — it closes with the recap, the NPS question, and the client's risk status."
       >
         <CallGuideActions touchId={touch.id} clientId={client.id} callGuide={touch.callGuide} screenOverrides={touch.callGuideScreens} />
+      </Section>
+
+      <Section
+        eyebrow="Live meeting"
+        title="Client presentation"
+        subtitle="The other way to run this touch: a branded deck built from the same prep, with private presenter notes. Play it full screen to present on the call, or download it as PowerPoint."
+      >
+        <PresentationViewer touchId={touch.id} presentation={touch.presentation} />
       </Section>
 
       <Section eyebrow="AI assistance" title="Evidence-backed recommendations" subtitle="What to say, why it matters, and the evidence behind it.">

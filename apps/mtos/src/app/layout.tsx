@@ -25,8 +25,12 @@ const monoFont = IBM_Plex_Mono({
  * attribute without writing to storage, so that page rendered in one theme and the next reverted
  * to the stored one. The theme now only ever changes when someone asks it to.
  *
- * `<html>` carries data-theme="light" so the server emits an explicit theme and this script only
- * ever swaps one known value for another.
+ * `<html>` deliberately carries no data-theme. It used to, so that the server would emit an
+ * explicit theme -- but naming the attribute in JSX hands it to React, which re-applies its own
+ * "light" every time it re-renders the root layout: a router.refresh(), or any navigation whose
+ * payload re-sends the layout. The script's "dark" was wiped on those loads and restored on the
+ * next hard one, which is the flip-flop the script exists to prevent. This script is the only
+ * writer now. The CSS default is light, so a first paint before it runs looks as it always did.
  */
 const THEME_INIT = `(function(){try{var d=document.documentElement;var q=new URLSearchParams(location.search);var p=q.get('theme');if(p==='dark'||p==='light'){localStorage.setItem('mtos-theme',p);}d.setAttribute('data-theme',localStorage.getItem('mtos-theme')==='dark'?'dark':'light');if((q.get('anno')||localStorage.getItem('mtos-annotations'))==='on')d.setAttribute('data-annotations','on');if(q.get('hints')==='preview')d.setAttribute('data-hints','preview');}catch(e){}})();`;
 
@@ -43,7 +47,6 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      data-theme="light"
       className={`${bodyFont.variable} ${monoFont.variable} h-full antialiased`}
       suppressHydrationWarning
     >

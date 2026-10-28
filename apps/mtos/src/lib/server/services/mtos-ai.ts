@@ -161,28 +161,53 @@ async function callAnthropic(params: AdapterParams): Promise<string> {
   // is deprecated for this model" and, because Claude is tried first, took the whole prep with it.
   // params.temperature is still honoured by the OpenAI and Gemini adapters; there is simply no
   // longer anything to send here. Do not add it back to court the same outage.
-  const response = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    signal: params.signal,
-    headers: {
-      "content-type": "application/json",
-      "x-api-key": params.apiKey,
-      "anthropic-version": "2023-06-01",
-    },
-    body: JSON.stringify({
-      model: params.model,
-      max_tokens: params.maxTokens,
-      system: params.system,
-      messages: [{ role: "user", content: [{ type: "text", text: params.userText }] }],
-    }),
-  });
-  const payload = (await response.json().catch(() => ({}))) as {
-    content?: Array<{ type?: string; text?: string }>;
-    stop_reason?: string;
-    error?: { message?: string };
+  const postAnthropic = async (body: Record<string, unknown>) => {
+    const response = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      signal: params.signal,
+      headers: {
+        "content-type": "application/json",
+        "x-api-key": params.apiKey,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify(body),
+    });
+    const payload = (await response.json().catch(() => ({}))) as {
+      content?: Array<{ type?: string; text?: string }>;
+      stop_reason?: string;
+      error?: { message?: string };
+    };
+    return { response, payload };
   };
+
+  const baseBody: Record<string, unknown> = {
+    model: params.model,
+    max_tokens: params.maxTokens,
+    system: params.system,
+    messages: [{ role: "user", content: [{ type: "text", text: params.userText }] }],
+  };
+
+  // Current Claude models think before answering whether or not you ask, and the thinking is spent
+  // out of max_tokens. On a prompt this size it took most of an 8000 ceiling and the JSON came back
+  // cut off mid-array -- "Expected ',' or ']' after array element at position 3513" -- after 80 to
+  // 106 seconds. Low effort is the lever for that: less thinking, so less of the budget and less of
+  // the clock, and the ceiling left over for the answer. Raise it if the writing gets thin.
+  let { response, payload } = await postAnthropic({ ...baseBody, output_config: { effort: "low" } });
+
+  // A model old enough not to know output_config should not take the provider down over it.
+  if (!response.ok && /output_config|effort/i.test(payload.error?.message || "")) {
+    ({ response, payload } = await postAnthropic(baseBody));
+  }
+
   if (!response.ok) {
     throw new Error(payload.error?.message || `Claude request failed with status ${response.status}`);
+  }
+  if (payload.stop_reason === "max_tokens") {
+    // Say this plainly here. Left alone it surfaces as a JSON syntax error from a frame that has
+    // no idea the text was simply cut off, which is how this cost an afternoon.
+    throw new Error(
+      `Claude hit the ${params.maxTokens}-token ceiling and its answer was cut off mid-sentence`,
+    );
   }
   const text = (payload.content || [])
     .filter((block) => block.type === "text" && block.text)
@@ -215,7 +240,7 @@ async function callOpenAI(params: AdapterParams): Promise<string> {
       body: JSON.stringify(body),
     });
     const payload = (await response.json().catch(() => ({}))) as {
-      choices?: Array<{ message?: { content?: string } }>;
+      choices?: Array<{ message?: { content?: string }; finish_reason?: string }>;
       error?: { message?: string; param?: string };
     };
     return { response, payload };
@@ -231,19 +256,37 @@ async function callOpenAI(params: AdapterParams): Promise<string> {
     ],
   };
 
+  // Reasoning models spend max_completion_tokens on reasoning before they write anything, and on a
+  // prompt this size that left no budget for the answer: the content came back empty and the caller
+  // reported "the model's response did not include a JSON object" after two full minutes. Low
+  // effort keeps the reasoning short enough to leave room, and is most of the speed-up here.
+  const withEffort = { ...baseBody, reasoning_effort: "low" };
+
   // Attempt 1: include temperature (most models honor it).
-  let { response, payload } = await postOpenAI({ ...baseBody, temperature: params.temperature });
+  let { response, payload } = await postOpenAI({ ...withEffort, temperature: params.temperature });
 
   // Attempt 2: if the model rejects temperature (reasoning models only allow the
   // default), retry without it rather than failing the whole provider.
   if (!response.ok && /temperature/i.test(payload.error?.message || "")) {
+    ({ response, payload } = await postOpenAI(withEffort));
+  }
+
+  // Attempt 3: a model that predates reasoning_effort should not take the provider down over it.
+  if (!response.ok && /reasoning_effort/i.test(payload.error?.message || "")) {
     ({ response, payload } = await postOpenAI(baseBody));
   }
 
   if (!response.ok) {
     throw new Error(payload.error?.message || `OpenAI request failed with status ${response.status}`);
   }
-  return payload.choices?.[0]?.message?.content || "";
+  const content = payload.choices?.[0]?.message?.content || "";
+  if (!content.trim()) {
+    const finish = payload.choices?.[0]?.finish_reason;
+    throw new Error(
+      `OpenAI returned no content${finish ? ` (finish_reason: ${finish})` : ""} -- the token budget was spent before it wrote an answer`,
+    );
+  }
+  return content;
 }
 
 async function callGemini(params: AdapterParams): Promise<string> {

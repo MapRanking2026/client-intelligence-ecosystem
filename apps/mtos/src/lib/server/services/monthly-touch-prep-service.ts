@@ -1573,8 +1573,11 @@ async function generateClaudeTouchOutput(
         ),
         ].join("\n"),
         // The brief now runs several paragraphs and weaves in ClickUp context on top of wins, risks,
-        // recommendations, agenda, and talking points -- 2000/4000 truncated the JSON mid-array.
-        maxTokens: 8000,
+        // recommendations, agenda, and talking points -- 2000/4000 truncated the JSON mid-array, and
+        // so did 8000 once the models started thinking before they answer and charging that thinking
+        // to the same ceiling. The answer itself measures ~2000 tokens; the rest is headroom so that
+        // a thoughtful run cannot cost us the JSON.
+        maxTokens: 16000,
         temperature: 0.2,
   });
   const parsed = claudeResponseSchema.parse(normalizeClaudeTouchPayload(llmResult.data));

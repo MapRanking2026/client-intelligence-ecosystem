@@ -264,6 +264,33 @@ function normalizeTitle(value: string) {
 }
 
 /**
+ * The instants worth searching around for this touch's artifacts.
+ *
+ * `scheduledAt` alone is not good enough, and assuming it was is what produced the worst version
+ * of this bug: a touch scheduled for 23 September, run today, searched late September and
+ * reported that nothing existed -- while the call's notes sat in Drive with today's date on them.
+ * Touches slip by weeks, and the AM presses Fetch transcript minutes after hanging up, so NOW is
+ * the better anchor of the two more often than not.
+ *
+ * Two narrow windows rather than one wide one spanning both: a five-week span would overrun the
+ * calendar page size on a busy week and drag in every unrelated client in between.
+ */
+function searchAnchors(scheduledAtIso: string): number[] {
+  const now = Date.now();
+  const scheduled = new Date(scheduledAtIso).getTime();
+  if (Number.isNaN(scheduled)) {
+    return [now];
+  }
+  // Within a couple of days of each other, one window already covers both.
+  return Math.abs(now - scheduled) <= 1000 * 60 * 60 * 48 ? [scheduled] : [scheduled, now];
+}
+
+/** Distance to whichever anchor this candidate sits nearest. */
+function distanceToNearestAnchor(instantMs: number, anchors: number[]): number {
+  return Math.min(...anchors.map((anchor) => Math.abs(instantMs - anchor)));
+}
+
+/**
  * Does this calendar entry look like the AM's own preparation hold rather than the client call?
  *
  * This is the single biggest reason the lookup used to come back empty. `syncGoogleCalendar`
@@ -293,27 +320,34 @@ async function findMeetingEventByClient(
   clientName: string,
   scheduledAtIso: string,
 ): Promise<{ event: CalendarEvent; docId?: string } | undefined> {
-  const scheduledMs = new Date(scheduledAtIso).getTime();
-  if (!clientName || Number.isNaN(scheduledMs)) {
+  if (!clientName) {
     return undefined;
   }
+  const anchors = searchAnchors(scheduledAtIso);
 
-  // Three days either side: a touch is routinely moved a day or two off the scheduled slot, and
-  // the prep hold often sits on a different day from the call itself.
+  // Three days either side of each anchor: a touch is routinely moved a day or two off the
+  // scheduled slot, and the prep hold often sits on a different day from the call itself.
   const windowMs = 1000 * 60 * 60 * 24 * 3;
-  const url = new URL(`${CALENDAR_API}/calendars/primary/events`);
-  url.searchParams.set("timeMin", new Date(scheduledMs - windowMs).toISOString());
-  url.searchParams.set("timeMax", new Date(scheduledMs + windowMs).toISOString());
-  url.searchParams.set("singleEvents", "true");
-  url.searchParams.set("orderBy", "startTime");
-  url.searchParams.set("maxResults", "250");
+  const events = new Map<string, CalendarEvent>();
+  for (const anchor of anchors) {
+    const url = new URL(`${CALENDAR_API}/calendars/primary/events`);
+    url.searchParams.set("timeMin", new Date(anchor - windowMs).toISOString());
+    url.searchParams.set("timeMax", new Date(anchor + windowMs).toISOString());
+    url.searchParams.set("singleEvents", "true");
+    url.searchParams.set("orderBy", "startTime");
+    url.searchParams.set("maxResults", "250");
 
-  const result = await googleGet(url.toString(), accessToken);
-  if (!result.ok) {
-    return undefined;
+    const result = await googleGet(url.toString(), accessToken);
+    if (!result.ok) {
+      continue;
+    }
+    for (const event of (result.payload.items as CalendarEvent[]) || []) {
+      const key = event.id || `${event.summary}|${event.start?.dateTime || event.start?.date}`;
+      if (key) events.set(key, event);
+    }
   }
 
-  const scored = ((result.payload.items as CalendarEvent[]) || [])
+  const scored = [...events.values()]
     .map((event) => {
       const summary = event.summary || "";
       if (!summary || looksLikePrepBlock(summary)) return undefined;
@@ -329,7 +363,7 @@ async function findMeetingEventByClient(
         event,
         docId,
         rank: (docId ? 100 : 0) + (hasTouchMarker(summary) ? 10 : 0) + strength,
-        distance: Number.isNaN(startMs) ? Number.MAX_SAFE_INTEGER : Math.abs(startMs - scheduledMs),
+        distance: Number.isNaN(startMs) ? Number.MAX_SAFE_INTEGER : distanceToNearestAnchor(startMs, anchors),
       };
     })
     .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry))
@@ -365,43 +399,46 @@ async function findNotesDocCandidates(
   scheduledAtIso: string,
   eventSummary?: string,
 ): Promise<{ file: DriveFile; docId: string; exact: boolean }[]> {
-  const scheduledMs = new Date(scheduledAtIso).getTime();
-  if (Number.isNaN(scheduledMs)) {
-    return [];
-  }
+  const anchors = searchAnchors(scheduledAtIso);
 
-  // A week either side, not 36 hours. Verified on live data: JP Plumbing's touch was scheduled
-  // for 15 Oct and the call actually happened on the 19th, so the old window excluded the real
-  // Doc and admitted only an aborted call from the 16th.
+  // A week either side of each anchor, not 36 hours around the scheduled date. Verified on live
+  // data: JP Plumbing's touch was scheduled for 15 Oct and the call happened on the 19th, so the
+  // old window excluded the real Doc and admitted only an aborted call from the 16th.
   const windowMs = 1000 * 60 * 60 * 24 * 7;
-  const query = [
-    `mimeType = '${DOCUMENT_MIME}'`,
-    "trashed = false",
-    "name contains 'Notes by Gemini'",
-    `createdTime > '${new Date(scheduledMs - windowMs).toISOString()}'`,
-    `createdTime < '${new Date(scheduledMs + windowMs).toISOString()}'`,
-  ].join(" and ");
+  const files = new Map<string, DriveFile>();
+  for (const anchor of anchors) {
+    const query = [
+      `mimeType = '${DOCUMENT_MIME}'`,
+      "trashed = false",
+      "name contains 'Notes by Gemini'",
+      `createdTime > '${new Date(anchor - windowMs).toISOString()}'`,
+      `createdTime < '${new Date(anchor + windowMs).toISOString()}'`,
+    ].join(" and ");
 
-  const url = new URL(`${DRIVE_API}/files`);
-  url.searchParams.set("q", query);
-  url.searchParams.set(
-    "fields",
-    "files(id,name,mimeType,createdTime,owners(emailAddress),shortcutDetails(targetId,targetMimeType))",
-  );
-  url.searchParams.set("pageSize", "100");
-  // A touch hosted by another account manager reaches Francisco's Drive as a shared item or a
-  // shortcut, and may sit on a shared drive -- all three have to be in scope for the search.
-  url.searchParams.set("includeItemsFromAllDrives", "true");
-  url.searchParams.set("supportsAllDrives", "true");
-  url.searchParams.set("corpora", "allDrives");
+    const url = new URL(`${DRIVE_API}/files`);
+    url.searchParams.set("q", query);
+    url.searchParams.set(
+      "fields",
+      "files(id,name,mimeType,createdTime,owners(emailAddress),shortcutDetails(targetId,targetMimeType))",
+    );
+    url.searchParams.set("pageSize", "100");
+    // A touch hosted by another account manager reaches Francisco's Drive as a shared item or a
+    // shortcut, and may sit on a shared drive -- all three have to be in scope for the search.
+    url.searchParams.set("includeItemsFromAllDrives", "true");
+    url.searchParams.set("supportsAllDrives", "true");
+    url.searchParams.set("corpora", "allDrives");
 
-  const result = await googleGet(url.toString(), accessToken);
-  if (!result.ok) {
-    return [];
+    const result = await googleGet(url.toString(), accessToken);
+    if (!result.ok) {
+      continue;
+    }
+    for (const file of (result.payload.files as DriveFile[]) || []) {
+      if (file.id) files.set(file.id, file);
+    }
   }
 
   const wantedSummary = eventSummary ? normalizeTitle(eventSummary) : undefined;
-  const scored = ((result.payload.files as DriveFile[]) || [])
+  const scored = [...files.values()]
     .map((file) => {
       const parsed = TITLE_PATTERN.exec(file.name || "");
       if (!parsed) return undefined;
@@ -426,7 +463,7 @@ async function findNotesDocCandidates(
         file,
         exact,
         rank: exact ? 100 : strength,
-        distance: Math.abs(createdMs - scheduledMs),
+        distance: distanceToNearestAnchor(createdMs, anchors),
       };
     })
     .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry))
@@ -857,8 +894,13 @@ export async function fetchMonthlyTouchTranscript(
       // Say which path came up empty rather than blaming Gemini's publishing delay, which was
       // wrong for every touch older than an hour and sent the AM away to "try again shortly"
       // for a Doc that had been sitting in Drive the whole time.
+      // Name the dates actually searched. The old message quoted only the scheduled date, which
+      // read as nonsense when the touch had slipped and the call had happened today.
+      const searched = [
+        ...new Set(searchAnchors(scheduledAt).map((anchor) => new Date(anchor).toISOString().slice(0, 10))),
+      ].join(" or ");
       const tried = clientName
-        ? `Nothing on your calendar within a week of ${scheduledAt.slice(0, 10)} matches "${clientName}", and no "Notes by Gemini" Doc from around then names this client.`
+        ? `Nothing on your calendar within a week of ${searched} matches "${clientName}", and no "Notes by Gemini" Doc from around then names this client.`
         : "MTOS can't see this client's record, so it had no name to match a meeting or a notes Doc against.";
 
       if (eventMissing) {

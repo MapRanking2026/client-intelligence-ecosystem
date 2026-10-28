@@ -9,7 +9,8 @@ type JsonRecord = Record<string, unknown>;
 // chat channel. Overridable in case the workspace layout changes.
 const MAP_RANKING_SPACE_ID = process.env.CLICKUP_MAP_RANKING_SPACE_ID || "90112581687";
 const V2 = "https://api.clickup.com/api/v2";
-const V3 = "https://api.clickup.com/api/v3";
+export const CLICKUP_V3 = "https://api.clickup.com/api/v3";
+const V3 = CLICKUP_V3;
 
 // Which Client's Book pages carry the business context an AM needs before a touch. Matched
 // case-insensitively against page names; page trees are walked so children (e.g. the latest monthly
@@ -35,7 +36,7 @@ interface DashboardPage {
   pages?: DashboardPage[];
 }
 
-async function clickupFetch(url: string, token: string): Promise<JsonRecord | JsonRecord[] | null> {
+export async function clickupFetch(url: string, token: string): Promise<JsonRecord | JsonRecord[] | null> {
   try {
     const response = await fetch(url, { headers: { authorization: token, accept: "application/json" } });
     if (!response.ok) {
@@ -47,7 +48,7 @@ async function clickupFetch(url: string, token: string): Promise<JsonRecord | Js
   }
 }
 
-async function resolveWorkspaceId(token: string, preferredId?: string): Promise<string | null> {
+export async function resolveWorkspaceId(token: string, preferredId?: string): Promise<string | null> {
   const payload = (await clickupFetch(`${V2}/team`, token)) as JsonRecord | null;
   const teams = Array.isArray(payload?.teams) ? (payload!.teams as JsonRecord[]) : [];
   if (!teams.length) {
@@ -57,7 +58,7 @@ async function resolveWorkspaceId(token: string, preferredId?: string): Promise<
   return String((match || teams[0]).id);
 }
 
-async function findClientFolder(token: string, clientName: string) {
+export async function findClientFolder(token: string, clientName: string) {
   const payload = (await clickupFetch(`${V2}/space/${MAP_RANKING_SPACE_ID}/folder?archived=false`, token)) as
     | JsonRecord
     | null;

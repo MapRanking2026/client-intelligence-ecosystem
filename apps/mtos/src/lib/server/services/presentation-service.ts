@@ -92,7 +92,7 @@ async function recentFormats(
   excludeTouchId: string,
 ): Promise<string[]> {
   try {
-    const dataSource = getMtosDataSource();
+    const dataSource = getMtosDataSource(context);
     const touches = await dataSource.getMonthlyTouches();
     return touches
       .filter(
@@ -119,14 +119,18 @@ export async function generatePresentation(
     throw new Error("Firestore is not configured");
   }
 
-  const dataSource = getMtosDataSource();
+  const dataSource = getMtosDataSource(context);
   const touch = await dataSource.getMonthlyTouchById(touchId);
   if (!touch) {
     throw new Error("Monthly touch not found");
   }
-  if (!touch.prepPack || !touch.executiveBrief) {
+  // The prep pack is the only precondition. The deck is the findings of the
+  // preparation, so it is built before the meeting, not after it -- nothing here
+  // waits on a transcript, a QA review or anything else the touch itself produces.
+  if (!touch.prepPack) {
     throw new Error(
-      "Prepare this touch first — the deck is built from the reviewed prep, not from raw data.",
+      "Run the preparation for this touch first — the deck is written from the prep findings, " +
+        "so there is nothing to present until the prep exists.",
     );
   }
 

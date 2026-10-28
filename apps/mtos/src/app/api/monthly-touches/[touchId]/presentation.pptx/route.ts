@@ -26,10 +26,10 @@ function safeFileName(value: string): string {
 }
 
 export async function GET(request: Request, { params }: { params: Promise<{ touchId: string }> }) {
-  await resolveTenantContext(request);
+  const context = await resolveTenantContext(request);
   const { touchId } = await params;
 
-  const touch = await getMtosDataSource().getMonthlyTouchById(touchId);
+  const touch = await getMtosDataSource(context).getMonthlyTouchById(touchId);
   if (!touch) {
     return NextResponse.json({ error: "Monthly touch not found" }, { status: 404 });
   }

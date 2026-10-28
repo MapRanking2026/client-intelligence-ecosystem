@@ -137,14 +137,14 @@ export function hasTouchMarker(summary: string) {
 }
 
 /** How convincing a name match is. Higher wins; 0 means no match. */
-const MATCH_STRENGTH = { none: 0, tokenOverlap: 1, containment: 2, exact: 3 } as const;
+export const MATCH_STRENGTH = { none: 0, tokenOverlap: 1, containment: 2, exact: 3 } as const;
 
 /**
  * Scores a free-text candidate against a client name. Strength matters more than specificity: a
  * loose word overlap against a long client name must never outrank an exact hit on a shorter one,
  * or "Connolly Heating & Air Conditioning" gets handed to "One Hour Heating & Air Conditioning".
  */
-function scoreCandidateAgainstClient(clientName: string, candidate: string): number {
+export function scoreCandidateAgainstClient(clientName: string, candidate: string): number {
   if (!candidate) return MATCH_STRENGTH.none;
 
   const client = squash(stripBusinessNameNoise(clientName));

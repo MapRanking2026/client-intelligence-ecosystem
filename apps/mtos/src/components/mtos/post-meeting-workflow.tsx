@@ -104,7 +104,7 @@ interface TranscriptLookup {
   reason: string;
   transcript?: string;
   doc?: { id: string; title: string; url: string };
-  matchedBy?: "calendar_attachment" | "title_and_time";
+  matchedBy?: "calendar_attachment" | "calendar_search" | "title_and_time" | "client_and_time";
   sections?: { fullNotes: boolean; transcript: boolean };
 }
 

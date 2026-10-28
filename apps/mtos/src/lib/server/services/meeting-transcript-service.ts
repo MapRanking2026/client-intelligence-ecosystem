@@ -1,4 +1,10 @@
 import type { TenantContext } from "@/src/lib/contracts/mtos";
+import {
+  MATCH_STRENGTH,
+  extractTitleCandidate,
+  hasTouchMarker,
+  scoreCandidateAgainstClient,
+} from "@/src/lib/server/calendar-touch-matching";
 import type { MonthlyTouchRecord } from "@/src/lib/mtos-data";
 import { getMtosDataSource } from "@/src/lib/server/data/seed-mtos-data-source";
 import {
@@ -73,7 +79,7 @@ export interface MeetingTranscriptLookup {
   /** The Doc we resolved, when we got far enough to identify one. */
   doc?: { id: string; title: string; url: string };
   /** How the Doc was found, so the UI can say when it fell back to title matching. */
-  matchedBy?: "calendar_attachment" | "title_and_time";
+  matchedBy?: "calendar_attachment" | "calendar_search" | "title_and_time" | "client_and_time";
   /** Which tabs made it into `transcript`, so the UI can say what was and wasn't found. */
   sections?: { fullNotes: boolean; transcript: boolean };
 }
@@ -258,28 +264,116 @@ function normalizeTitle(value: string) {
 }
 
 /**
- * Fallback resolution by title prefix + proximity in time.
+ * Does this calendar entry look like the AM's own preparation hold rather than the client call?
  *
- * Only used when the event carries no attachment. Deliberately conservative: the event's own
- * summary must match the Doc title's prefix, because one client can have several Gemini Docs
- * on the same day (and one per language), and feeding the wrong call's dialogue into
- * analyze_transcript would produce confidently wrong tickets.
- *
- * Candidates are scored on `createdTime` rather than the timestamp inside the title: the title
- * carries a local abbreviation ("PDT", "CEST") that can't be resolved to an instant reliably,
- * while createdTime is a real UTC instant from Drive.
+ * This is the single biggest reason the lookup used to come back empty. `syncGoogleCalendar`
+ * frequently links a touch to the "Prep: <client> Monthly Touch" block the AM keeps for
+ * themselves -- verified against live data, where 8 of 12 recent touches pointed at a prep hold.
+ * A solo hold has no Meet conference and so no Gemini artifacts, which means resolving from it
+ * can only ever fail -- and that failure used to be reported as "Gemini hasn't published yet".
  */
-async function findNotesDocByTitle(
+export function looksLikePrepBlock(summary: string): boolean {
+  return /(^|\W)prep(aration)?\b\s*[:\-]?/i.test(summary) && !/\bap+ointment\b/i.test(summary);
+}
+
+/**
+ * The real client meeting on the AM's calendar, found by client name and date.
+ *
+ * Used when the linked event is a prep hold, carries no artifacts, or has been deleted outright:
+ * go and look at the meeting that actually happened on the signed-in manager's calendar instead
+ * of trusting a stored id.
+ *
+ * Ranking is deliberate. An event already carrying a Gemini attachment beats one that does not,
+ * because that attachment is Google's own event -> artifact link; an explicit monthly-touch
+ * marker in the title beats a bare name hit; then strength of the name match; then proximity to
+ * the scheduled time. Prep holds are excluded outright.
+ */
+async function findMeetingEventByClient(
   accessToken: string,
-  event: CalendarEvent,
+  clientName: string,
   scheduledAtIso: string,
-): Promise<{ file: DriveFile; docId: string } | undefined> {
+): Promise<{ event: CalendarEvent; docId?: string } | undefined> {
   const scheduledMs = new Date(scheduledAtIso).getTime();
-  if (!event.summary || Number.isNaN(scheduledMs)) {
+  if (!clientName || Number.isNaN(scheduledMs)) {
     return undefined;
   }
 
-  const windowMs = 1000 * 60 * 60 * 36;
+  // Three days either side: a touch is routinely moved a day or two off the scheduled slot, and
+  // the prep hold often sits on a different day from the call itself.
+  const windowMs = 1000 * 60 * 60 * 24 * 3;
+  const url = new URL(`${CALENDAR_API}/calendars/primary/events`);
+  url.searchParams.set("timeMin", new Date(scheduledMs - windowMs).toISOString());
+  url.searchParams.set("timeMax", new Date(scheduledMs + windowMs).toISOString());
+  url.searchParams.set("singleEvents", "true");
+  url.searchParams.set("orderBy", "startTime");
+  url.searchParams.set("maxResults", "250");
+
+  const result = await googleGet(url.toString(), accessToken);
+  if (!result.ok) {
+    return undefined;
+  }
+
+  const scored = ((result.payload.items as CalendarEvent[]) || [])
+    .map((event) => {
+      const summary = event.summary || "";
+      if (!summary || looksLikePrepBlock(summary)) return undefined;
+
+      const strength = scoreCandidateAgainstClient(clientName, extractTitleCandidate(summary));
+      if (strength < MATCH_STRENGTH.tokenOverlap) return undefined;
+
+      const docId = pickNotesAttachment(event);
+      const startedAt = event.start?.dateTime || event.start?.date || "";
+      const startMs = startedAt ? new Date(startedAt).getTime() : Number.NaN;
+
+      return {
+        event,
+        docId,
+        rank: (docId ? 100 : 0) + (hasTouchMarker(summary) ? 10 : 0) + strength,
+        distance: Number.isNaN(startMs) ? Number.MAX_SAFE_INTEGER : Math.abs(startMs - scheduledMs),
+      };
+    })
+    .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry))
+    .sort((a, b) => b.rank - a.rank || a.distance - b.distance);
+
+  const best = scored[0];
+  return best ? { event: best.event, docId: best.docId } : undefined;
+}
+
+/**
+ * Fallback straight off Drive: a "Notes by Gemini" Doc whose title names this client, created
+ * near the meeting time.
+ *
+ * This used to require the Doc title prefix to EQUAL the calendar event summary, which meant it
+ * could never fire in the case that needed it most -- the linked event is the prep hold ("Prep:
+ * JP Plumbing Monthly Touch") while the Doc is named after the call ("Monthly Touch JP
+ * Plumbing"). Scoring against the CLIENT NAME instead, with the same matcher the calendar sync
+ * uses, is what closes that gap, and it also rescues touches whose calendar event was deleted,
+ * because no event is needed at all.
+ *
+ * Still conservative about handing the wrong call's dialogue to the analyzer: a bare word overlap
+ * counts only when the title also carries a monthly-touch or appointment marker, an exact hit on
+ * the event summary outranks everything, and an inexact match is reported as `client_and_time` so
+ * the UI tells the AM to check the call before analyzing.
+ *
+ * Candidates are scored on `createdTime` rather than the timestamp inside the title: the title
+ * carries a local abbreviation ("PDT", "CEST") that cannot be resolved to an instant reliably,
+ * while createdTime is a real UTC instant from Drive.
+ */
+async function findNotesDocCandidates(
+  accessToken: string,
+  clientName: string,
+  scheduledAtIso: string,
+  eventSummary?: string,
+): Promise<{ file: DriveFile; docId: string; exact: boolean }[]> {
+  const scheduledMs = new Date(scheduledAtIso).getTime();
+  if (Number.isNaN(scheduledMs)) {
+    return [];
+  }
+
+  // A week either side, not 36 hours. Verified on live data: JP Plumbing's touch was scheduled
+  // for 15 Oct and the call actually happened on the 19th, so the old window excluded the real
+  // Doc and admitted only an aborted call from the 16th.
+  const windowMs = 1000 * 60 * 60 * 24 * 7;
   const query = [
     `mimeType = '${DOCUMENT_MIME}'`,
     "trashed = false",
@@ -290,7 +384,10 @@ async function findNotesDocByTitle(
 
   const url = new URL(`${DRIVE_API}/files`);
   url.searchParams.set("q", query);
-  url.searchParams.set("fields", "files(id,name,mimeType,createdTime,owners(emailAddress),shortcutDetails(targetId,targetMimeType))");
+  url.searchParams.set(
+    "fields",
+    "files(id,name,mimeType,createdTime,owners(emailAddress),shortcutDetails(targetId,targetMimeType))",
+  );
   url.searchParams.set("pageSize", "100");
   // A touch hosted by another account manager reaches Francisco's Drive as a shared item or a
   // shortcut, and may sit on a shared drive -- all three have to be in scope for the search.
@@ -300,25 +397,52 @@ async function findNotesDocByTitle(
 
   const result = await googleGet(url.toString(), accessToken);
   if (!result.ok) {
-    return undefined;
+    return [];
   }
 
-  const wanted = normalizeTitle(event.summary);
+  const wantedSummary = eventSummary ? normalizeTitle(eventSummary) : undefined;
   const scored = ((result.payload.files as DriveFile[]) || [])
     .map((file) => {
       const parsed = TITLE_PATTERN.exec(file.name || "");
       if (!parsed) return undefined;
-      if (normalizeTitle(parsed[1]) !== wanted) return undefined;
+      const prefix = parsed[1];
+
+      const exact = Boolean(wantedSummary && normalizeTitle(prefix) === wantedSummary);
+      const strength = clientName
+        ? scoreCandidateAgainstClient(clientName, extractTitleCandidate(prefix))
+        : MATCH_STRENGTH.none;
+
+      // A loose word overlap alone is not enough to hand dialogue to the analyzer; the title has
+      // to also look like a client call rather than an internal meeting.
+      const named =
+        strength >= MATCH_STRENGTH.containment ||
+        (strength >= MATCH_STRENGTH.tokenOverlap && hasTouchMarker(prefix));
+      if (!exact && !named) return undefined;
+
       const createdMs = file.createdTime ? new Date(file.createdTime).getTime() : Number.NaN;
       if (Number.isNaN(createdMs)) return undefined;
-      return { file, distance: Math.abs(createdMs - scheduledMs) };
-    })
-    .filter((entry): entry is { file: DriveFile; distance: number } => Boolean(entry))
-    .sort((a, b) => a.distance - b.distance);
 
-  const best = scored[0]?.file;
-  const docId = best?.shortcutDetails?.targetId || best?.id;
-  return best && docId ? { file: best, docId } : undefined;
+      return {
+        file,
+        exact,
+        rank: exact ? 100 : strength,
+        distance: Math.abs(createdMs - scheduledMs),
+      };
+    })
+    .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry))
+    .sort((a, b) => b.rank - a.rank || a.distance - b.distance);
+
+  // Every plausible Doc, best first -- the caller reads them in order and keeps the first that
+  // actually contains dialogue. Returning a single pick was the bug: Gemini writes a Doc for
+  // every join attempt, so a call the AM dropped and redialled leaves a stub whose Transcript
+  // tab holds only "Transcription ended after 00:00:19". Those stubs are frequently closer to
+  // the scheduled time than the real call and so used to win outright.
+  return scored
+    .map((entry) => {
+      const docId = entry.file.shortcutDetails?.targetId || entry.file.id;
+      return docId ? { file: entry.file, docId, exact: entry.exact } : undefined;
+    })
+    .filter((entry): entry is { file: DriveFile; docId: string; exact: boolean } => Boolean(entry));
 }
 
 /**
@@ -564,6 +688,72 @@ export function trimGeminiTranscript(raw: string): string {
 }
 
 /**
+ * Read one notes Doc: its Drive metadata, Gemini's Full notes, and the verbatim dialogue.
+ *
+ * Split out of the lookup because the lookup now tries SEVERAL candidate Docs in turn. Gemini
+ * writes a Doc per join attempt, so a call that was dropped and redialled leaves behind stubs
+ * whose Transcript tab holds nothing but "Transcription ended after 00:00:19" -- and those stubs
+ * are often nearer the scheduled time than the real call. Reading in order and keeping the first
+ * Doc with actual dialogue is what makes the right one win.
+ */
+async function readNotesDoc(
+  accessToken: string,
+  docId: string,
+): Promise<
+  | { kind: "ok"; doc: { id: string; title: string; url: string }; fullNotes: string; transcript: string }
+  | { kind: "unreadable"; docId: string }
+  | { kind: "failed"; message: string; doc?: { id: string; title: string; url: string } }
+> {
+  const described = await describeDoc(accessToken, docId);
+  if (!described.ok) {
+    if (described.status === 403 || described.status === 404) {
+      return { kind: "unreadable", docId };
+    }
+    return { kind: "failed", message: described.message };
+  }
+
+  const doc = { id: described.id, title: described.title, url: docUrl(described.id) };
+
+  let rawFullNotes: string | undefined;
+  let rawTranscript: string | undefined;
+  const viaDocs = await readTabsViaDocsApi(accessToken, described.id);
+  if (viaDocs.ok) {
+    rawFullNotes = viaDocs.fullNotes;
+    rawTranscript = viaDocs.transcript;
+  } else if (viaDocs.status === 403 || viaDocs.status === 401) {
+    // documents.readonly may be missing even though Drive worked -- fall back to the export.
+    const exportUrl = new URL(`${DRIVE_API}/files/${described.id}/export`);
+    exportUrl.searchParams.set("mimeType", "text/plain");
+    const exported = await googleGetText(exportUrl.toString(), accessToken);
+    if (exported.ok) {
+      rawFullNotes = sliceTabFromFlatText(exported.text, /full\s*notes/);
+      rawTranscript = sliceTabFromFlatText(exported.text, /transcript/);
+    }
+  } else {
+    return { kind: "failed", message: viaDocs.message, doc };
+  }
+
+  return {
+    kind: "ok",
+    doc,
+    fullNotes: rawFullNotes ? trimGeminiFullNotes(rawFullNotes) : "",
+    transcript: rawTranscript ? trimGeminiTranscript(rawTranscript) : "",
+  };
+}
+
+/** Below this, a Transcript tab holds only Gemini's "transcription ended" scaffolding. */
+const MIN_TRANSCRIPT_CHARS = 40;
+
+/**
+ * Long enough that this is unmistakably the call itself, so there is no point reading further
+ * candidates. A monthly touch runs 20-40 minutes and lands in the tens of thousands of
+ * characters; the redial stubs Gemini leaves behind come in at one to three hundred. 2,000 sits
+ * in the empty space between the two, so a genuinely short call is still taken as the best
+ * answer -- it just doesn't stop the search early.
+ */
+const SUBSTANTIAL_TRANSCRIPT_CHARS = 2000;
+
+/**
  * Resolve a monthly touch to its Gemini transcript.
  *
  * Read-only and never throws for an expected condition: every failure the AM can act on comes
@@ -580,108 +770,182 @@ export async function fetchMonthlyTouchTranscript(
     return { status: "failed", reason: "Monthly touch not found." };
   }
 
-  if (!touch.calendarEventId) {
-    return {
-      status: "no_calendar_event",
-      reason:
-        "This touch has no Google Calendar event linked, so there's no Meet recording to pull from. Paste the transcript below -- that's expected for Zoom calls and manual recaps.",
-    };
-  }
-
   const token = await resolveAccessToken(context);
   if (!token.ok) {
     return token.lookup;
   }
   const { accessToken } = token;
 
+  // The client's name is the join key for both fallbacks, so it is worth a read even though the
+  // happy path never needs it. A missing client is not fatal: the attachment path still works.
+  const client = await dataSource.getClientById(touch.clientId).catch(() => undefined);
+  const clientName = client?.name || "";
+
   try {
-    const eventUrl = new URL(`${CALENDAR_API}/calendars/primary/events/${encodeURIComponent(touch.calendarEventId)}`);
-    const eventResult = await googleGet(eventUrl.toString(), accessToken);
-    if (!eventResult.ok) {
-      if (eventResult.status === 404) {
-        return {
-          status: "no_calendar_event",
-          reason:
-            "The calendar event for this touch is no longer on your primary calendar, so its Gemini notes can't be located. Paste the transcript below.",
-        };
-      }
-      if (eventResult.status === 403) {
+    let event: CalendarEvent | undefined;
+    let eventMissing = false;
+
+    if (touch.calendarEventId) {
+      const eventUrl = new URL(
+        `${CALENDAR_API}/calendars/primary/events/${encodeURIComponent(touch.calendarEventId)}`,
+      );
+      const eventResult = await googleGet(eventUrl.toString(), accessToken);
+      if (eventResult.ok) {
+        event = eventResult.payload as CalendarEvent;
+      } else if (eventResult.status === 404) {
+        // Deleted, or living on a calendar that isn't this manager's. Not a dead end any more:
+        // the client name and the date are enough to find the call's notes without it.
+        eventMissing = true;
+      } else if (eventResult.status === 403) {
         return {
           status: "needs_reconsent",
           reason: `Google refused the calendar read (${eventResult.message}). Reconnect Google Meet in Settings -> Integrations to re-approve access, then fetch again.`,
         };
-      }
-      return { status: "failed", reason: `Couldn't read the calendar event: ${eventResult.message}` };
-    }
-
-    const event = eventResult.payload as CalendarEvent;
-    const scheduledAt = touch.scheduledAt || event.start?.dateTime || event.start?.date || "";
-
-    let matchedBy: MeetingTranscriptLookup["matchedBy"] = "calendar_attachment";
-    let docId = pickNotesAttachment(event);
-    if (!docId) {
-      const fallback = scheduledAt ? await findNotesDocByTitle(accessToken, event, scheduledAt) : undefined;
-      if (fallback) {
-        docId = fallback.docId;
-        matchedBy = "title_and_time";
+      } else {
+        return { status: "failed", reason: `Couldn't read the calendar event: ${eventResult.message}` };
       }
     }
 
-    if (!docId) {
+    const scheduledAt = touch.scheduledAt || event?.start?.dateTime || event?.start?.date || "";
+    if (!scheduledAt) {
       return {
-        status: "artifact_not_ready",
+        status: "no_calendar_event",
         reason:
-          "Gemini hasn't published the notes Doc for this meeting yet -- it usually appears a few minutes after the call ends. Try again shortly, or paste the transcript below.",
+          "This touch has neither a scheduled date nor a calendar event, so there's nothing to search a Meet recording against. Paste the transcript below.",
       };
     }
 
-    const described = await describeDoc(accessToken, docId);
-    if (!described.ok) {
-      if (described.status === 403 || described.status === 404) {
+    const linkedWasPrepBlock = Boolean(event?.summary && looksLikePrepBlock(event.summary));
+
+    // Every Doc worth reading, strongest provenance first. The attachment on the linked event is
+    // Google's own event -> artifact link; then the attachment on the real client meeting found
+    // by name on this manager's calendar; then Docs matched in Drive by client name and date.
+    const candidates: { docId: string; matchedBy: NonNullable<MeetingTranscriptLookup["matchedBy"]> }[] = [];
+    const seen = new Set<string>();
+    const addCandidate = (docId: string | undefined, matchedBy: NonNullable<MeetingTranscriptLookup["matchedBy"]>) => {
+      if (!docId || seen.has(docId)) return;
+      seen.add(docId);
+      candidates.push({ docId, matchedBy });
+    };
+
+    let resolvedEvent = event;
+    addCandidate(event ? pickNotesAttachment(event) : undefined, "calendar_attachment");
+
+    // The linked event had no artifacts (or there is no linked event). Go and find the meeting
+    // that actually happened on this manager's calendar -- the normal case, because the sync
+    // routinely links the AM's prep hold rather than the client call.
+    if (clientName) {
+      const found = await findMeetingEventByClient(accessToken, clientName, scheduledAt);
+      if (found) {
+        resolvedEvent = found.event;
+        addCandidate(found.docId, "calendar_search");
+      }
+    }
+
+    // And the Docs themselves, by client name and date. Works even when no calendar event
+    // survives, and when Google never attached the notes to the event.
+    for (const entry of await findNotesDocCandidates(
+      accessToken,
+      clientName,
+      scheduledAt,
+      resolvedEvent?.summary,
+    )) {
+      addCandidate(entry.docId, entry.exact ? "title_and_time" : "client_and_time");
+    }
+
+    if (!candidates.length) {
+      // Say which path came up empty rather than blaming Gemini's publishing delay, which was
+      // wrong for every touch older than an hour and sent the AM away to "try again shortly"
+      // for a Doc that had been sitting in Drive the whole time.
+      const tried = clientName
+        ? `Nothing on your calendar within a week of ${scheduledAt.slice(0, 10)} matches "${clientName}", and no "Notes by Gemini" Doc from around then names this client.`
+        : "MTOS can't see this client's record, so it had no name to match a meeting or a notes Doc against.";
+
+      if (eventMissing) {
+        return {
+          status: "no_calendar_event",
+          reason: `The calendar event linked to this touch no longer exists on your calendar. ${tried} Paste the transcript below.`,
+        };
+      }
+      if (linkedWasPrepBlock) {
+        return {
+          status: "artifact_not_ready",
+          reason: `This touch is linked to your prep block ("${event?.summary}"), not the client call -- a solo hold has no Meet recording. ${tried} Paste the transcript below, or check the call is on the Google account you connected.`,
+        };
+      }
+      return {
+        status: "artifact_not_ready",
+        reason: `No Gemini notes Doc could be found for this meeting. If the call has only just ended, the Doc usually appears a few minutes later. ${tried} Paste the transcript below.`,
+      };
+    }
+
+    // Read in order, keep the first Doc with real dialogue. Capped so a client with a long
+    // history of redials can't turn one fetch into a dozen Docs API round trips.
+    const MAX_CANDIDATES = 5;
+    let best:
+      | { doc: { id: string; title: string; url: string }; fullNotes: string; transcript: string; matchedBy: NonNullable<MeetingTranscriptLookup["matchedBy"]> }
+      | undefined;
+    let unreadable: string | undefined;
+    let failure: { message: string; doc?: { id: string; title: string; url: string } } | undefined;
+
+    for (const candidate of candidates.slice(0, MAX_CANDIDATES)) {
+      const read = await readNotesDoc(accessToken, candidate.docId);
+      if (read.kind === "unreadable") {
+        unreadable = unreadable || read.docId;
+        continue;
+      }
+      if (read.kind === "failed") {
+        failure = failure || { message: read.message, doc: read.doc };
+        continue;
+      }
+      const candidateIsBetter =
+        !best ||
+        read.transcript.length > best.transcript.length ||
+        (read.transcript.length === best.transcript.length && read.fullNotes.length > best.fullNotes.length);
+      if (candidateIsBetter) {
+        best = { ...read, matchedBy: candidate.matchedBy };
+      }
+
+      // Stop only once a candidate is unmistakably the call. Taking the first Doc over the
+      // 40-character floor was still wrong: the redial stubs clear that floor easily (101, 113
+      // and 267 characters on three real touches), so the stub won and the 30,000-character
+      // transcript sitting two candidates later was never read.
+      if (read.transcript.length >= SUBSTANTIAL_TRANSCRIPT_CHARS) {
+        break;
+      }
+    }
+
+    if (!best) {
+      if (unreadable) {
         return {
           status: "doc_unreadable",
           reason:
             "The Gemini notes Doc for this meeting exists but this Google account can't open it -- the call was hosted by someone else and the Doc hasn't been shared. Ask the host to share it, or paste the transcript below.",
-          doc: { id: docId, title: "Notes by Gemini", url: docUrl(docId) },
-          matchedBy,
+          doc: { id: unreadable, title: "Notes by Gemini", url: docUrl(unreadable) },
         };
       }
-      return { status: "failed", reason: `Couldn't read the notes Doc: ${described.message}` };
+      return {
+        status: "failed",
+        reason: `Couldn't read the notes Doc: ${failure?.message || "unknown error"}`,
+        doc: failure?.doc,
+      };
     }
 
-    const doc = { id: described.id, title: described.title, url: docUrl(described.id) };
-
-    let rawFullNotes: string | undefined;
-    let rawTranscript: string | undefined;
-    const viaDocs = await readTabsViaDocsApi(accessToken, described.id);
-    if (viaDocs.ok) {
-      rawFullNotes = viaDocs.fullNotes;
-      rawTranscript = viaDocs.transcript;
-    } else if (viaDocs.status === 403 || viaDocs.status === 401) {
-      // documents.readonly may be missing even though Drive worked -- fall back to the export.
-      const exportUrl = new URL(`${DRIVE_API}/files/${described.id}/export`);
-      exportUrl.searchParams.set("mimeType", "text/plain");
-      const exported = await googleGetText(exportUrl.toString(), accessToken);
-      if (exported.ok) {
-        rawFullNotes = sliceTabFromFlatText(exported.text, /full\s*notes/);
-        rawTranscript = sliceTabFromFlatText(exported.text, /transcript/);
-      }
-    } else {
-      return { status: "failed", reason: `Couldn't read the notes Doc: ${viaDocs.message}`, doc, matchedBy };
-    }
-
-    const fullNotes = rawFullNotes ? trimGeminiFullNotes(rawFullNotes) : "";
-    const transcript = rawTranscript ? trimGeminiTranscript(rawTranscript) : "";
+    const { doc, fullNotes, transcript, matchedBy } = best;
 
     // The verbatim dialogue is the thing the analysis has to be grounded in, so no transcript
     // is a dead end even when Gemini's summary came through -- the AM has to decide whether a
     // summary-only analysis is acceptable, and says so by pasting or by editing the box.
-    if (transcript.length < 40) {
+    if (transcript.length < MIN_TRANSCRIPT_CHARS) {
+      const checked =
+        candidates.length > 1
+          ? ` MTOS checked ${Math.min(candidates.length, MAX_CANDIDATES)} notes Docs around this date; none carried dialogue.`
+          : "";
       return {
         status: "no_transcript",
         reason: fullNotes
-          ? "This meeting's Gemini Doc has a summary but no transcript, so transcription wasn't turned on for the call. Loading the summary alone would make the recap and tickets guesswork -- paste the transcript below if you have one."
-          : "The Gemini notes Doc for this meeting has no transcript in it, which means transcription wasn't turned on for the call. Paste the transcript below if you have one.",
+          ? `"${doc.title}" has a summary but no transcript, so transcription wasn't on for the call. Loading the summary alone would make the recap and tickets guesswork -- paste the transcript below if you have one.${checked}`
+          : `"${doc.title}" has no transcript in it, which means transcription wasn't on for the call.${checked} Paste the transcript below if you have one.`,
         doc,
         matchedBy,
         sections: { fullNotes: Boolean(fullNotes), transcript: false },
@@ -694,16 +958,31 @@ export async function fetchMonthlyTouchTranscript(
       transcript,
     ].join("\n");
 
+    // How it was found is worth saying out loud: the fallbacks are progressively looser, and only
+    // the attachment is Google's own event -> artifact link. The rest ask the AM to confirm the
+    // call before the dialogue reaches the analyzer.
     const provenance =
       matchedBy === "calendar_attachment"
         ? `Loaded from "${doc.title}", attached to this touch's calendar event.`
-        : `Loaded from "${doc.title}", matched by title and meeting time -- check it's the right call before analyzing.`;
+        : matchedBy === "calendar_search"
+          ? `Loaded from "${doc.title}", attached to "${resolvedEvent?.summary || "the matching meeting"}" on your calendar -- the event linked to this touch had no Meet notes of its own.`
+          : matchedBy === "title_and_time"
+            ? `Loaded from "${doc.title}", matched by title and meeting time -- check it's the right call before analyzing.`
+            : `Loaded from "${doc.title}", matched by client name and meeting time -- check it's the right call before analyzing.`;
+
+    // A transcript this short is almost always a dropped-and-redialled join rather than the
+    // meeting, and it is the AM who can tell. Loading it is still right -- it may genuinely be a
+    // five-minute call -- but it must not look like a full transcript.
+    const thin =
+      transcript.length < SUBSTANTIAL_TRANSCRIPT_CHARS
+        ? ` Only ${transcript.length} characters of dialogue, which usually means a dropped join rather than the call -- check it before analyzing.`
+        : "";
 
     return {
       status: "loaded",
       reason: fullNotes
-        ? `${provenance} Gemini's full notes and the verbatim transcript are both below, labelled separately.`
-        : `${provenance} Verbatim transcript only -- this Doc has no Gemini summary tab.`,
+        ? `${provenance} Gemini's full notes and the verbatim transcript are both below, labelled separately.${thin}`
+        : `${provenance} Verbatim transcript only -- this Doc has no Gemini summary tab.${thin}`,
       transcript: payload,
       doc,
       matchedBy,

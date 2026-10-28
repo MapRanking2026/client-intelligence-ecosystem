@@ -65,6 +65,66 @@ function formatElapsed(seconds: number): string {
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
 }
 
+/**
+ * What a run looks like while it is running. Its own component so it can be rendered on its own
+ * and looked at in both themes -- this panel spent a while invisible in the light theme, which is
+ * the default one, and nobody could see that from reading the file.
+ *
+ * Colours come from the design tokens, never from a literal hex. globals.css remaps the Tailwind
+ * slate classes per theme but cannot remap an arbitrary value like `text-[#d7f5ec]`, so a literal
+ * is a colour that only works in the theme it was picked in.
+ */
+export function PrepProgressPanel({
+  steps,
+  stepIndex,
+  elapsed,
+}: {
+  steps: string[];
+  stepIndex: number;
+  elapsed: number;
+}) {
+  return (
+    <div
+      className="space-y-3 rounded-[20px] border border-[color:var(--hair-strong)] bg-[color:var(--surface-2)] p-4"
+      role="status"
+      aria-live="polite"
+    >
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-sm font-semibold text-slate-100">{steps[stepIndex]}…</p>
+        <span className="shrink-0 font-mono text-xs text-slate-400" aria-live="off">
+          {formatElapsed(elapsed)}
+        </span>
+      </div>
+
+      {/* Indeterminate: the server reports no percentage, and inventing one would be a lie
+          that stalls at 90%. The stripe moving is the signal. */}
+      <div className="h-1.5 overflow-hidden rounded-full bg-[color:var(--surface-3)]">
+        <div className="mtos-indeterminate h-full w-1/3 rounded-full bg-[color:var(--accent)]" />
+      </div>
+
+      <ul className="space-y-1.5">
+        {steps.map((step, index) => (
+          <li key={step} className="flex items-center gap-2 text-xs">
+            {index < stepIndex ? (
+              <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-[color:var(--good)]" />
+            ) : index === stepIndex ? (
+              <LoaderCircle className="h-3.5 w-3.5 shrink-0 animate-spin text-[color:var(--accent)]" />
+            ) : (
+              <Circle className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+            )}
+            <span className={index <= stepIndex ? "text-slate-200" : "text-slate-500"}>{step}</span>
+          </li>
+        ))}
+      </ul>
+
+      <p className="text-xs text-slate-400">
+        This reads every connected dashboard and then writes with AI, so a few minutes is normal.
+        Keep this tab open — the page reloads itself when it finishes.
+      </p>
+    </div>
+  );
+}
+
 async function postTouchAction(touchId: string, action: string): Promise<PrepareTouchResponse> {
   const response = await fetch(`/api/monthly-touches/${touchId}`, {
     method: "POST",
@@ -201,40 +261,7 @@ export function MonthlyTouchPrepActions({
       </div>
 
       {activeAction ? (
-        <div className="space-y-3 rounded-[20px] border border-[#d7f5ec]/15 bg-[#d7f5ec]/5 p-4">
-          <div className="flex items-center justify-between gap-3">
-            <p className="text-sm font-medium text-[#d7f5ec]">{steps[stepIndex]}…</p>
-            <span className="shrink-0 font-mono text-xs text-slate-300" aria-live="off">
-              {formatElapsed(elapsed)}
-            </span>
-          </div>
-
-          {/* Indeterminate: the server reports no percentage, and inventing one would be a lie
-              that stalls at 90%. The stripe moving is the signal. */}
-          <div className="h-1.5 overflow-hidden rounded-full bg-black/30">
-            <div className="mtos-indeterminate h-full w-1/3 rounded-full bg-[#2dd4bf]" />
-          </div>
-
-          <ul className="space-y-1.5">
-            {steps.map((step, index) => (
-              <li key={step} className="flex items-center gap-2 text-xs">
-                {index < stepIndex ? (
-                  <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-[#2dd4bf]" />
-                ) : index === stepIndex ? (
-                  <LoaderCircle className="h-3.5 w-3.5 shrink-0 animate-spin text-[#2dd4bf]" />
-                ) : (
-                  <Circle className="h-3.5 w-3.5 shrink-0 text-slate-600" />
-                )}
-                <span className={index <= stepIndex ? "text-slate-200" : "text-slate-500"}>{step}</span>
-              </li>
-            ))}
-          </ul>
-
-          <p className="text-xs text-slate-400">
-            This reads every connected dashboard and then writes with AI, so a few minutes is
-            normal. Keep this tab open — the page reloads itself when it finishes.
-          </p>
-        </div>
+        <PrepProgressPanel steps={steps} stepIndex={stepIndex} elapsed={elapsed} />
       ) : null}
 
       {error ? <p className="text-sm text-rose-300">{error}</p> : null}

@@ -270,7 +270,11 @@ async function generateClaudeSections(
   // 1200 truncated the JSON mid-array, which then fails to parse. Give it headroom -- more of it
   // now that the models think before answering and charge the thinking to this same ceiling.
   // max_tokens is a ceiling, not a spend: headroom costs nothing unless it is used.
-  const result = await callLlmForJson({ env, system, userText, maxTokens: 12000 });
+  // 12000 truncated the run-sheet mid-array on the first touch prepared under the
+  // richer MT-002 brief: the guide is derived from the prep, so a longer prep means a
+  // longer guide, on top of the thinking that is charged to this same ceiling.
+  // max_tokens is a ceiling, not a spend -- headroom costs nothing unless it is used.
+  const result = await callLlmForJson({ env, system, userText, maxTokens: 24000 });
   const parsed = callGuideSchema.parse(result.data);
   return { sections: parsed.sections, provider: result.provider, model: result.model };
 }

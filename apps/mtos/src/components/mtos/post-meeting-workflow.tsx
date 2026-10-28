@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useState } from "react";
 import {
   CheckCircle2,
   FileText,
@@ -14,6 +14,8 @@ import {
   Ticket,
   Trash2,
 } from "lucide-react";
+
+import { AiProgressPanel, useAiRun } from "@/src/components/mtos/ai-progress";
 
 import type {
   BillingChangeType,
@@ -288,11 +290,29 @@ function departmentTone(department: DraftTicket["department"]) {
   }
 }
 
+/** What each AI-backed action is called while it runs, for the progress panel. */
+const ACTION_STEP: Record<string, string> = {
+  analyze_transcript: "Reading the transcript and drafting the recap",
+  retry_client_intelligence: "Re-reading the call for client intelligence",
+  record_client_health: "Recording client health",
+  apply_client_intelligence: "Applying client intelligence",
+  apply_post_meeting_decisions: "Filing tickets, commitments and the recap",
+  generate_qa_review: "Scoring the call against the QA rubric",
+};
+
+const ACTION_TYPICAL: Record<string, string> = {
+  analyze_transcript: "Usually 1-3 minutes, longer for a long transcript",
+  retry_client_intelligence: "Usually under a minute",
+  apply_post_meeting_decisions: "Usually under a minute",
+  generate_qa_review: "Usually 1-2 minutes",
+};
+
 export function PostMeetingWorkflow({ touchId, postMeeting, qaReview }: PostMeetingWorkflowProps) {
   const [transcript, setTranscript] = useState(postMeeting?.transcript || "");
   const [error, setError] = useState<string | null>(null);
-  const [isPending, startTransition] = useTransition();
   const [activeAction, setActiveAction] = useState<string | null>(null);
+  const ai = useAiRun();
+  const isPending = activeAction !== null;
   const [tickets, setTickets] = useState<EditableTicket[]>(() =>
     (postMeeting?.draftTickets || []).map((ticket) => ({
       id: ticket.id,
@@ -522,19 +542,23 @@ export function PostMeetingWorkflow({ touchId, postMeeting, qaReview }: PostMeet
   const emailValid = !approveEmail || Boolean(emailSubject.trim() && emailBody.trim());
   const confirmDisabled = isPending || !allTicketsDecided || !approvedTicketsValid || !emailValid;
 
+  /** Not wrapped in startTransition -- see ai-progress.tsx for why that hides the panel. */
   function run(action: string, body: Record<string, unknown>) {
-    startTransition(async () => {
-      setError(null);
-      setActiveAction(action);
+    setError(null);
+    setActiveAction(action);
+    ai.start([ACTION_STEP[action] || "Working"], ACTION_TYPICAL[action]);
+
+    void (async () => {
       try {
         await postAction(touchId, body);
         globalThis.location.reload();
       } catch (caught) {
         setError(caught instanceof Error ? caught.message : "That action failed");
       } finally {
+        ai.stop();
         setActiveAction(null);
       }
-    });
+    })();
   }
 
   const analysisReady = alreadyAnalyzed;
@@ -638,6 +662,8 @@ export function PostMeetingWorkflow({ touchId, postMeeting, qaReview }: PostMeet
           <p className="mt-3 text-xs text-slate-500">Analyzed {postMeeting?.analyzedAt ? new Date(postMeeting.analyzedAt).toLocaleString("en-US") : ""}</p>
         )}
       </div>
+
+      {ai.run ? <AiProgressPanel run={ai.run} elapsed={ai.elapsed} /> : null}
 
       {error ? <p className="text-sm text-rose-300">{error}</p> : null}
 

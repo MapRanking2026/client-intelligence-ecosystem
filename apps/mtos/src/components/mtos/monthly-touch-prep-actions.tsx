@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
-import { CheckCircle2, Circle, LoaderCircle, RefreshCw, Sparkles } from "lucide-react";
+import { useState } from "react";
+import { LoaderCircle, RefreshCw, Sparkles } from "lucide-react";
 
+import { AiProgressPanel, useAiRun } from "@/src/components/mtos/ai-progress";
 import { readJsonResponse } from "@/src/lib/api/read-json-response";
 
 interface MonthlyTouchPrepActionsProps {
@@ -61,69 +62,9 @@ function formatPreparedAt(value?: string) {
 const GENERATE_STEPS = ["Preparing data and writing the prep pack", "Building the live call guide"];
 const REFRESH_STEPS = ["Refreshing the data behind this touch"];
 
-function formatElapsed(seconds: number): string {
-  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
-}
-
-/**
- * What a run looks like while it is running. Its own component so it can be rendered on its own
- * and looked at in both themes -- this panel spent a while invisible in the light theme, which is
- * the default one, and nobody could see that from reading the file.
- *
- * Colours come from the design tokens, never from a literal hex. globals.css remaps the Tailwind
- * slate classes per theme but cannot remap an arbitrary value like `text-[#d7f5ec]`, so a literal
- * is a colour that only works in the theme it was picked in.
- */
-export function PrepProgressPanel({
-  steps,
-  stepIndex,
-  elapsed,
-}: {
-  steps: string[];
-  stepIndex: number;
-  elapsed: number;
-}) {
-  return (
-    <div
-      className="space-y-3 rounded-[20px] border border-[color:var(--hair-strong)] bg-[color:var(--surface-2)] p-4"
-      role="status"
-      aria-live="polite"
-    >
-      <div className="flex items-center justify-between gap-3">
-        <p className="text-sm font-semibold text-slate-100">{steps[stepIndex]}…</p>
-        <span className="shrink-0 font-mono text-xs text-slate-400" aria-live="off">
-          {formatElapsed(elapsed)}
-        </span>
-      </div>
-
-      {/* Indeterminate: the server reports no percentage, and inventing one would be a lie
-          that stalls at 90%. The stripe moving is the signal. */}
-      <div className="h-1.5 overflow-hidden rounded-full bg-[color:var(--surface-3)]">
-        <div className="mtos-indeterminate h-full w-1/3 rounded-full bg-[color:var(--accent)]" />
-      </div>
-
-      <ul className="space-y-1.5">
-        {steps.map((step, index) => (
-          <li key={step} className="flex items-center gap-2 text-xs">
-            {index < stepIndex ? (
-              <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-[color:var(--good)]" />
-            ) : index === stepIndex ? (
-              <LoaderCircle className="h-3.5 w-3.5 shrink-0 animate-spin text-[color:var(--accent)]" />
-            ) : (
-              <Circle className="h-3.5 w-3.5 shrink-0 text-slate-400" />
-            )}
-            <span className={index <= stepIndex ? "text-slate-200" : "text-slate-500"}>{step}</span>
-          </li>
-        ))}
-      </ul>
-
-      <p className="text-xs text-slate-400">
-        This reads every connected dashboard and then writes with AI, so a few minutes is normal.
-        Keep this tab open — the page reloads itself when it finishes.
-      </p>
-    </div>
-  );
-}
+/** Measured on production: 9s of dashboard pulls, then ~145s of model time per half. */
+const GENERATE_TYPICAL = "Usually 3-5 minutes — it reads every connected dashboard, then writes twice";
+const REFRESH_TYPICAL = "Usually under a minute — this only re-reads the dashboards, no AI";
 
 async function postTouchAction(touchId: string, action: string): Promise<PrepareTouchResponse> {
   const response = await fetch(`/api/monthly-touches/${touchId}`, {
@@ -151,33 +92,25 @@ export function MonthlyTouchPrepActions({
   callGuideGenerated,
 }: MonthlyTouchPrepActionsProps) {
   const [error, setError] = useState<string | null>(null);
-  const [isPending, startTransition] = useTransition();
   const [activeAction, setActiveAction] = useState<"prepare" | "prepare_and_generate" | null>(null);
-  const [stepIndex, setStepIndex] = useState(0);
-  const [elapsed, setElapsed] = useState(0);
+  const ai = useAiRun();
 
-  const steps = activeAction === "prepare" ? REFRESH_STEPS : GENERATE_STEPS;
+  const isPending = activeAction !== null;
 
-  // A ticking clock is the cheapest honest proof the request is still alive. These runs last
-  // minutes, and without it a spinner alone is indistinguishable from a hung page.
-  useEffect(() => {
-    if (!activeAction) {
-      return;
-    }
-    const startedAt = Date.now();
-    const timer = window.setInterval(() => {
-      setElapsed(Math.floor((Date.now() - startedAt) / 1000));
-    }, 1000);
-    return () => window.clearInterval(timer);
-  }, [activeAction]);
-
+  /**
+   * Deliberately NOT wrapped in startTransition. See ai-progress.tsx: an async
+   * transition holds its state updates until the work finishes, so the progress
+   * panel never mounted while there was anything to report.
+   */
   function runPrepare(action: "prepare" | "prepare_and_generate") {
-    startTransition(async () => {
-      setError(null);
-      setElapsed(0);
-      setStepIndex(0);
-      setActiveAction(action);
+    setError(null);
+    setActiveAction(action);
+    ai.start(
+      action === "prepare" ? REFRESH_STEPS : GENERATE_STEPS,
+      action === "prepare" ? REFRESH_TYPICAL : GENERATE_TYPICAL,
+    );
 
+    void (async () => {
       try {
         if (action === "prepare") {
           await postTouchAction(touchId, "prepare");
@@ -188,7 +121,7 @@ export function MonthlyTouchPrepActions({
           // half has its own budget, and the prep pack survives a failure in the second half.
           await postTouchAction(touchId, "prepare_with_ai");
 
-          setStepIndex(1);
+          ai.advance();
           try {
             await postTouchAction(touchId, "generate_call_guide");
           } catch (guideError) {
@@ -204,9 +137,10 @@ export function MonthlyTouchPrepActions({
       } catch (caught) {
         setError(caught instanceof Error ? caught.message : "Unable to prepare this monthly touch");
       } finally {
+        ai.stop();
         setActiveAction(null);
       }
-    });
+    })();
   }
 
   return (
@@ -260,9 +194,7 @@ export function MonthlyTouchPrepActions({
         </button>
       </div>
 
-      {activeAction ? (
-        <PrepProgressPanel steps={steps} stepIndex={stepIndex} elapsed={elapsed} />
-      ) : null}
+      {ai.run ? <AiProgressPanel run={ai.run} elapsed={ai.elapsed} /> : null}
 
       {error ? <p className="text-sm text-rose-300">{error}</p> : null}
       {!error && claudeStatus === "failed" && claudeError ? (

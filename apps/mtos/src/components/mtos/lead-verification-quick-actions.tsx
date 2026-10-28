@@ -1,9 +1,10 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState } from "react";
 import Link from "next/link";
 import { AlertTriangle, ArrowRight, LoaderCircle, ShieldCheck } from "lucide-react";
 
+import { AiProgressPanel, useAiRun } from "@/src/components/mtos/ai-progress";
 import { LEAD_CHANNEL_LABEL, LEAD_WINDOW_LABEL } from "@/src/lib/mtos-data";
 import type { LeadVerificationReview, LeadWindowInput, LeadWindowPreset } from "@/src/lib/mtos-data";
 
@@ -39,7 +40,8 @@ function formatGeneratedAt(value?: string) {
 export function LeadVerificationQuickActions({ clientId, initialReview }: LeadVerificationQuickActionsProps) {
   const [review, setReview] = useState<LeadVerificationReview | null>(initialReview);
   const [error, setError] = useState<string | null>(null);
-  const [isPending, startTransition] = useTransition();
+  const ai = useAiRun();
+  const isPending = ai.isRunning;
   // Pull window — defaults to a rolling last 30 days.
   const [windowPreset, setWindowPreset] = useState<LeadWindowPreset>("last_30_days");
   const [customSince, setCustomSince] = useState("");
@@ -54,9 +56,12 @@ export function LeadVerificationQuickActions({ clientId, initialReview }: LeadVe
 
   const customIncomplete = windowPreset === "custom" && !customSince;
 
+  /** Not wrapped in startTransition -- see ai-progress.tsx for why that hides the panel. */
   function runVerify() {
-    startTransition(async () => {
-      setError(null);
+    setError(null);
+    ai.start(["Reviewing leads and calls with AI"], "Usually 1-2 minutes");
+
+    void (async () => {
       try {
         const response = await fetch(`/api/clients/${clientId}/lead-verification`, {
           method: "POST",
@@ -70,8 +75,10 @@ export function LeadVerificationQuickActions({ clientId, initialReview }: LeadVe
         setReview(payload.data ?? null);
       } catch (caught) {
         setError(caught instanceof Error ? caught.message : "Unable to verify leads");
+      } finally {
+        ai.stop();
       }
-    });
+    })();
   }
 
   const totals = review?.totals;
@@ -177,6 +184,8 @@ export function LeadVerificationQuickActions({ clientId, initialReview }: LeadVe
           ))}
         </div>
       ) : null}
+
+      {ai.run ? <AiProgressPanel run={ai.run} elapsed={ai.elapsed} /> : null}
 
       {error ? <p className="text-sm text-rose-300">{error}</p> : null}
 

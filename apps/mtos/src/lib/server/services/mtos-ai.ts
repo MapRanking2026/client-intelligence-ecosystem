@@ -29,15 +29,53 @@ export function extractJsonObject(value: string): Record<string, unknown> {
     return JSON.parse(trimmed) as Record<string, unknown>;
   }
 
-  const match = trimmed.match(/\{[\s\S]*\}/);
-  if (!match) {
+  const start = trimmed.indexOf("{");
+  if (start === -1) {
     // Not "Claude": any of the three providers lands here, and the failover line already names
     // which one. Saying Claude printed "openai: Claude response did not include a JSON object"
     // on a failure that had nothing to do with Claude.
     throw new Error("the model's response did not include a JSON object");
   }
 
-  return JSON.parse(match[0]) as Record<string, unknown>;
+  // Scan to the brace that closes the one at `start`, ignoring braces inside strings.
+  // A greedy /\{[\s\S]*\}/ used to do this, which spans from the first brace to the
+  // LAST one anywhere in the response -- so a closing brace in trailing prose, or a
+  // half-written object, produced "Expected ',' or ']' after array element in JSON at
+  // position 10828" from a frame with no idea what had actually gone wrong.
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+
+  for (let index = start; index < trimmed.length; index += 1) {
+    const char = trimmed[index];
+
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (char === "\\") escaped = true;
+      else if (char === '"') inString = false;
+      continue;
+    }
+
+    if (char === '"') {
+      inString = true;
+    } else if (char === "{") {
+      depth += 1;
+    } else if (char === "}") {
+      depth -= 1;
+      if (depth === 0) {
+        return JSON.parse(trimmed.slice(start, index + 1)) as Record<string, unknown>;
+      }
+    }
+  }
+
+  // The braces never balanced, so the answer stopped partway through. Say that plainly:
+  // a character offset reads like malformed JSON when the real cause is a ceiling or a
+  // dropped connection, and that distinction is the whole difference between "retry" and
+  // "raise maxTokens".
+  throw new Error(
+    `the model's answer was cut off mid-JSON after ${trimmed.length} characters, still ` +
+      `${depth} ${depth === 1 ? "level" : "levels"} deep -- it ran out of room before it finished`,
+  );
 }
 
 // ---------------------------------------------------------------------------

@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState } from "react";
 import { LoaderCircle, Sparkles, MonitorPlay, ArrowUpRight } from "lucide-react";
 
+import { AiProgressPanel, useAiRun } from "@/src/components/mtos/ai-progress";
 import { readJsonResponse } from "@/src/lib/api/read-json-response";
 import type { CallGuide, CallGuideSection } from "@/src/lib/mtos-data";
 
@@ -53,12 +54,17 @@ function suggestScreenKey(section: CallGuideSection): ScreenKey {
 
 export function CallGuideActions({ touchId, clientId, callGuide, screenOverrides }: CallGuideActionsProps) {
   const [error, setError] = useState<string | null>(null);
-  const [isPending, startTransition] = useTransition();
   const [overrides, setOverrides] = useState<Record<string, string>>(screenOverrides || {});
+  const ai = useAiRun();
 
+  const isPending = ai.isRunning;
+
+  /** Not wrapped in startTransition -- see ai-progress.tsx for why that hides the panel. */
   function generate() {
-    startTransition(async () => {
-      setError(null);
+    setError(null);
+    ai.start(["Building the live call guide"], "Usually 1-2 minutes");
+
+    void (async () => {
       try {
         const response = await fetch(`/api/monthly-touches/${touchId}`, {
           method: "POST",
@@ -70,8 +76,10 @@ export function CallGuideActions({ touchId, clientId, callGuide, screenOverrides
         globalThis.location.reload();
       } catch (caught) {
         setError(caught instanceof Error ? caught.message : "Unable to generate the call guide");
+      } finally {
+        ai.stop();
       }
-    });
+    })();
   }
 
   async function setScreen(index: number, key: ScreenKey) {
@@ -114,6 +122,8 @@ export function CallGuideActions({ touchId, clientId, callGuide, screenOverrides
           {callGuide?.status === "generated" ? "Regenerate guide only" : "Generate guide only"}
         </button>
       </div>
+
+      {ai.run ? <AiProgressPanel run={ai.run} elapsed={ai.elapsed} /> : null}
 
       {error ? <p className="text-sm text-rose-300">{error}</p> : null}
 

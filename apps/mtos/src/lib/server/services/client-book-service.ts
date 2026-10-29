@@ -1,4 +1,5 @@
 import type { TenantContext } from "@/src/lib/contracts/mtos";
+import type { ClientBookLinks } from "@/src/lib/mtos-data";
 import { getIntegrationConnection, getIntegrationCredentials } from "@/src/lib/server/integrations";
 import {
   CLICKUP_V3,
@@ -23,17 +24,11 @@ import {
 
 type JsonRecord = Record<string, unknown>;
 
-/** Pages MTOS has written for a touch, so a re-run edits them instead of stacking duplicates. */
-export interface ClientBookLinks {
-  docId: string;
-  /** The `Monthly Touch (M/D/YYYY)` page holding the prep notes. */
-  prepPageId: string;
-  prepPageUrl: string;
-  /** The `Post Monthly Touch Notes` subpage beneath it. */
-  postPageId?: string;
-  postPageUrl?: string;
-  writtenAt: string;
-}
+/**
+ * The pages MTOS has written for a touch, so a re-run edits them instead of stacking duplicates.
+ * Defined with the rest of the touch record in mtos-data, because it is persisted on the touch.
+ */
+export type { ClientBookLinks };
 
 export const POST_NOTES_PAGE_NAME = "Post Monthly Touch Notes";
 
@@ -277,18 +272,34 @@ export async function writePrepNotesToClientBook(
 }
 
 /**
+ * The touch page for a date that is already in the book, whoever wrote it.
+ *
+ * The AM writes these pages by hand today, so the post-call subpage must be able to attach itself to
+ * the page that is already there instead of creating a second one for the same day. Nesting under a
+ * hand-written page doesn't modify it, so there is nothing to protect here -- unlike replacing one,
+ * which stays restricted to pages MTOS wrote itself.
+ */
+function findTouchPage(pages: BookPageNode[], name: string): BookPageNode | undefined {
+  const wanted = name.trim().toLowerCase();
+  return pages.find((page) => String(page.name || "").trim().toLowerCase() === wanted);
+}
+
+/**
  * File the post-call write-up as a subpage of this touch's page.
  *
- * Requires the prep page to exist, because the subpage hangs off it. That ordering is the AM's:
- * the touch page is the record of the meeting, and the post notes are part of it, not a sibling
- * floating next to every other month's.
+ * The subpage hangs off the touch page, which is the AM's own ordering: the touch page is the record
+ * of the meeting and the post notes are part of it, not a sibling floating next to every other
+ * month's. When MTOS has no page recorded -- the AM wrote this month's page themselves, or the prep
+ * ran before this feature existed -- the page is looked up by name, and only created when the book
+ * genuinely has none for that date.
  */
 export async function writePostNotesToClientBook(
   context: TenantContext,
   options: {
     clientName: string;
+    touchDateIso: string;
     markdown: string;
-    links: ClientBookLinks;
+    links?: ClientBookLinks;
   },
 ): Promise<{ links: ClientBookLinks } | { error: string }> {
   const located = await locateBook(context, options.clientName);
@@ -296,9 +307,37 @@ export async function writePostNotesToClientBook(
     return located;
   }
 
-  const { access, docId } = located;
-  const { links } = options;
+  const { access, docId, meetingsPageId, pages } = located;
+  const touchPageName = monthlyTouchPageName(options.touchDateIso);
 
+  let links = options.links?.docId === docId ? options.links : undefined;
+  if (!links) {
+    // Attach to the page already in the book for this date, and only create one when there is none.
+    const existing = findTouchPage(pages, touchPageName);
+    const parentId =
+      existing?.id ||
+      (
+        await createPage(
+          access,
+          docId,
+          touchPageName,
+          `MTOS filed the post-meeting notes for this touch. The prep notes for ${touchPageName} were not filed here.`,
+          meetingsPageId,
+        )
+      )?.id;
+    if (!parentId) {
+      return { error: "ClickUp refused to create the touch page the post-meeting notes hang off." };
+    }
+    links = {
+      docId,
+      prepPageId: parentId,
+      prepPageUrl: pageUrl(access.workspaceId, docId, parentId),
+      writtenAt: new Date().toISOString(),
+    };
+  }
+
+  // A subpage the AM wrote by hand under their own touch page is theirs; only replace the one MTOS
+  // recorded. `findTouchPage` is deliberately not used here for that reason.
   if (links.postPageId) {
     const replaced = await replacePage(access, docId, links.postPageId, POST_NOTES_PAGE_NAME, options.markdown);
     if (replaced) {

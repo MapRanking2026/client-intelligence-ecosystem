@@ -9,6 +9,7 @@ import type {
   BillingChangeType,
   MonthlyTouchRecord,
   PostMeetingReview,
+  PostTouchNotes,
   TicketDepartment,
   TicketPriority,
   TicketType,
@@ -21,6 +22,7 @@ import { getIntegrationConnection, getIntegrationCredentials } from "@/src/lib/s
 import { splitTranscriptPayload } from "@/src/lib/server/services/meeting-transcript-service";
 import { callLlmForJson, getNowIso, hasAnyLlmProvider, stripUndefinedDeep } from "@/src/lib/server/services/mtos-ai";
 import { getPromptText } from "@/src/lib/server/prompt-store";
+import { generatePostTouchNotes } from "@/src/lib/server/services/post-touch-notes-service";
 import { getAccountManagerIdentity } from "@/src/lib/server/services/user-service";
 import { generateClientIntelligence } from "@/src/lib/server/services/client-intelligence-service";
 import type { ClientIntelligenceReview } from "@/src/lib/mtos-data";
@@ -1185,11 +1187,32 @@ export async function applyPostMeetingDecisions(
     status: decisions.email.approve ? "approved" : "pending",
   };
 
+  // The internal notes are written last, because this is the first moment the document can be true:
+  // the score is the one the AM confirmed, and each item is the decision they made, with the link of
+  // the ticket that was actually created. Non-fatal -- the tickets are already filed, so a missing
+  // model or a ClickUp refusal surfaces as a note on the screen and never undoes the approval.
+  const notes = await generatePostTouchNotes(
+    context,
+    { ...touch, postMeeting: { ...touch.postMeeting, draftTickets: updatedTickets } },
+    client,
+    {
+      accountManagerName: sharedContext.accountManager || "",
+      tickets: updatedTickets,
+      existingLinks: touch.postMeeting.notes?.clientBook,
+    },
+  ).catch((error): PostTouchNotes => ({
+    markdown: "",
+    generatedAt: getNowIso(),
+    errorMessage:
+      error instanceof Error ? error.message : "The post-meeting notes could not be written.",
+  }));
+
   const postMeeting: PostMeetingReview = {
     ...touch.postMeeting,
     status: "approved",
     draftTickets: updatedTickets,
     clientEmail,
+    notes,
   };
 
   const updatedTouch: MonthlyTouchRecord = stripUndefinedDeep({

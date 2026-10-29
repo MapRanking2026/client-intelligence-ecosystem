@@ -7,6 +7,7 @@ import {
   Gauge,
   LoaderCircle,
   Mail,
+  NotebookPen,
   Plus,
   RefreshCw,
   ShieldCheck,
@@ -540,7 +541,16 @@ export function PostMeetingWorkflow({ touchId, postMeeting, qaReview }: PostMeet
     return true;
   });
   const emailValid = !approveEmail || Boolean(emailSubject.trim() && emailBody.trim());
-  const confirmDisabled = isPending || !allTicketsDecided || !approvedTicketsValid || !emailValid;
+  /**
+   * The score comes first. It is the header line of the internal notes written when the decisions are
+   * applied, and a score of 6 or below is what requires the Risk Register entry and the Manager tag --
+   * so confirming the tickets before recording it would file the notes with the score missing. Only
+   * gated when the health panel is actually on screen; if Client Intelligence didn't run there is
+   * nothing to record and nothing to wait for.
+   */
+  const healthPending = Boolean(clientIntelligence) && !recordedHealth;
+  const confirmDisabled =
+    isPending || !allTicketsDecided || !approvedTicketsValid || !emailValid || healthPending;
 
   /** Not wrapped in startTransition -- see ai-progress.tsx for why that hides the panel. */
   function run(action: string, body: Record<string, unknown>) {
@@ -1150,9 +1160,9 @@ export function PostMeetingWorkflow({ touchId, postMeeting, qaReview }: PostMeet
                     <p className="mt-0.5 text-xs text-slate-400">
                       {healthSuggestion
                         ? healthSuggestion.npsStatedByClient
-                          ? "The client gave a score on the call — confirm it and the reason below."
+                          ? "A number came up on the call — the score is still your judgment. Confirm or change it."
                           : "Suggested from the transcript. Change either value and the reason updates to match."
-                        : "No suggestion was generated — record what the client told you on the call."}
+                        : "No suggestion was generated — set the score from how the call actually went."}
                     </p>
                   </div>
                   {recordedHealth ? (
@@ -1445,6 +1455,13 @@ export function PostMeetingWorkflow({ touchId, postMeeting, qaReview }: PostMeet
             </div>
           ) : null}
 
+          {!decisionsApplied && healthPending ? (
+            <p className="rounded-xl border border-amber-400/20 bg-amber-500/5 px-3 py-2 text-xs text-amber-200">
+              Record the NPS &amp; risk status first — it is the header line of the notes filed in the
+              Client&apos;s Book, so the tickets are confirmed after the score, not before it.
+            </p>
+          ) : null}
+
           {!decisionsApplied ? (
             <button
               type="button"
@@ -1482,6 +1499,47 @@ export function PostMeetingWorkflow({ touchId, postMeeting, qaReview }: PostMeet
               )}
               Confirm decisions
             </button>
+          ) : null}
+
+          {/* The internal record of the touch, written once the decisions were applied. The AM's own
+              copy of the notes lives in the Client's Book, so the link matters more than the text --
+              but the markdown is shown too, because a failed write-back must not lose the document. */}
+          {postMeeting.notes ? (
+            <div className="rounded-[24px] border border-white/8 bg-black/20 p-5">
+              <div className="flex items-center gap-2">
+                <NotebookPen className="h-4 w-4 text-[#d7f5ec]" />
+                <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">
+                  Post-Monthly Touch Notes
+                </p>
+              </div>
+
+              {postMeeting.notes.clientBook?.postPageUrl ? (
+                <p className="mt-3 text-sm text-slate-300">
+                  Filed in the client&apos;s Client&apos;s Book, under this month&apos;s touch page.{" "}
+                  <a
+                    href={postMeeting.notes.clientBook.postPageUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-[#d7f5ec] underline"
+                  >
+                    Open the page in ClickUp
+                  </a>
+                </p>
+              ) : null}
+
+              {postMeeting.notes.errorMessage ? (
+                <p className="mt-3 rounded-xl border border-amber-400/20 bg-amber-500/5 px-3 py-2 text-xs text-amber-200">
+                  The notes weren&apos;t filed in the Client&apos;s Book: {postMeeting.notes.errorMessage}
+                  {postMeeting.notes.markdown ? " They're below — copy them into the book by hand." : ""}
+                </p>
+              ) : null}
+
+              {postMeeting.notes.markdown ? (
+                <pre className="mt-3 max-h-80 overflow-auto whitespace-pre-wrap rounded-2xl border border-white/8 bg-black/30 p-3 text-xs leading-5 text-slate-300">
+                  {postMeeting.notes.markdown}
+                </pre>
+              ) : null}
+            </div>
           ) : null}
         </>
       ) : null}
@@ -1578,7 +1636,7 @@ export function PostMeetingWorkflow({ touchId, postMeeting, qaReview }: PostMeet
                 <div className="rounded-2xl border border-white/10 bg-black/20 p-3">
                   <p className="text-sm text-slate-200">
                     {qaReview.status === "approved"
-                      ? "Victor approved this grade. This touch is marked Completed -- file the final report to Drive Monthly Notes and the ClickUp Client Book manually until write access is connected."
+                      ? "Victor approved this grade. This touch is marked Completed -- the internal notes are already filed in the client's Client's Book; the final report still goes to Drive Monthly Notes by hand."
                       : "Victor requested changes."}
                   </p>
                   {qaReview.victorNote ? <p className="mt-1 text-xs text-slate-400">Note: {qaReview.victorNote}</p> : null}

@@ -861,6 +861,34 @@ export interface ClientIntelligenceReview {
   errorMessage?: string;
 }
 
+/**
+ * The pages a touch owns in the client's ClickUp Client's Book: this month's touch page under
+ * `Client Meetings Notes`, and the `Post Monthly Touch Notes` subpage beneath it. Recorded so a
+ * re-run edits the pages MTOS wrote rather than stacking a second set for the same day.
+ */
+export interface ClientBookLinks {
+  docId: string;
+  prepPageId: string;
+  prepPageUrl: string;
+  postPageId?: string;
+  postPageUrl?: string;
+  writtenAt: string;
+}
+
+/**
+ * The internal Post-Monthly Touch Notes document, written once the AM has confirmed the score and
+ * decided every ticket, and filed in the Client's Book. Kept on the touch as well as in ClickUp so
+ * the document is never lost when the write-back itself fails.
+ */
+export interface PostTouchNotes {
+  markdown: string;
+  generatedAt: string;
+  model?: string;
+  clientBook?: ClientBookLinks;
+  /** Why the notes aren't in the book (ClickUp not connected, no book, no model configured). */
+  errorMessage?: string;
+}
+
 export interface PostMeetingReview {
   status: "not_started" | "draft_ready" | "approved";
   transcript?: string;
@@ -872,6 +900,8 @@ export interface PostMeetingReview {
   dashboardUpdates?: DashboardUpdateReview;
   /** Client Intelligence report + (if at risk) Risk Register / Stakeholder Map entries. */
   clientIntelligence?: ClientIntelligenceReview;
+  /** The internal notes written to the Client's Book once the decisions were applied. */
+  notes?: PostTouchNotes;
   analyzedAt?: string;
   model?: string;
   errorMessage?: string;

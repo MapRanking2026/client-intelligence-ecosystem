@@ -101,9 +101,9 @@ export function CallGuideActions({ touchId, clientId, callGuide, screenOverrides
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-[24px] border border-white/8 bg-black/20 p-4">
+      <div className="card flex flex-wrap items-center justify-between gap-3">
         <div>
-          <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">Live call guide</p>
+          <p className="card-title">Live call guide</p>
           <p className="mt-1 text-sm text-slate-300">
             {callGuide?.status === "generated"
               ? `Generated ${callGuide.source === "claude" ? "with Claude" : "from the prep pack"} alongside the preparation above -- each section shows the screen to present. Tap a link to open it in a new tab.`
@@ -116,7 +116,7 @@ export function CallGuideActions({ touchId, clientId, callGuide, screenOverrides
           onClick={generate}
           disabled={isPending}
           style={{ color: "#0d1625" }}
-          className="inline-flex items-center gap-2 rounded-full border border-[#d7f5ec]/20 bg-[#d7f5ec] px-4 py-2 text-sm font-semibold text-[#0d1625] transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-60"
+          className="btn btn-primary"
         >
           {isPending ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
           {callGuide?.status === "generated" ? "Regenerate guide only" : "Generate guide only"}
@@ -132,10 +132,10 @@ export function CallGuideActions({ touchId, clientId, callGuide, screenOverrides
           {callGuide.sections.map((section, index) => {
             const key = (overrides[String(index)] as ScreenKey) || suggestScreenKey(section);
             return (
-              <div key={`${section.title}-${index}`} className="rounded-2xl border border-white/8 bg-white/4 p-4">
+              <div key={`${section.title}-${index}`} className="panel">
                 <div className="flex items-center justify-between gap-3">
                   <p className="text-sm font-semibold text-white">{section.title}</p>
-                  <span className="rounded-full border border-white/10 bg-black/20 px-3 py-1 text-xs text-slate-300">
+                  <span className="chip">
                     {section.minutes} min
                   </span>
                 </div>
@@ -158,7 +158,7 @@ export function CallGuideActions({ touchId, clientId, callGuide, screenOverrides
                     <select
                       value={key}
                       onChange={(e) => void setScreen(index, e.target.value as ScreenKey)}
-                      className="rounded-lg border border-white/10 bg-black/30 px-2 py-1.5 text-xs text-slate-200 outline-none"
+                      className="select"
                     >
                       {SCREEN_KEYS.map((k) => (
                         <option key={k} value={k} style={{ color: "#0d1625" }}>{SCREENS[k].label}</option>
@@ -169,7 +169,7 @@ export function CallGuideActions({ touchId, clientId, callGuide, screenOverrides
 
                 <div className="mt-3 space-y-2">
                   {section.talkingPoints.map((point) => (
-                    <div key={point} className="rounded-xl border border-white/8 bg-black/20 px-3 py-2 text-sm text-slate-200">
+                    <div key={point} className="panel-tight text-sm text-slate-200">
                       {point}
                     </div>
                   ))}
@@ -187,7 +187,7 @@ export function CallGuideActions({ touchId, clientId, callGuide, screenOverrides
 
           {callGuide.anticipatedObjections?.length ? (
             <div className="rounded-2xl border border-amber-300/15 bg-amber-300/5 p-4">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-amber-200">
+              <p className="card-title">
                 Anticipated objections
               </p>
               <p className="mt-1 text-xs text-slate-400">
@@ -197,7 +197,7 @@ export function CallGuideActions({ touchId, clientId, callGuide, screenOverrides
                 {callGuide.anticipatedObjections.map((item, index) => (
                   <div
                     key={`objection-${index}`}
-                    className="rounded-xl border border-white/8 bg-black/20 px-3 py-2"
+                    className="panel-tight"
                   >
                     <p className="text-sm font-semibold text-amber-100">&ldquo;{item.objection}&rdquo;</p>
                     <p className="mt-1 text-sm text-slate-200">{item.response}</p>
@@ -212,7 +212,7 @@ export function CallGuideActions({ touchId, clientId, callGuide, screenOverrides
 
           {callGuide.valueTranslations?.length ? (
             <div className="rounded-2xl border border-[#2dd4bf]/15 bg-[#2dd4bf]/5 p-4">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-[#2dd4bf]">
+              <p className="card-title">
                 Say it in business terms
               </p>
               <p className="mt-1 text-xs text-slate-400">
@@ -222,9 +222,9 @@ export function CallGuideActions({ touchId, clientId, callGuide, screenOverrides
                 {callGuide.valueTranslations.map((item, index) => (
                   <div
                     key={`value-${index}`}
-                    className="rounded-xl border border-white/8 bg-black/20 px-3 py-2"
+                    className="panel-tight"
                   >
-                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">{item.metric}</p>
+                    <p className="card-title">{item.metric}</p>
                     <p className="mt-1 text-sm text-slate-200">{item.meaning}</p>
                   </div>
                 ))}

@@ -151,9 +151,9 @@ export function PresentationViewer({
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-start justify-between gap-3 rounded-[24px] border border-white/8 bg-black/20 p-4">
+      <div className="card flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">
+          <p className="card-title">
             Client presentation
           </p>
           <p className="mt-1 text-sm text-slate-300">
@@ -176,14 +176,14 @@ export function PresentationViewer({
                 type="button"
                 onClick={present}
                 style={{ color: "#0d1625" }}
-                className="inline-flex items-center gap-2 rounded-full border border-[#d7f5ec]/20 bg-[#d7f5ec] px-4 py-2 text-sm font-semibold transition hover:bg-white"
+                className="btn btn-primary"
               >
                 <Play className="h-4 w-4" />
                 Play slideshow
               </button>
               <a
                 href={`/api/monthly-touches/${touchId}/presentation.pptx`}
-                className="inline-flex items-center gap-2 rounded-full border border-white/12 bg-white/5 px-4 py-2 text-sm font-medium text-slate-200 transition hover:bg-white/10"
+                className="btn btn-ghost"
               >
                 <Download className="h-4 w-4" />
                 Download .pptx
@@ -194,7 +194,7 @@ export function PresentationViewer({
             type="button"
             onClick={generate}
             disabled={ai.isRunning}
-            className="inline-flex items-center gap-2 rounded-full border border-white/12 bg-white/5 px-4 py-2 text-sm font-medium text-slate-200 transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-60"
+            className="btn btn-ghost"
           >
             <Sparkles className="h-4 w-4" />
             {presentation?.status === "generated" ? "Regenerate presentation" : "Generate presentation"}
@@ -235,7 +235,7 @@ export function PresentationViewer({
                 onClick={() => go(-1)}
                 disabled={index === 0}
                 aria-label="Previous slide"
-                className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/12 bg-white/5 text-slate-200 transition hover:bg-white/10 disabled:opacity-40"
+                className="btn btn-ghost btn-sm"
               >
                 <ChevronLeft className="h-4 w-4" />
               </button>
@@ -247,7 +247,7 @@ export function PresentationViewer({
                 onClick={() => go(1)}
                 disabled={index >= count - 1}
                 aria-label="Next slide"
-                className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/12 bg-white/5 text-slate-200 transition hover:bg-white/10 disabled:opacity-40"
+                className="btn btn-ghost btn-sm"
               >
                 <ChevronRight className="h-4 w-4" />
               </button>
@@ -257,7 +257,7 @@ export function PresentationViewer({
             <button
               type="button"
               onClick={() => setShowNotes((value) => !value)}
-              className="inline-flex items-center gap-2 rounded-full border border-white/12 bg-white/5 px-3 py-1.5 text-xs font-medium text-slate-300 transition hover:bg-white/10"
+              className="btn btn-ghost btn-sm"
             >
               {showNotes ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
               {showNotes ? "Hide notes" : "Show notes"}
@@ -265,8 +265,8 @@ export function PresentationViewer({
           </div>
 
           {showNotes ? (
-            <div className="rounded-[20px] border border-[color:var(--hair-strong)] bg-[color:var(--surface-2)] p-4">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">
+            <div className="panel">
+              <p className="card-title">
                 Presenter notes — only you see these
               </p>
               <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-200">

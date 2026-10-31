@@ -4,6 +4,7 @@ import { z } from "zod";
 import { resolveTenantContext } from "@/src/lib/auth/resolve-tenant-context";
 import { monthlyTouchWorkspaceResponse } from "@/src/lib/api/mtos-query";
 import { prepareMonthlyTouch } from "@/src/lib/server/services/monthly-touch-prep-service";
+import { runResearchStage } from "@/src/lib/server/services/prep-workflow-service";
 import { generatePresentation } from "@/src/lib/server/services/presentation-service";
 import { generateLiveCallGuide } from "@/src/lib/server/services/live-call-guide-service";
 import {
@@ -15,6 +16,10 @@ import {
   recordClientHealth,
   retryClientIntelligence,
 } from "@/src/lib/server/services/client-intelligence-service";
+import {
+  applyPostMeetingReview,
+  PostMeetingReviewIncompleteError,
+} from "@/src/lib/server/services/post-meeting-review-service";
 import { generateQaReview, recordVictorDecision } from "@/src/lib/server/services/qa-review-service";
 
 // One Generate now runs the prep pack and the live call guide back to back -- several
@@ -90,6 +95,42 @@ const touchRequestSchema = z.discriminatedUnion("action", [
     ),
     email: z.object({ subject: z.string(), body: z.string(), approve: z.boolean() }),
   }),
+  /**
+   * The whole review in one submission: the score, every ticket decision, the two register
+   * entries and the client email. This is the one the screen uses -- the three narrower actions
+   * above stay for older clients and for re-applying a single piece.
+   */
+  z.object({
+    action: z.literal("apply_post_meeting_review"),
+    nps: z.number().int().min(0).max(10).nullable(),
+    npsReason: z.string(),
+    riskTier: z.enum(["Healthy", "Low", "Medium", "High", "Critical"]).optional(),
+    riskReason: z.string().optional(),
+    tickets: z.array(
+      z.object({
+        id: z.string().min(1),
+        title: z.string(),
+        description: z.string(),
+        department: z.enum(["SEO", "Web Design", "Ads", "Account Manager", "Other"]),
+        assigneeId: z.number().optional(),
+        assignee: z.string().optional(),
+        businessOptionId: z.string().optional(),
+        businessName: z.string().optional(),
+        priority: z.enum(["urgent", "high", "normal", "low"]).optional(),
+        timeEstimateMinutes: z.number().optional(),
+        dueDate: z.string().optional(),
+        ticketType: z.enum(["regular", "billing"]).optional(),
+        billingChangeType: z
+          .enum(["Upsell", "Downsell", "New Sale", "Pause", "Cancel", "Payment Failed"])
+          .optional(),
+        dateRequested: z.string().optional(),
+        decision: z.enum(["approved", "declined"]),
+      }),
+    ),
+    email: z.object({ subject: z.string(), body: z.string(), approve: z.boolean() }),
+    riskRegister: riskRegisterSchema.optional(),
+    stakeholderMap: stakeholderMapSchema.optional(),
+  }),
   z.object({ action: z.literal("retry_client_intelligence") }),
   z.object({
     action: z.literal("apply_client_intelligence"),
@@ -153,13 +194,17 @@ export async function POST(
         // each a full model call on top of the dashboard pulls, and together they ran past the
         // 300s function ceiling and were killed mid-run. Split across two requests each half gets
         // its own budget, and a failure in the second half leaves the prep pack already saved.
-        result = await prepareMonthlyTouch(context, touchId, { includeClaude: true });
+        //
+        // Routed through the workflow's research stage so that whichever screen an AM starts from,
+        // the account review is recorded as stage 1 with the sources it reached -- and judged
+        // honestly, rather than reporting success when the analysis half failed.
+        result = await runResearchStage(context, touchId);
         break;
       case "prepare_and_generate":
         // One Generate action produces both halves of the workspace: the preparation
         // pack and the interactive live call guide built from it. The AM scrolls from
         // preparing straight into presenting, so the guide is never a second step.
-        await prepareMonthlyTouch(context, touchId, { includeClaude: true });
+        await runResearchStage(context, touchId);
         {
           // The guide re-reads the touch the prep just persisted, so its copy carries
           // the fresh prep pack too -- keep the response shape prep callers expect.
@@ -183,6 +228,22 @@ export async function POST(
         result = await applyPostMeetingDecisions(context, touchId, {
           tickets: payload.tickets,
           email: payload.email,
+        });
+        break;
+      case "apply_post_meeting_review":
+        result = await applyPostMeetingReview(context, touchId, {
+          nps: payload.nps,
+          npsReason: payload.npsReason,
+          riskTier: payload.riskTier,
+          riskReason: payload.riskReason,
+          tickets: payload.tickets,
+          email: payload.email,
+          ...(payload.riskRegister
+            ? { riskRegister: { decision: payload.riskRegister.decision, entry: payload.riskRegister } }
+            : {}),
+          ...(payload.stakeholderMap
+            ? { stakeholderMap: { decision: payload.stakeholderMap.decision, entry: payload.stakeholderMap } }
+            : {}),
         });
         break;
       case "retry_client_intelligence":
@@ -215,6 +276,14 @@ export async function POST(
       data: result,
     });
   } catch (error) {
+    // An incomplete review is the AM having more to decide, not a bad request. 409 and the list of
+    // what is left keeps the screen's state intact so nothing they typed has to be retyped.
+    if (error instanceof PostMeetingReviewIncompleteError) {
+      return NextResponse.json(
+        { error: error.blockers[0], blockers: error.blockers },
+        { status: 409 },
+      );
+    }
     return NextResponse.json(
       {
         error: error instanceof Error ? error.message : "Monthly touch action failed",

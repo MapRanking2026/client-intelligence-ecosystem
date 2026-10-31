@@ -7,6 +7,11 @@ import type {
   PostTouchNotes,
 } from "@/src/lib/mtos-data";
 import { getServerEnv } from "@/src/lib/server/env";
+import {
+  LOW_SCORE_OBLIGATIONS,
+  RISK_REGISTER_SKIPPED_NOTE,
+  riskRegisterRequired,
+} from "@/src/lib/contracts/post-meeting-review";
 import { getPromptText } from "@/src/lib/server/prompt-store";
 import { writePostNotesToClientBook } from "@/src/lib/server/services/client-book-service";
 import { buildTouchEvidence } from "@/src/lib/server/services/live-call-guide-service";
@@ -129,6 +134,17 @@ export async function generatePostTouchNotes(
       ? `The AM confirmed the score: ${health.nps ?? "none"}/10 — "${health.npsReason}". Reproduce that number and justification exactly.`
       : "The AM has not recorded a score for this touch. Write the NPS line as **NPS / Account Health: pending — AM to provide** and say in the summary that the notes are incomplete until it is filled.",
     `Label the Quarterly Goal line ${quarterLabel(touchDateIso)}.`,
+    // A score of 6 or below requires the Risk Register entry. When the AM declined it, the
+    // obligation does not disappear -- it becomes an open item in the document, said plainly, so
+    // nobody reads the notes as if the client had been logged.
+    ...(riskRegisterRequired(health?.nps ?? null)
+      ? [
+          intelligence?.riskRegisterStatus === "approved"
+            ? "The score is 6 or below and the Risk Register entry was approved and written. Include the Account health / risk block."
+            : `The score is 6 or below, which requires a Risk Register entry, and the AM did not approve one. Include the Account health / risk block and keep this exact open line in it: "**Action:** ${RISK_REGISTER_SKIPPED_NOTE}". Do not write that the client was logged.`,
+          `Also keep these as open actions owned by MR AM: ${LOW_SCORE_OBLIGATIONS.join(" ")}`,
+        ]
+      : []),
     geminiFullNotes
       ? "You are given two views of the call: `transcript` is the verbatim dialogue and the only source of truth, and `geminiFullNotes` is Gemini's automated summary, for orientation only. Where they disagree, the transcript wins."
       : "You are given the verbatim transcript only.",

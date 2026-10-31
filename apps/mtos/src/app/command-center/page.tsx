@@ -141,7 +141,12 @@ export default async function CommandCenterPage() {
           </p>
         </div>
         <div className="card glow" style={{ minWidth: 230, padding: "18px 20px" }}>
-          <div className="stat-label">Portfolio health</div>
+          <Link href="/command-center/v2" className="ilink mb-3 inline-block text-[0.78rem]">
+            Try the new Command Center →
+          </Link>
+          {/* Named for what it is. This gauge shows the average growth-readiness score of the
+              clients that have one -- it is not an overall health figure for the book. */}
+          <div className="stat-label">Average growth score</div>
           <div className="mt-3 flex items-center gap-4">
             <Gauge value={avgGrowth.value ?? 0} />
             <div>

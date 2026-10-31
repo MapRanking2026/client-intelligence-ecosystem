@@ -11,6 +11,7 @@ export const integrationProviderIds = [
   "gohighlevel",
   "google-drive",
   "gmail",
+  "intercom",
   "ahrefs",
   "rank-tracker",
   "geogrid",

@@ -1,3 +1,8 @@
+import type { GoogleMeetingState } from "@/src/lib/contracts/google-meet";
+import type { PrepWorkflowState } from "@/src/lib/contracts/prep-workflow";
+
+export type { PrepWorkflowState };
+
 export type Confidence = "High" | "Medium" | "Low";
 /**
  * "unknown" is a real state, not a default: most ClickUp Health Tracker rows have no health value
@@ -438,6 +443,8 @@ export interface ClickupClientContext {
 }
 
 export interface ClientRecord {
+  /** Explicit attendee addresses for reliable Google Calendar client matching. */
+  googleMeetingEmails?: string[];
   id: string;
   name: string;
   industry: string;
@@ -741,14 +748,26 @@ export type YesNoMaybe = "Yes" | "No" | "maybe";
 export type YesNoKindOf = "Yes" | "No" | "kind of";
 export type RiskTier = "Healthy" | "Low" | "Medium" | "High" | "Critical";
 export type ClientType = "Direct" | "White Label";
-export type CaseStatus = "Watching" | "Working" | "Requested Cancellation" | "Resolved-Healthy";
+export type CaseStatus =
+  | "Watching"
+  | "Working"
+  | "Requested Cancellation"
+  | "Resolved-Healthy"
+  | "Downgraded";
 export type RiskPrimaryCategory =
   | "Communication"
   | "Expectations"
   | "Gen. Business"
   | "Product"
-  | "Onboarding";
-export type CommunicationPreference = "Phone" | "Email" | "Face-to-Face" | "Text/Chat";
+  | "Onboarding"
+  | "Money flow"
+  | "Billing Issue";
+export type CommunicationPreference =
+  | "Phone"
+  | "Email"
+  | "Face-to-Face"
+  | "Text/Chat"
+  | "WhatsApp";
 export type MarketingLiteracy = "Low" | "Medium" | "High";
 
 /** The Risk Register row for an at-risk client (mirrors the ClickUp Risk Register form). */
@@ -1097,7 +1116,37 @@ export const LEAD_TYPE_LABEL: Record<LeadType, string> = {
   manual: "Manual",
 };
 
+/** One agenda segment as the AM actually ran it. */
+export interface LiveSegmentRecord {
+  /** Stable key for the segment, so notes survive the guide being regenerated. */
+  key: string;
+  title: string;
+  /** The AM's own notes. Internal: never shown in the client-facing slides. */
+  notes: string;
+  /** How long the segment was on screen, in seconds. */
+  elapsedSeconds: number;
+}
+
+/**
+ * The live meeting, as it happened.
+ *
+ * The AM's notes and the timings are the two things the old screens lost: the five questions, the
+ * call guide and the client deck each had their own view, and switching between them threw away
+ * anything typed. One record, saved as they go.
+ */
+export interface LiveSession {
+  startedAt: string;
+  updatedAt: string;
+  segments: LiveSegmentRecord[];
+  /** The six steps of the Live Recap & Close the AM has worked through, by step number. */
+  recapStepsDone: number[];
+  /** Notes taken during the close itself -- dates agreed, the next meeting, the follow-up channel. */
+  closeNotes: string;
+}
+
 export interface MonthlyTouchRecord {
+  /** Exact Google room/conference selected for this touch, owned by the connected AM. */
+  googleMeeting?: GoogleMeetingState;
   id: string;
   clientId: string;
   status: "Preparing" | "Ready" | "Live" | "Completed";
@@ -1124,6 +1173,20 @@ export interface MonthlyTouchRecord {
   qaReview?: QaReview;
   /** Latest lead & call verification captured during prep (optional, additive). */
   leadVerification?: LeadVerificationReview;
+  /**
+   * What the AM captured while the meeting was running: their own notes per agenda segment, how
+   * long each segment took, and whether the Live Recap & Close was worked through. Kept so moving
+   * between segments never loses a note, and so the follow-through can read what the AM wrote
+   * rather than only what the recording caught.
+   */
+  liveSession?: LiveSession;
+  /**
+   * The four ordered preparation stages and what each one actually did -- the account review, the
+   * client confirmation email, the structured preparation notes, and the ClickUp filing. Absent on
+   * touches last prepared by the single-action engine; the run-sheet treats that as "not started"
+   * rather than inferring success from the older fields.
+   */
+  prepWorkflow?: PrepWorkflowState;
 }
 
 const clients: ClientRecord[] = [

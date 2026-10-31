@@ -15,7 +15,10 @@
     "check:prompt-store": "tsx scripts/check-prompt-store.ts",
     "check:health-mapping": "tsx scripts/check-clickup-health-mapping.ts",
     "check:transcript-parsing": "tsx scripts/check-transcript-parsing.ts",
-    "check:api-errors": "tsx scripts/check-api-error-messages.ts"
+    "check:api-errors": "tsx scripts/check-api-error-messages.ts",
+    "check:prep-workflow": "tsx scripts/check-prep-workflow.ts",
+    "check:post-meeting-review": "tsx scripts/check-post-meeting-review.ts",
+    "check:google-meet": "tsx scripts/check-google-meet.ts"
   },
   "dependencies": {
     "@cie/engine": "*",

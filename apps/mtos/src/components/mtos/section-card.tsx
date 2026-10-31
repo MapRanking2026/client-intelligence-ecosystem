@@ -20,7 +20,7 @@ export function SectionCard({
       <div className="flex flex-col gap-4 border-b border-white/8 pb-4 md:flex-row md:items-start md:justify-between">
         <div className="space-y-2">
           {eyebrow ? (
-            <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">
+            <p className="card-title">
               {eyebrow}
             </p>
           ) : null}

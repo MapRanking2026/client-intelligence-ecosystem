@@ -370,8 +370,8 @@ const providerDefinitions: ProviderDefinition[] = [
     shortName: "Meet",
     category: "communications",
     authMode: "oauth",
-    description: "Authorize access to meeting link, schedule context, and the Gemini notes Doc so MTOS can load a touch's transcript without a manual paste.",
-    highlight: "Meet link visibility plus automatic transcript retrieval after the call.",
+    description: "Connect your calendar and Meet conference records, retrieve transcripts and recordings, and grant support@mapranking.com Editor access to generated meeting files.",
+    highlight: "Client meeting history, call controls, transcript analysis and automatic support file access.",
     capabilities: [
       "Meet link visibility",
       "Scheduled touch context",
@@ -383,13 +383,14 @@ const providerDefinitions: ProviderDefinition[] = [
     oauth: {
       authUrl: "https://accounts.google.com/o/oauth2/v2/auth",
       tokenUrl: "https://oauth2.googleapis.com/token",
-      // The transcript lives in a Gemini notes Doc that the calendar event points at via
-      // `attachments[]`, so this one connection needs all three reads: calendar to find the
-      // event and its attachment, Drive to resolve/read the file (including shortcuts and
-      // Docs a teammate hosted), and Docs to pull the Transcript TAB on its own.
+      // Existing Meet-generated files were not created by MTOS, so drive.file is insufficient
+      // for unattended sharing. Full Drive access requires Google restricted-scope review.
+      // meetings.space.created controls only rooms created by this application.
       scopes: [
         "https://www.googleapis.com/auth/calendar.readonly",
-        "https://www.googleapis.com/auth/drive.readonly",
+        "https://www.googleapis.com/auth/drive",
+        "https://www.googleapis.com/auth/meetings.space.readonly",
+        "https://www.googleapis.com/auth/meetings.space.created",
         "https://www.googleapis.com/auth/documents.readonly",
       ],
       clientIdEnv: "GOOGLE_INTEGRATIONS_CLIENT_ID",
@@ -458,15 +459,27 @@ const providerDefinitions: ProviderDefinition[] = [
     shortName: "Gmail",
     category: "communications",
     authMode: "oauth",
-    description: "Authorize inbox access so MTOS can reference client communications when preparing and closing touches.",
+    description:
+      "Authorize inbox access so MTOS can reference client communications when preparing and closing touches, and send the AM-approved client agenda email.",
     highlight: "Email conversation context tied to clients and follow-ups.",
-    capabilities: ["Inbox retrieval", "Conversation context", "Thread history reference"],
+    capabilities: [
+      "Inbox retrieval",
+      "Conversation context",
+      "Thread history reference",
+      "Sending AM-approved client emails",
+    ],
     defaultApiBaseUrl: "https://gmail.googleapis.com",
     fields: [],
     oauth: {
       authUrl: "https://accounts.google.com/o/oauth2/v2/auth",
       tokenUrl: "https://oauth2.googleapis.com/token",
-      scopes: ["https://www.googleapis.com/auth/gmail.readonly"],
+      // The send scope is additive: connections authorized before it was added keep working for
+      // reading and are reported as missing a scope, which is what prompts the AM to re-consent.
+      // Nothing is ever sent without the AM's explicit approval of that specific email.
+      scopes: [
+        "https://www.googleapis.com/auth/gmail.readonly",
+        "https://www.googleapis.com/auth/gmail.send",
+      ],
       clientIdEnv: "GOOGLE_INTEGRATIONS_CLIENT_ID",
       clientSecretEnv: "GOOGLE_INTEGRATIONS_CLIENT_SECRET",
       transport: "standard_form",
@@ -474,6 +487,39 @@ const providerDefinitions: ProviderDefinition[] = [
       accessType: "offline",
       prompt: "consent",
       extraAuthorizeParams: { include_granted_scopes: "true" },
+    },
+  },
+  {
+    id: "intercom",
+    name: "Intercom",
+    shortName: "Intercom",
+    category: "communications",
+    authMode: "oauth",
+    description:
+      "Authorize the shared client inbox so MTOS can read a client's Intercom conversations before it says anything about whether an email was sent, answered or left hanging.",
+    highlight: "The inbox the account managers actually answer client email in.",
+    capabilities: [
+      "Contact lookup by email",
+      "Conversation history per client",
+      "Last admin reply and last client message",
+      "Evidence for the Intercom-first email rule",
+    ],
+    defaultApiBaseUrl: "https://api.intercom.io",
+    fields: [],
+    oauth: {
+      // Intercom grants permissions on the app itself rather than through scopes in the authorize
+      // URL, so there is no scope list to request here. The registry's missing-scope check
+      // therefore has nothing to compare, which is correct for this provider: a connection either
+      // reads conversations or it does not, and a refused read is reported as a failed check.
+      authUrl: "https://app.intercom.com/oauth",
+      tokenUrl: "https://api.intercom.io/auth/eagle/token",
+      scopes: [],
+      clientIdEnv: "INTERCOM_CLIENT_ID",
+      clientSecretEnv: "INTERCOM_CLIENT_SECRET",
+      transport: "standard_form",
+      // Intercom access tokens do not expire; there is nothing to refresh and no refresh token is
+      // issued. A revoked app shows up as a failed read, not as an expiring connection.
+      refreshStrategy: "none",
     },
   },
   {

@@ -24,7 +24,6 @@ import {
   ScorecardGrid,
   SeoPerformancePanel,
   AdsPerformancePanel,
-  StrategicActionPanel,
 } from "@/src/components/mtos/prep-pack-sections";
 import { resolveTenantContext } from "@/src/lib/auth/resolve-tenant-context";
 import { getClientMappingView } from "@/src/lib/server/services/client-mappings-service";
@@ -359,8 +358,28 @@ export default async function ClientWorkspacePage({
   );
 
   const prep = touch?.prepPack;
+  // These numbers are a snapshot taken when the preparation last ran, not a live read. Saying so,
+  // with the date, is the difference between an AM quoting a current figure and quoting a figure
+  // from five weeks ago in front of the client.
+  const snapshotDate = prep?.preparedAt ? new Date(prep.preparedAt) : null;
+  const snapshotValid = Boolean(snapshotDate && !Number.isNaN(snapshotDate.getTime()));
   const performance = prep ? (
     <div className="flex flex-col gap-4">
+      <div className="card" style={{ borderLeft: "3px solid var(--accent)" }}>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <div className="card-title">Snapshot, not live data</div>
+            <p className="mt-1.5 text-[0.86rem]" style={{ color: "var(--text-2)" }}>
+              Taken when the preparation last ran for {client.name}
+              {snapshotValid
+                ? ` on ${new Intl.DateTimeFormat("en-US", { dateStyle: "medium", timeStyle: "short" }).format(snapshotDate!)}`
+                : ""}
+              . Nothing here has changed since. Run the preparation again for current numbers.
+            </p>
+          </div>
+          <span className="chip muted">{snapshotValid ? "Historical snapshot" : "Date unknown"}</span>
+        </div>
+      </div>
       <div className="card">
         <div className="card-title mb-4">Business scorecard</div>
         <ScorecardGrid scorecard={prep.businessScorecard} clientId={client.id} />
@@ -372,10 +391,6 @@ export default async function ClientWorkspacePage({
       <div className="card">
         <div className="card-title mb-4">Paid media</div>
         <AdsPerformancePanel ads={prep.adsPerformance} />
-      </div>
-      <div className="card">
-        <div className="card-title mb-4">Strategic action</div>
-        <StrategicActionPanel action={prep.strategicAction} />
       </div>
     </div>
   ) : (

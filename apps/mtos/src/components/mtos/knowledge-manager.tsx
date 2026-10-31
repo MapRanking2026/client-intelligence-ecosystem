@@ -242,7 +242,7 @@ export function KnowledgeManager({ initialDocuments }: KnowledgeManagerProps) {
             type="button"
             onClick={runRetrieve}
             disabled={isPending || !query.trim()}
-            className="inline-flex items-center gap-2 rounded-full border border-white/12 bg-white/4 px-4 py-2 text-sm font-medium text-slate-100 transition hover:bg-white/8 disabled:cursor-not-allowed disabled:opacity-60"
+            className="btn btn-ghost"
           >
             {isPending && pending === "retrieve" ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
             Retrieve
@@ -280,7 +280,7 @@ export function KnowledgeManager({ initialDocuments }: KnowledgeManagerProps) {
               onClick={resyncClickup}
               disabled={isPending}
               title="Re-embed changed pages and prune deleted ones for docs already imported"
-              className="inline-flex items-center gap-2 rounded-full border border-white/12 bg-white/4 px-4 py-2 text-sm font-medium text-slate-100 transition hover:bg-white/8 disabled:cursor-not-allowed disabled:opacity-60"
+              className="btn btn-ghost"
             >
               {isPending && pending === "clickup_resync" ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
               Re-sync now
@@ -289,7 +289,7 @@ export function KnowledgeManager({ initialDocuments }: KnowledgeManagerProps) {
               type="button"
               onClick={loadClickupDocs}
               disabled={isPending}
-              className="inline-flex items-center gap-2 rounded-full border border-white/12 bg-white/4 px-4 py-2 text-sm font-medium text-slate-100 transition hover:bg-white/8 disabled:cursor-not-allowed disabled:opacity-60"
+              className="btn btn-ghost"
             >
               {isPending && pending === "clickup_list" ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Cloud className="h-4 w-4" />}
               Load ClickUp docs
@@ -360,14 +360,14 @@ export function KnowledgeManager({ initialDocuments }: KnowledgeManagerProps) {
       {/* Documents list */}
       <div className="space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">
+          <p className="card-title">
             Stored knowledge ({documents.length})
           </p>
           <button
             type="button"
             onClick={backfill}
             disabled={isPending}
-            className="inline-flex items-center gap-2 rounded-full border border-white/12 bg-white/4 px-4 py-2 text-sm font-medium text-slate-100 transition hover:bg-white/8 disabled:cursor-not-allowed disabled:opacity-60"
+            className="btn btn-ghost"
           >
             {isPending && pending === "backfill" ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
             Backfill from past monthly touches

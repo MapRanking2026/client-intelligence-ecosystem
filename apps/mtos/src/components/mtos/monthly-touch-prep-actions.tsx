@@ -144,61 +144,63 @@ export function MonthlyTouchPrepActions({
   }
 
   return (
-    <div className="space-y-3 rounded-[24px] border border-white/8 bg-black/20 p-4">
-      <div className="space-y-1">
-        <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">
-          Preparation engine
+    <div className="card" style={{ padding: "18px 20px" }}>
+      <div className="card-head">
+        <div className="card-title">Preparation engine</div>
+        <span className={`chip ${claudeStatus === "generated" ? "good" : claudeStatus === "failed" ? "risk" : "muted"}`}>
+          {claudeStatus === "generated" ? "Generated" : claudeStatus === "failed" ? "Failed" : "Not configured"}
+        </span>
+      </div>
+
+      <div className="grid gap-1.5 text-[0.84rem]">
+        <p>
+          <span className="muted">Last prepared:</span> {formatPreparedAt(preparedAt)}
         </p>
-        <p className="text-sm text-slate-200">Last prepared: {formatPreparedAt(preparedAt)}</p>
-        <p className="text-xs text-slate-500">
-          AI status: {claudeStatus === "generated" ? "Generated" : claudeStatus === "failed" ? "Failed" : "Not configured"}
-          {claudeStatus === "generated" && claudeProvider
-            ? ` · via ${PROVIDER_LABEL[claudeProvider] || claudeProvider}`
-            : ""}
-          {` · Live call guide: ${callGuideGenerated ? "ready" : "not generated"}`}
+        <p className="muted text-[0.8rem]">
+          {claudeStatus === "generated" && claudeProvider ? `Written by ${PROVIDER_LABEL[claudeProvider] || claudeProvider}. ` : ""}
+          Live call guide: {callGuideGenerated ? "ready" : "not generated"}.
         </p>
-        <p className="text-xs text-slate-500">
-          Generate builds the preparation and the live call guide together — scroll down to walk from prep
-          into the call.
+        <p className="field-hint">
+          Generate builds the preparation and the live call guide together — scroll down to walk from prep into the call.
+          For the ordered workflow (client email, preparation notes, filing in ClickUp), open the new run-sheet.
         </p>
       </div>
 
-      <div className="flex flex-wrap gap-3">
-        <button
-          type="button"
-          onClick={() => runPrepare("prepare")}
-          disabled={isPending}
-          style={{ color: "#0d1625" }}
-          className="inline-flex items-center gap-2 rounded-full border border-white/12 bg-white px-4 py-2 text-sm font-medium text-[#0d1625] transition hover:bg-[#d7f5ec] disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          {isPending && activeAction === "prepare" ? (
-            <LoaderCircle className="h-4 w-4 animate-spin" />
-          ) : (
-            <RefreshCw className="h-4 w-4" />
-          )}
+      <div className="mt-4 flex flex-wrap gap-2.5">
+        <button type="button" onClick={() => runPrepare("prepare")} disabled={isPending} className="btn btn-ghost">
+          {isPending && activeAction === "prepare" ? <LoaderCircle className="animate-spin" /> : <RefreshCw />}
           Refresh data only
         </button>
         <button
           type="button"
           onClick={() => runPrepare("prepare_and_generate")}
           disabled={isPending}
-          style={{ color: "#0d1625" }}
-          className="inline-flex items-center gap-2 rounded-full border border-[#d7f5ec]/20 bg-[#d7f5ec] px-4 py-2 text-sm font-semibold text-[#0d1625] transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-60"
+          className="btn btn-primary"
         >
           {isPending && activeAction === "prepare_and_generate" ? (
-            <LoaderCircle className="h-4 w-4 animate-spin" />
+            <LoaderCircle className="animate-spin" />
           ) : (
-            <Sparkles className="h-4 w-4" />
+            <Sparkles />
           )}
           {callGuideGenerated ? "Regenerate prep + call guide" : "Generate prep + call guide"}
         </button>
       </div>
 
-      {ai.run ? <AiProgressPanel run={ai.run} elapsed={ai.elapsed} /> : null}
+      {ai.run ? (
+        <div className="mt-3">
+          <AiProgressPanel run={ai.run} elapsed={ai.elapsed} />
+        </div>
+      ) : null}
 
-      {error ? <p className="text-sm text-rose-300">{error}</p> : null}
+      {error ? (
+        <p className="mt-3 rounded-[10px] px-3 py-2.5 text-[0.82rem]" style={{ background: "var(--risk-bg)", color: "var(--risk)" }}>
+          {error}
+        </p>
+      ) : null}
       {!error && claudeStatus === "failed" && claudeError ? (
-        <p className="text-sm text-amber-200">{claudeError}</p>
+        <p className="mt-3 rounded-[10px] px-3 py-2.5 text-[0.82rem]" style={{ background: "var(--watch-bg)", color: "var(--watch)" }}>
+          {claudeError}
+        </p>
       ) : null}
     </div>
   );

@@ -293,6 +293,19 @@
         "version": 1,
         "updatedAt": "2026-10-28T20:10:00.000Z",
         "history": []
+      },
+      {
+        "key": "monthly_touch_prep_document_prompt",
+        "title": "Monthly Touch Preparation Document",
+        "role": "Workflow Agent",
+        "provider": "claude",
+        "difficulty": "difficult",
+        "description": "House layer for the Pre-Monthly Touch Preparation & Agenda document (step 3 of the preparation workflow). The document's section catalogue and evidence rules live in the application and cannot be edited away here; this row is added on top of them, for tone, house wording and anything Javier wants every prep to say. Leave it empty to use the built-in standard alone.",
+        "workflows": [
+          "MT-002 Monthly Touch Preparation",
+          "Preparation notes"
+        ],
+        "prompt": "HOUSE LAYER FOR THE PREPARATION DOCUMENT\nThese notes are added to the built-in document standard. They do not replace the section list, the output\nformat or the evidence rules -- those are part of the workflow itself.\n\nWRITING\nWrite every item as a short self-contained paragraph the AM can act on without asking anyone: which client\nand which call with the date and time in the AM's own zone, what happened, how we know (name the sources\nchecked), why it matters, what to do, and by when. If it is already done, say how to close it out.\nFour to seven short sentences. One idea per sentence. No idioms and no slang.\nNever use internal codes, tracker identifiers, criterion numbers or rubric labels -- say what they mean.\nNumbers always carry their meaning and their period.\nName what went well before what to change. Never shame; these reviews are AI-assisted and the AMs are learning.\n\nCLIENT EMAIL EVIDENCE\nClient email is answered mainly through the shared Intercom inbox, and mail sent that way may not appear in\nGmail at all. Do not state that an email was sent, received, missing or unanswered unless the bundle says\nboth the Intercom inbox and the support@ inbox were read. Say which sources were checked. A missing email is\nonly a finding once both have been checked.\n\nDELIVERY\nEvery win the SEO team ships is reported to the client the same week, with the date it shipped. A win that\nstays in ClickUp does not count for the client -- if one is sitting unreported, put it in the wins section\nwith the date and a line the AM can say."
       }
     ]
   },

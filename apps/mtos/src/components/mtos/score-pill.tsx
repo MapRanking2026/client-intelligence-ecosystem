@@ -29,7 +29,7 @@ export function ScorePill({
   return (
     <div className={cn("rounded-full border px-3 py-2", toneClasses[tone], className)}>
       <div className={cn("flex items-center gap-3", contentClassName)}>
-        <span className={cn("text-[11px] uppercase tracking-[0.24em] text-slate-400", labelClassName)}>
+        <span className={cn("card-title", labelClassName)}>
           {label}
         </span>
         <span className={cn("text-sm font-semibold", valueClassName)}>{value}</span>

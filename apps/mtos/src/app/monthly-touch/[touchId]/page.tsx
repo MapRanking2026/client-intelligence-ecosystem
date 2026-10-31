@@ -1,3 +1,4 @@
+import { GoogleMeetingPanel } from "@/src/components/mtos/google-meeting-panel";
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import type { ReactNode } from "react";
@@ -205,7 +206,13 @@ export default async function MonthlyTouchPage({
               </span>
               <span className={`chip ${touch.status === "Ready" ? "good" : "watch"}`}>{touch.status}</span>
             </div>
-            <Link href={`/monthly-touch/${touch.id}/summary`} className="btn btn-primary btn-sm">
+            <Link href={`/monthly-touch/${touch.id}/v2`} className="btn btn-primary btn-sm">
+              Open the new run-sheet
+            </Link>
+            {/* The after-call action, kept where it was but no longer the page's primary one: it
+                belongs to a meeting that has happened, and on this page the meeting usually has
+                not. The new run-sheet shows the action for the stage the touch is actually in. */}
+            <Link href={`/monthly-touch/${touch.id}/summary`} className="btn btn-ghost btn-sm">
               <CheckCircle2 style={{ width: 16, height: 16 }} />
               Capture &amp; close out
             </Link>
@@ -222,6 +229,8 @@ export default async function MonthlyTouchPage({
           />
         </div>
       </div>
+
+      <GoogleMeetingPanel touchId={touch.id} emails={client.googleMeetingEmails} />
 
       {prepPack ? (
         <div className="mt-4">

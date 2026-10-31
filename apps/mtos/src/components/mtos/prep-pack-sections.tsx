@@ -364,7 +364,7 @@ function HeatmapComparisonCard({ comparison }: { comparison: HeatmapComparison }
         {previous ? (
           <div>
             <HeatmapGridSvg grid={previous} />
-            <p className="mt-1 px-1 text-[11px] uppercase tracking-[0.18em] text-slate-500">
+            <p className="mt-1 px-1 card-title">
               Previous -- {formatScanDate(previous.scanDate)}
             </p>
             <p className="px-1 text-xs text-slate-400">
@@ -545,7 +545,7 @@ export function SeoPerformancePanel({ seo }: { seo: SeoPerformancePack }) {
           {matchedBusinesses.length ? (
             <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
               {matchedBusinesses.map((business) => (
-                <div key={`${business.businessName}-${business.placeId}`} className="rounded-2xl border border-white/8 bg-white/4 p-4">
+                <div key={`${business.businessName}-${business.placeId}`} className="panel">
                   <p className="text-sm font-semibold text-white">{business.businessName}</p>
                   <p className="mt-1 text-xs text-slate-400">{business.address || "Address not on file"}</p>
                   <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-slate-300">
@@ -739,7 +739,7 @@ export function AdsPerformancePanel({ ads }: { ads: AdsPerformancePack[] }) {
   return (
     <div className="grid gap-3 sm:grid-cols-2">
       {(ads ?? []).map((channel) => (
-        <div key={channel.channel} className="rounded-2xl border border-white/8 bg-white/4 p-4">
+        <div key={channel.channel} className="panel">
           <p className="text-sm font-semibold text-white">{channel.channel}</p>
           {channel.connected ? (
             <div className="mt-2 text-sm text-slate-200">

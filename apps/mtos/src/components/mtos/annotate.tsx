@@ -64,7 +64,15 @@ type Rule =
   | { kind: "link"; pattern: string; href: string }
   | { kind: "hl"; pattern: string; tone: AnnoTone };
 
-// Semantic auto-highlight rules — numbers/dates are "important" facts; status words carry sentiment.
+/**
+ * Automatic emphasis is limited to facts: amounts, percentages, positions, dates and measured
+ * quantities. Nothing else.
+ *
+ * It used to also highlight whole classes of ordinary English -- "growth", "gains", "due",
+ * "pending", "consider", "recommend", every form of "improve" and "decline" -- which meant a
+ * paragraph of normal prose came out half-coloured and the emphasis stopped meaning anything. The
+ * numbers are what an AM scans for mid-call, so the numbers are what gets marked.
+ */
 const HL_RULES: { pattern: string; tone: AnnoTone }[] = [
   { pattern: "\\$\\d[\\d,]*(?:\\.\\d+)?\\s?(?:[KkMm]|thousand|million|billion)?", tone: "important" }, // money
   { pattern: "\\b\\d+(?:\\.\\d+)?%", tone: "important" }, // percentages
@@ -75,21 +83,12 @@ const HL_RULES: { pattern: string; tone: AnnoTone }[] = [
     tone: "important",
   }, // Aug 30, 2026
   { pattern: "\\b\\d{1,2}/\\d{1,2}(?:/\\d{2,4})?\\b", tone: "important" },
-  { pattern: "\\b\\d+\\s+days?\\b", tone: "important" },
+  // A number with the thing it counts -- "18 calls", "3 booked jobs", "12 days". The unit is
+  // required, so section numbers and list indices are left alone.
   {
     pattern:
-      "\\b(declin(?:e|ed|ing)|decreas(?:e|ed|ing)|drop(?:ped|ping)?|fell|falling|lost|losing|missed|missing|overdue|unresolved|delayed?|stalled|paused|fail(?:ed|ing)?|blocked|at[\\s-]risk|churn(?:ing|ed)?)\\b",
-    tone: "critical",
-  },
-  {
-    pattern:
-      "\\b(improv(?:e|ed|ing)|increas(?:e|ed|ing)|grew|grow(?:ing|th)|gain(?:ed|ing|s)?|complet(?:e|ed)|resolv(?:e|ed)|approv(?:e|ed)|publish(?:ed)?|launch(?:ed)?|won|healthy|on[\\s-]track|ahead)\\b",
-    tone: "positive",
-  },
-  { pattern: "\\b(deadline|due|awaiting|pending|upcoming|remember|scheduled)\\b", tone: "important" },
-  {
-    pattern: "\\b(recommend(?:ation|ed|s)?|opportunit(?:y|ies)|next step|strateg(?:y|ic)|suggest(?:ed|ion)?|consider)\\b",
-    tone: "info",
+      "\\b\\d[\\d,]*(?:\\.\\d+)?\\s+(?:booked\\s+)?(?:calls?|leads?|jobs?|reviews?|clicks?|views?|searches|conversions?|visits?|sessions?|impressions?|photos?|posts?|keywords?|check-?ins?|tickets?|days?|weeks?|months?|hours?)\\b",
+    tone: "important",
   },
 ];
 
@@ -101,20 +100,23 @@ function buildRules(options: RichOptions): Rule[] {
     .filter((c) => c.name && c.name.length > 2)
     .forEach((c) => rules.push({ kind: "link", pattern: escapeRegExp(c.name), href: `/clients/${c.id}` }));
 
+  // Only terms that genuinely name the thing the link goes to. The vague ones that used to be here
+  // -- "website", "visibility", "SEO", "ranking", "scorecard", "expansion", "opportunity" -- turned
+  // ordinary sentences into a field of links, several of which went somewhere unrelated to the
+  // sentence they were in ("their website is slow" led to the performance tab).
   const keyword: [string[], string][] = [];
   if (clientId) {
     keyword.push([["Google Business Profile", "GBP"], `/clients/${clientId}?tab=performance`]);
     keyword.push([["Google Ads", "Local Services Ads", "LSA"], `/clients/${clientId}?tab=performance`]);
     keyword.push([
-      ["share of local voice", "share of voice", "map pack", "map-pack", "rankings", "ranking", "visibility", "SEO", "top-3", "scorecard", "website"],
+      ["share of local voice", "share of voice", "map pack", "map-pack", "Map Check-Ins"],
       `/clients/${clientId}?tab=performance`,
     ]);
-    keyword.push([["missed calls", "lead quality", "leads", "call quality"], `/clients/${clientId}?tab=leads`]);
-    keyword.push([["commitments", "commitment", "promises"], `/clients/${clientId}?tab=promises`]);
-    keyword.push([["opportunities", "opportunity", "upsell", "expansion"], `/clients/${clientId}?tab=intelligence`]);
+    keyword.push([["missed calls", "lead quality", "call quality"], `/clients/${clientId}?tab=leads`]);
+    keyword.push([["open commitments", "Commitments"], `/clients/${clientId}?tab=promises`]);
   } else {
-    keyword.push([["opportunities", "opportunity"], `/opportunities`]);
-    keyword.push([["commitments", "promises"], `/commitments`]);
+    keyword.push([["Opportunities"], `/opportunities`]);
+    keyword.push([["Commitments"], `/commitments`]);
     keyword.push([["Call Intelligence"], `/calls`]);
   }
   keyword.forEach(([terms, href]) => terms.forEach((t) => rules.push({ kind: "link", pattern: escapeRegExp(t), href })));

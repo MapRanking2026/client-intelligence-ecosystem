@@ -328,6 +328,16 @@ async function analyzeWithClaude(
     `description which business the work is for (name the business "${client.name}"), so whoever picks`,
     "it up knows the client without extra digging.",
     ...sourceDirective,
+    ...(touch.liveSession
+      ? [
+          "AM LIVE NOTES: `accountManagerLiveNotes` is what the account manager typed during the call.",
+          "Use it to pick up dates, numbers and commitments the recording may not have caught, and to",
+          "see what they agreed in the close. It is the AM's own record, not the client's words: never",
+          "quote it as something the client said, and where it disagrees with the transcript, the",
+          "transcript wins.",
+          "",
+        ]
+      : []),
     "",
     JSON.stringify(
       {
@@ -341,6 +351,21 @@ async function analyzeWithClaude(
         touchExecutiveBrief: touch.executiveBrief,
         touchWins: touch.wins,
         touchRisks: touch.risks,
+        // What the AM typed while the call was running, per agenda segment, plus what they wrote
+        // down during the close. Treated as the AM's own record: it catches the dates and numbers a
+        // client said off-mic or in passing, which the recording often misses. It is not a
+        // substitute for the transcript, and nothing from it is attributed to the client as a quote.
+        ...(touch.liveSession
+          ? {
+              accountManagerLiveNotes: {
+                segments: touch.liveSession.segments
+                  .filter((segment) => segment.notes.trim())
+                  .map((segment) => ({ segment: segment.title, notes: segment.notes })),
+                closeNotes: touch.liveSession.closeNotes,
+                recapStepsCompleted: touch.liveSession.recapStepsDone,
+              },
+            }
+          : {}),
         // Split so the model can weigh the two sources differently; geminiFullNotes is absent
         // for a hand-pasted transcript, which is the common case for Zoom calls.
         ...(geminiFullNotes ? { geminiFullNotes } : {}),
@@ -362,6 +387,28 @@ async function analyzeWithClaude(
 }
 
 export async function analyzePostMeetingTranscript(context: TenantContext, touchId: string, transcript: string) {
+  const db = getFirebaseAdminDb();
+  if (!db) throw new Error("Firebase Admin must be configured before post-meeting analysis can run");
+  const source = getMtosDataSource(context);
+  const touch = await source.getMonthlyTouchById(touchId);
+  if (!touch || !await source.getClientById(touch.clientId)) throw new Error("Monthly touch is not available to your account");
+  const ref = db.doc(monthlyTouchPath(context.tenantId, touchId));
+  const lease = nanoid();
+  await db.runTransaction(async (tx) => {
+    const current = (await tx.get(ref)).data();
+    if ((current?.meetingAnalysisLeaseUntil || 0) > Date.now()) throw new Error("Transcript analysis is already running. Try again shortly.");
+    tx.update(ref, { meetingAnalysisLease: lease, meetingAnalysisLeaseUntil: Date.now() + 15 * 60_000 });
+  });
+  try { return await analyzePostMeetingTranscriptUnlocked(context, touchId, transcript); }
+  finally {
+    await db.runTransaction(async (tx) => {
+      const current = (await tx.get(ref)).data();
+      if (current?.meetingAnalysisLease === lease) tx.update(ref, { meetingAnalysisLeaseUntil: 0 });
+    });
+  }
+}
+
+async function analyzePostMeetingTranscriptUnlocked(context: TenantContext, touchId: string, transcript: string) {
   const trimmedTranscript = transcript.trim();
   if (trimmedTranscript.length < 40) {
     throw new Error("Paste the full meeting transcript (at least a few sentences) before analyzing.");

@@ -50,6 +50,11 @@ import { listPrepAdditions } from "@/src/lib/server/services/section-notes-servi
 import { resolveMeetingFormat, buildDecisionsTogether, buildVarietyContext, recordTouchHistory, type VarietyContext } from "@/src/lib/server/services/meeting-variety-service";
 import { retrieveKnowledge } from "@/src/lib/server/services/knowledge-service";
 import { getPromptText } from "@/src/lib/server/prompt-store";
+import {
+  computeConfidence,
+  computeReadiness,
+  deriveTouchStatus,
+} from "@/src/lib/server/services/prep-readiness-service";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -1409,33 +1414,6 @@ function buildDeterministicRecommendations(
   return recommendations;
 }
 
-function computeReadinessScore(
-  touch: MonthlyTouchRecord,
-  openCommitments: CommitmentRecord[],
-  opportunities: OpportunityRecord[],
-  sources: MonthlyTouchPrepPack["integrationSources"],
-  hasClaudeOutput: boolean,
-) {
-  const score =
-    58 +
-    Math.min(sources.length * 6, 18) +
-    (touch.scheduledAt ? 10 : 0) +
-    Math.min(openCommitments.length * 2, 10) +
-    Math.min(opportunities.length * 3, 9) +
-    (hasClaudeOutput ? 5 : 0);
-
-  return clamp(Math.round(score), 55, 98);
-}
-
-function computeConfidenceScore(client: ClientRecord, hasClaudeOutput: boolean) {
-  // Unassessed scores contribute a neutral midpoint rather than a zero, so an unassessed client does
-  // not read as low-confidence purely for lacking a ClickUp health label.
-  const relationship = client.relationshipScore ?? 65;
-  const health = client.healthScore ?? 65;
-  const score = Math.round(relationship * 0.65 + health * 0.35 + (hasClaudeOutput ? 3 : 0));
-  return clamp(score, 55, 98);
-}
-
 function stripUndefinedDeep<T>(value: T): T {
   if (Array.isArray(value)) {
     return value.map((item) => stripUndefinedDeep(item)).filter((item) => item !== undefined) as T;
@@ -1949,7 +1927,6 @@ export async function prepareMonthlyTouch(
 
   const derivedOpportunities = buildOpportunities(client, opportunities);
   const derivedCommitments = buildCommitmentList(commitments);
-  const hasClaudeOutput = claudeState.status === "generated";
 
   // Fold in the AM's "add anything we missed" notes so the regenerated five questions
   // reflect them: what happened → wins, what caused it → risks, opportunities,
@@ -1961,11 +1938,8 @@ export async function prepareMonthlyTouch(
     executiveBrief = `${executiveBrief}\n\nAdded by the account manager:\n${prepAdditions.brief.map((t) => `- ${t}`).join("\n")}`;
   }
 
-  const updatedTouch: MonthlyTouchRecord = stripUndefinedDeep({
+  const withFindings: MonthlyTouchRecord = stripUndefinedDeep({
     ...touch,
-    status: touch.status === "Live" || touch.status === "Completed" ? touch.status : "Ready",
-    readinessScore: computeReadinessScore(touch, openCommitments, opportunities, integrationSources, hasClaudeOutput),
-    confidenceScore: computeConfidenceScore(client, hasClaudeOutput),
     executiveBrief,
     agenda,
     wins: wins.length ? wins : touch.wins,
@@ -1983,6 +1957,20 @@ export async function prepareMonthlyTouch(
     },
     leadVerification,
     updatedAt: getNowIso(),
+  });
+
+  // Readiness, confidence and the status are derived from what the preparation workflow has
+  // actually achieved, not from how complete the inputs look. This used to set the touch to "Ready"
+  // on every run with a readiness score floored at 55, which is why the list could show a touch as
+  // Ready at 94 while the panel beside it said "Not prepared yet". Running the data pulls is one of
+  // four required steps; the score says so.
+  const readiness = computeReadiness(withFindings);
+  const confidence = computeConfidence(withFindings);
+  const updatedTouch: MonthlyTouchRecord = stripUndefinedDeep({
+    ...withFindings,
+    readinessScore: readiness.score ?? 0,
+    confidenceScore: confidence.score ?? 0,
+    status: deriveTouchStatus(withFindings, readiness),
   });
 
   await db.doc(monthlyTouchPath(context.tenantId, touch.id)).set(updatedTouch, { merge: true });

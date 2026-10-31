@@ -80,7 +80,7 @@ function ProviderMappingBlock({
                 <p className="truncate text-sm text-slate-200">{candidate?.label || id}</p>
                 {candidate?.detail ? <p className="truncate text-xs text-slate-500">{candidate.detail}</p> : null}
               </div>
-              <span className="shrink-0 rounded-full border border-white/10 bg-white/8 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-300">
+              <span className="chip shrink-0">
                 Auto
               </span>
             </div>
@@ -98,7 +98,7 @@ function ProviderMappingBlock({
                   {candidate?.detail ? <p className="truncate text-xs text-emerald-200/60">{candidate.detail}</p> : null}
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
-                  <span className="rounded-full border border-emerald-400/25 bg-emerald-500/12 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-emerald-200">
+                  <span className="chip good">
                     Manual
                   </span>
                   <button
@@ -214,7 +214,7 @@ export function ClientProfileMappings({ clientId, providers }: ClientProfileMapp
           type="button"
           onClick={save}
           disabled={!isDirty || isPending}
-          className="inline-flex items-center gap-2 rounded-full border border-white/12 bg-white px-4 py-2.5 text-sm font-semibold text-[#0c1524] transition hover:bg-[#d7f5ec] disabled:cursor-not-allowed disabled:opacity-40"
+          className="btn btn-primary"
         >
           {isPending ? <LoaderCircle className="h-4 w-4 animate-spin" /> : saved ? <Check className="h-4 w-4" /> : null}
           {saved && !isDirty ? "Saved" : "Save mappings"}

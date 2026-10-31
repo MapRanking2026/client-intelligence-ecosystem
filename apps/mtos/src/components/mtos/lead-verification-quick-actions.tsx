@@ -88,7 +88,7 @@ export function LeadVerificationQuickActions({ clientId, initialReview }: LeadVe
     <div className="space-y-4 rounded-[24px] border border-white/8 bg-black/20 p-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">
+          <p className="card-title">
             Quick verify
           </p>
           <p className="mt-1 text-xs text-slate-500">
@@ -99,8 +99,8 @@ export function LeadVerificationQuickActions({ clientId, initialReview }: LeadVe
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <label className="inline-flex items-center gap-2 rounded-full border border-white/12 bg-white/4 px-3 py-2 text-xs text-slate-300">
-            <span className="uppercase tracking-[0.14em] text-slate-500">Period</span>
+          <label className="chip">
+            <span className="card-title">Period</span>
             <select
               value={windowPreset}
               onChange={(event) => setWindowPreset(event.target.value as LeadWindowPreset)}
@@ -127,7 +127,7 @@ export function LeadVerificationQuickActions({ clientId, initialReview }: LeadVe
       </div>
 
       {windowPreset === "custom" ? (
-        <div className="inline-flex items-center gap-1.5 rounded-full border border-white/12 bg-white/4 px-3 py-1.5 text-xs text-slate-300">
+        <div className="chip">
           <input
             type="date"
             value={customSince}
@@ -191,7 +191,7 @@ export function LeadVerificationQuickActions({ clientId, initialReview }: LeadVe
 
       <Link
         href={`/clients/${clientId}/lead-verification`}
-        className="inline-flex items-center gap-2 rounded-full border border-white/12 bg-white/4 px-4 py-2 text-sm font-medium text-slate-100 transition hover:bg-white/8"
+        className="btn btn-ghost"
       >
         Open full verification
         <ArrowRight className="h-4 w-4" />
@@ -220,7 +220,7 @@ function SummaryPill({
   return (
     <div className={`rounded-2xl border px-4 py-3 text-center ${toneClass}`}>
       <p className="text-2xl font-semibold">{value}</p>
-      <p className="mt-1 text-[11px] uppercase tracking-[0.18em] opacity-80">{label}</p>
+      <p className="mt-1 card-title">{label}</p>
     </div>
   );
 }

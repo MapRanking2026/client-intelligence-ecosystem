@@ -116,8 +116,8 @@ export function LeadVerificationTable({
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-2">
-          <label className="inline-flex items-center gap-2 rounded-full border border-white/12 bg-white/4 px-3 py-2 text-xs text-slate-300">
-            <span className="uppercase tracking-[0.14em] text-slate-500">Period</span>
+          <label className="chip">
+            <span className="card-title">Period</span>
             <select
               value={windowPreset}
               onChange={(event) => setWindowPreset(event.target.value as LeadWindowPreset)}
@@ -131,7 +131,7 @@ export function LeadVerificationTable({
             </select>
           </label>
           {windowPreset === "custom" ? (
-            <div className="inline-flex items-center gap-1.5 rounded-full border border-white/12 bg-white/4 px-3 py-1.5 text-xs text-slate-300">
+            <div className="chip">
               <input
                 type="date"
                 value={customSince}
@@ -154,7 +154,7 @@ export function LeadVerificationTable({
             onClick={() => post({ action: "refresh", window: buildWindow() }, "refresh")}
             disabled={isPending || customIncomplete}
             style={{ color: "#0d1625" }}
-            className="inline-flex items-center gap-2 rounded-full border border-[#d7f5ec]/20 bg-[#d7f5ec] px-4 py-2 text-sm font-semibold text-[#0d1625] transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-60"
+            className="btn btn-primary"
           >
             {isPending && pendingAction === "refresh" ? (
               <LoaderCircle className="h-4 w-4 animate-spin" />
@@ -166,7 +166,7 @@ export function LeadVerificationTable({
           <button
             type="button"
             onClick={() => setShowCompare((value) => !value)}
-            className="inline-flex items-center gap-2 rounded-full border border-white/12 bg-white/4 px-4 py-2 text-sm font-medium text-slate-100 transition hover:bg-white/8"
+            className="btn btn-ghost"
           >
             <ClipboardCheck className="h-4 w-4" />
             Compare a list
@@ -174,7 +174,7 @@ export function LeadVerificationTable({
           <button
             type="button"
             onClick={() => setShowManual((value) => !value)}
-            className="inline-flex items-center gap-2 rounded-full border border-white/12 bg-white/4 px-4 py-2 text-sm font-medium text-slate-100 transition hover:bg-white/8"
+            className="btn btn-ghost"
           >
             <Plus className="h-4 w-4" />
             Add / paste leads
@@ -231,7 +231,7 @@ export function LeadVerificationTable({
         <div className="overflow-x-auto rounded-[24px] border border-white/8 bg-black/20">
           <table className="w-full min-w-[900px] text-left text-sm">
             <thead>
-              <tr className="text-[11px] uppercase tracking-[0.18em] text-slate-500">
+              <tr className="card-title">
                 <th className="px-4 py-3 font-medium">Lead</th>
                 <th className="px-4 py-3 font-medium">Received</th>
                 <th className="px-4 py-3 font-medium">Channel</th>
@@ -250,7 +250,7 @@ export function LeadVerificationTable({
                     <p className="text-xs text-slate-400">{lead.phone || lead.email || "No contact info"}</p>
                     {lead.reason ? <p className="mt-1 text-xs text-slate-500">{lead.reason}</p> : null}
                     {lead.manual ? (
-                      <span className="mt-1 inline-block rounded-full bg-white/8 px-2 py-0.5 text-[10px] uppercase tracking-[0.14em] text-slate-400">
+                      <span className="chip mt-1">
                         Manual
                       </span>
                     ) : null}
@@ -347,7 +347,7 @@ function FilterSelect({
       <select
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        className="rounded-full border border-white/12 bg-black/30 px-3 py-1.5 text-sm text-slate-100 outline-none focus:border-white/30"
+        className="input"
       >
         {options.map(([optionValue, optionLabel]) => (
           <option key={optionValue} value={optionValue} className="bg-slate-900">
@@ -441,7 +441,7 @@ function ManualLeadPanel({ onSubmit, disabled }: { onSubmit: (rows: ManualRow[])
             setText("");
           }}
           style={{ color: "#0d1625" }}
-          className="inline-flex items-center gap-2 rounded-full border border-white/12 bg-white px-4 py-2 text-sm font-semibold text-[#0d1625] transition hover:bg-[#d7f5ec] disabled:cursor-not-allowed disabled:opacity-60"
+          className="btn btn-primary"
         >
           Add {rows.length || ""} lead{rows.length === 1 ? "" : "s"}
         </button>
@@ -695,12 +695,12 @@ function CompareListPanel({
           onClick={() => runCompare()}
           disabled={!text.trim()}
           style={{ color: "#0d1625" }}
-          className="inline-flex items-center gap-2 rounded-full border border-[#d7f5ec]/20 bg-[#d7f5ec] px-4 py-2 text-sm font-semibold text-[#0d1625] transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-60"
+          className="btn btn-primary"
         >
           <ClipboardCheck className="h-4 w-4" />
           Compare
         </button>
-        <label className="inline-flex cursor-pointer items-center gap-2 rounded-full border border-white/12 bg-white/4 px-4 py-2 text-sm font-medium text-slate-100 transition hover:bg-white/8">
+        <label className="btn btn-ghost">
           <Upload className="h-4 w-4" />
           Upload .csv
           <input
@@ -739,10 +739,10 @@ function CompareListPanel({
               <span className="font-semibold text-emerald-200">{foundCount}</span> of {rows.length} found in
               GoHighLevel · <span className="font-semibold text-amber-200">{notFoundIndexes.length}</span> not found
             </p>
-            <div className="overflow-x-auto rounded-[20px] border border-white/8 bg-black/20">
+            <div className="table-scroll">
               <table className="w-full min-w-[560px] text-left text-sm">
                 <thead>
-                  <tr className="text-[11px] uppercase tracking-[0.18em] text-slate-500">
+                  <tr className="card-title">
                     <th className="px-4 py-3 font-medium">Your row</th>
                     <th className="px-4 py-3 font-medium">Result</th>
                     <th className="px-4 py-3 font-medium">Add</th>
@@ -794,7 +794,7 @@ function CompareListPanel({
               onClick={addSelected}
               disabled={disabled || selected.size === 0}
               style={{ color: "#0d1625" }}
-              className="inline-flex items-center gap-2 rounded-full border border-white/12 bg-white px-4 py-2 text-sm font-semibold text-[#0d1625] transition hover:bg-[#d7f5ec] disabled:cursor-not-allowed disabled:opacity-60"
+              className="btn btn-primary"
             >
               <Plus className="h-4 w-4" />
               Add {selected.size || ""} selected as manual lead{selected.size === 1 ? "" : "s"}

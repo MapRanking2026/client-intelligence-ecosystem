@@ -477,3 +477,135 @@ a { color: inherit; text-decoration: none; }
 /* Let the popover escape clipping ancestors only while it is visible. */
 .insight:has(.hint-pop.on), .card:has(.hint-pop.on), .table-scroll:has(.hint-pop.on) { overflow: visible; }
 [data-hints="preview"] .insight:has(.hint-pop), [data-hints="preview"] .card:has(.hint-pop), [data-hints="preview"] .table-scroll:has(.hint-pop) { overflow: visible; }
+
+/* ============================================================================
+   §10 — Form controls, workflow stages and document prose
+   Added so the preparation workflow, the run-sheet and the components that still
+   carried their own dark styling share one set of inputs, labels and headings
+   instead of each inventing its own.
+   ============================================================================ */
+
+/* ---------- Form controls ---------- */
+.field { display: flex; flex-direction: column; gap: 6px; }
+.field-label { font-size: 0.78rem; font-weight: 600; color: var(--text); }
+.field-hint { font-size: 0.76rem; color: var(--slate-400); line-height: 1.5; }
+.input, .textarea, .select {
+  width: 100%;
+  font: inherit;
+  font-size: 0.86rem;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--hair-strong);
+  border-radius: var(--r-md);
+  padding: 9px 12px;
+  transition: border-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
+}
+.textarea { line-height: 1.6; resize: vertical; min-height: 120px; }
+.input::placeholder, .textarea::placeholder { color: var(--slate-500); }
+.input:focus, .textarea:focus, .select:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.input:disabled, .textarea:disabled, .select:disabled { background: var(--surface-2); color: var(--slate-400); cursor: not-allowed; }
+.btn:disabled { opacity: 0.55; cursor: not-allowed; }
+/* Visible focus for keyboard users on every interactive surface. */
+.btn:focus-visible, .ilink:focus-visible, .stage-step:focus-visible, .seg-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.mono { font-family: var(--font-code); font-size: 0.8rem; }
+
+/* ---------- Five-stage progress indicator ---------- */
+.stage-track { display: flex; align-items: stretch; gap: 8px; flex-wrap: wrap; }
+.stage-step {
+  flex: 1 1 140px;
+  min-width: 132px;
+  text-align: left;
+  padding: 11px 13px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--hair);
+  background: var(--surface-2);
+  color: var(--slate-300);
+  display: flex; flex-direction: column; gap: 3px;
+  transition: all var(--dur) var(--ease);
+}
+.stage-step .stage-name { font-size: 0.84rem; font-weight: 650; color: var(--text-2); }
+.stage-step .stage-sub { font-size: 0.72rem; color: var(--slate-400); }
+.stage-step.is-done { background: var(--good-bg); border-color: transparent; }
+.stage-step.is-done .stage-name { color: var(--good); }
+.stage-step.is-current { background: var(--surface); border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+.stage-step.is-current .stage-name { color: var(--accent); }
+.stage-step.is-blocked { opacity: 0.68; }
+
+/* ---------- Ordered workflow steps ---------- */
+.wf-step { border: 1px solid var(--hair); border-radius: var(--r-lg); background: var(--surface); padding: 18px 20px; }
+.wf-step + .wf-step { margin-top: 12px; }
+.wf-step.is-blocked { background: var(--surface-2); }
+.wf-step.is-failed { border-color: color-mix(in srgb, var(--risk) 45%, var(--hair)); }
+.wf-step-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
+.wf-num {
+  width: 26px; height: 26px; flex-shrink: 0;
+  border-radius: 50%;
+  display: grid; place-items: center;
+  font-size: 0.76rem; font-weight: 700;
+  background: var(--surface-3); color: var(--slate-300);
+}
+.wf-step.is-done .wf-num { background: var(--good-bg); color: var(--good); }
+.wf-step.is-current .wf-num { background: var(--accent); color: var(--on-accent); }
+.wf-step.is-failed .wf-num { background: var(--risk-bg); color: var(--risk); }
+
+/* ---------- Segmented control ---------- */
+.seg { display: inline-flex; padding: 3px; gap: 3px; background: var(--surface-2); border: 1px solid var(--hair); border-radius: var(--r-md); }
+.seg-btn { padding: 6px 13px; border-radius: var(--r-sm); font-size: 0.8rem; font-weight: 600; color: var(--slate-300); transition: all var(--dur) var(--ease); }
+.seg-btn.on { background: var(--surface); color: var(--text); box-shadow: var(--sh-sm); }
+
+/* ---------- Generated document prose ---------- */
+.doc-prose { color: var(--text-2); font-size: 0.89rem; line-height: 1.65; }
+.doc-prose h1 { font-size: var(--t-h3); font-weight: 700; color: var(--text); margin: 0 0 10px; letter-spacing: -0.015em; }
+.doc-prose h2 { font-size: var(--t-h4); font-weight: 660; color: var(--text); margin: 22px 0 8px; }
+.doc-prose h3 { font-size: 0.9rem; font-weight: 660; color: var(--text); margin: 16px 0 6px; }
+.doc-prose p { margin: 0 0 10px; }
+.doc-prose ul, .doc-prose ol { margin: 0 0 10px; padding-left: 20px; }
+.doc-prose li { margin-bottom: 5px; }
+.doc-prose li::marker { color: var(--slate-400); }
+.doc-prose strong { color: var(--text); font-weight: 650; }
+.doc-prose em { color: var(--slate-400); font-style: italic; }
+.doc-prose blockquote { margin: 0 0 12px; padding: 11px 14px; border-left: 3px solid var(--accent); background: var(--accent-soft); border-radius: 0 var(--r-sm) var(--r-sm) 0; color: var(--accent-ink); }
+.doc-prose blockquote p:last-child { margin-bottom: 0; }
+.doc-prose code { font-family: var(--font-code); font-size: 0.82em; background: var(--surface-2); padding: 1px 5px; border-radius: 4px; }
+.doc-prose hr { border: 0; border-top: 1px solid var(--hair); margin: 20px 0; }
+
+/* ---------- Live meeting mode ---------- */
+.live-shell { position: fixed; inset: 0; z-index: 80; background: var(--bg); display: grid; grid-template-rows: auto 1fr; }
+.live-bar { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 12px 18px; border-bottom: 1px solid var(--hair); background: var(--surface); flex-wrap: wrap; }
+.live-body { display: grid; grid-template-columns: 232px minmax(0, 1fr); min-height: 0; }
+.live-rail { border-right: 1px solid var(--hair); background: var(--surface-2); overflow-y: auto; padding: 12px; }
+.live-main { overflow-y: auto; padding: 22px 26px 40px; min-width: 0; }
+.live-seg-btn { width: 100%; text-align: left; padding: 10px 12px; border-radius: var(--r-md); display: flex; flex-direction: column; gap: 2px; border: 1px solid transparent; transition: all var(--dur) var(--ease); }
+.live-seg-btn:hover { background: var(--surface); }
+.live-seg-btn.on { background: var(--surface); border-color: var(--accent); }
+.live-seg-btn .live-seg-name { font-size: 0.83rem; font-weight: 640; color: var(--text); }
+.live-seg-btn .live-seg-meta { font-size: 0.71rem; color: var(--slate-400); }
+.live-timer { font-family: var(--font-code); font-variant-numeric: tabular-nums; font-size: 1.05rem; font-weight: 600; color: var(--text); }
+.live-timer.is-over { color: var(--risk); }
+@media (max-width: 860px) {
+  .live-body { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
+  .live-rail { border-right: 0; border-bottom: 1px solid var(--hair); max-height: 36vh; }
+  .live-main { padding: 16px; }
+}
+
+/* ---------- Board view ---------- */
+.board { display: grid; gap: 12px; grid-template-columns: repeat(5, minmax(210px, 1fr)); align-items: start; overflow-x: auto; padding-bottom: 6px; }
+.board-col { background: var(--surface-2); border: 1px solid var(--hair); border-radius: var(--r-lg); padding: 12px; min-width: 210px; }
+.board-col-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
+.board-col-title { font-size: 0.74rem; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: var(--slate-400); }
+.board-card { background: var(--surface); border: 1px solid var(--hair); border-radius: var(--r-md); padding: 12px; box-shadow: var(--sh-sm); display: block; }
+.board-card + .board-card { margin-top: 9px; }
+.board-card:hover { border-color: var(--hair-strong); box-shadow: var(--sh-md); }
+
+/* ---------- Inner panel ---------- */
+/* One definition for the boxes nested inside a card, so the restyled components stop
+   stacking two and three shades of grey to separate one block of text from the next. */
+.panel { border: 1px solid var(--hair); background: var(--surface-2); border-radius: var(--r-md); padding: 14px 16px; }
+.panel-tight { border: 1px solid var(--hair); background: var(--surface-2); border-radius: var(--r-sm); padding: 9px 12px; }

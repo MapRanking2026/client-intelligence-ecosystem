@@ -807,6 +807,32 @@ export async function fetchMonthlyTouchTranscript(
     return { status: "failed", reason: "Monthly touch not found." };
   }
 
+  // Exact conference retrieval replaces the historical broad title/date fallback.
+  // A native Meet API failure must never silently select another client's notes.
+  try {
+    const { syncGoogleMeeting } = await import("./google-meet-service");
+    const result = await syncGoogleMeeting(context, touchId, false);
+    const file = result.artifacts?.find((artifact) => artifact.kind === "transcript");
+    return {
+      status: "transcript" in result && result.transcript ? "loaded" : "artifact_not_ready",
+      reason: result.message || "Waiting for this conference's transcript.",
+      ...("transcript" in result && typeof result.transcript === "string" ? { transcript: result.transcript } : {}),
+      ...(file ? { doc: { id: file.id, title: "Google Meet transcript", url: file.url } } : {}),
+      sections: { fullNotes: false, transcript: "transcript" in result && Boolean(result.transcript) },
+    };
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : "Meeting lookup failed.";
+    return { status: /[Rr]econnect/.test(reason) ? "needs_reconsent" : /[Cc]onnect Google/.test(reason) ? "not_connected" : "failed", reason };
+  }
+}
+
+/** Legacy Gemini parsing retained for existing fixture checks and explicit maintenance tools.
+ * Interactive and automatic lookups above no longer guess from Drive titles.
+ */
+export async function fetchLegacyGeminiTranscript(context: TenantContext, touchId: string): Promise<MeetingTranscriptLookup> {
+  const dataSource = getMtosDataSource(context);
+  const touch = await dataSource.getMonthlyTouchById(touchId);
+  if (!touch) return { status: "failed", reason: "Monthly touch not found." };
   const token = await resolveAccessToken(context);
   if (!token.ok) {
     return token.lookup;

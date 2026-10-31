@@ -234,7 +234,7 @@ async function generateClientHealthSuggestion(
     "Return a JSON object with exactly these keys:",
     "  suggestedNps: integer 0-10, or null when the transcript gives nothing to read it from.",
     "  npsStatedByClient: true only if the client said a number out loud; false if you inferred it.",
-    "  suggestedNpsReason: ONE sentence, grounded in what the client actually said.",
+    "  suggestedNpsReason: a short line in the AM's voice, grounded in what the client actually said.",
     '  npsReasonsByScore: an object keyed "0" through "10". For EVERY score, one sentence the AM',
     "    could use if they pick that score. Ground each one in this call's evidence; where the",
     "    evidence does not support a score, say plainly what would have to be true for it instead",
@@ -243,8 +243,28 @@ async function generateClientHealthSuggestion(
     '  riskReasonsByTier: an object keyed "Healthy","Low","Medium","High","Critical" -- one sentence',
     "    per tier the AM could use if they set that tier instead, grounded the same way.",
     "",
-    "Never invent a score the client did not give and never invent a quote. If sentiment is unclear,",
-    "return null for suggestedNps and say so in suggestedNpsReason.",
+    "The score is the account manager's judgment of the account, NOT a client survey. The client",
+    "never gives a number, so never write that the client did not state one, and never describe the",
+    "score as the client's. Work out a suggestion every time: read the call for the six red-flag",
+    "signals, place the account in a band, apply the lowest cap, and land on one number.",
+    "",
+    "Bands: 9-10 healthy · 7-8 stable with friction · 5-6 at risk · 3-4 critical · 1-2 churn imminent.",
+    "",
+    "A red flag CAPS the score -- a cap is a ceiling, not the score itself. Money or cash flow -> 8.",
+    "Responsiveness -> 5, or 3 for full ghosting. Life change -> 7. Technical challenge -> 4-7.",
+    "Another agency or advisor -> 7, or 5 once they start asking audit-style technical questions.",
+    "Performance -> 4, or 2-3 if they mention competitors or canceling. With several flags, the",
+    "LOWEST cap is the ceiling.",
+    "",
+    "Return null for suggestedNps only when the transcript is unusable (no client speech at all).",
+    "A hard call is still a call: pick the number the evidence supports and say what drove it.",
+    "Never invent a quote.",
+    "",
+    "Keep suggestedNpsReason short and in the AM's own voice -- a few words, no full sentence needed",
+    '(e.g. "replies slowed to weekly, still warm"). Name the band, and the flag and cap if one applied.',
+    "",
+    "A suggestion of 6 or below means this client MUST be logged in the Risk Register, so say in",
+    "suggestedNpsReason which red flag drove the cap -- the AM needs it to fill the entry.",
     "",
     JSON.stringify(
       {
@@ -284,7 +304,9 @@ async function generateClientHealthSuggestion(
     suggestedNpsReason:
       str(data.suggestedNpsReason) ||
       (suggestedNps === null
-        ? "The transcript doesn't show enough of the client's sentiment to read a score -- ask them directly."
+        // Not "ask them directly": the client never gives this number. When the call shows too
+        // little to read, the score is still the AM's to set from everything else they know.
+        ? "The transcript doesn't show enough to read a score from the call -- set it from what you know about the account."
         : ""),
     npsStatedByClient: data.npsStatedByClient === true ? true : undefined,
     npsReasonsByScore: ladder,

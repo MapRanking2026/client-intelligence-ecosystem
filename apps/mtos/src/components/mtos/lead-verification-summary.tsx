@@ -35,7 +35,7 @@ export function LeadVerificationSummary({
           {byChannel.map((row) => (
             <span
               key={row.channel}
-              className="inline-flex items-center gap-1.5 rounded-full border border-white/8 bg-white/4 px-3 py-1 text-xs text-slate-300"
+              className="chip"
             >
               {LEAD_CHANNEL_LABEL[row.channel]}
               <span className="font-semibold text-white">{row.total}</span>
@@ -46,10 +46,10 @@ export function LeadVerificationSummary({
       ) : null}
 
       {reconciliation.length ? (
-        <div className="overflow-x-auto rounded-[20px] border border-white/8 bg-black/20">
+        <div className="table-scroll">
           <table className="w-full min-w-[420px] text-left text-sm">
             <thead>
-              <tr className="text-[11px] uppercase tracking-[0.18em] text-slate-500">
+              <tr className="card-title">
                 <th className="px-4 py-3 font-medium">Channel</th>
                 <th className="px-4 py-3 font-medium">GoHighLevel</th>
                 <th className="px-4 py-3 font-medium">Platform reported</th>
@@ -95,7 +95,7 @@ export function LeadVerificationSummary({
       {showLink ? (
         <Link
           href={`/clients/${clientId}/lead-verification`}
-          className="inline-flex items-center gap-2 rounded-full border border-white/12 bg-white/4 px-4 py-2 text-sm font-medium text-slate-100 transition hover:bg-white/8"
+          className="btn btn-ghost"
         >
           Open full verification
           <ArrowRight className="h-4 w-4" />
@@ -127,7 +127,7 @@ function StatTile({
   return (
     <div className={`rounded-2xl border px-4 py-3 text-center ${toneClass}`}>
       <p className="text-2xl font-semibold">{value}</p>
-      <p className="mt-1 text-[11px] uppercase tracking-[0.18em] opacity-80">{label}</p>
+      <p className="mt-1 card-title">{label}</p>
     </div>
   );
 }

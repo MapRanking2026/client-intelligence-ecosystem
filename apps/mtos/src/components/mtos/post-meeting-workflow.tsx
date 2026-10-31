@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   CheckCircle2,
   FileText,
@@ -32,6 +33,11 @@ import type {
   TicketType,
 } from "@/src/lib/mtos-data";
 import { DateField } from "@/src/components/mtos/date-field";
+import {
+  npsBand,
+  reviewBlockers,
+  riskRegisterRequired,
+} from "@/src/lib/contracts/post-meeting-review";
 
 const DEPARTMENTS: TicketDepartment[] = ["SEO", "Web Design", "Ads", "Account Manager", "Other"];
 
@@ -261,6 +267,23 @@ interface TouchActionResponse {
     touch?: MonthlyTouchRecord;
   };
   error?: string;
+  /** Present on a 409: everything still outstanding in the review. */
+  blockers?: string[];
+}
+
+/**
+ * The server refusing a review because the AM still has something to decide.
+ *
+ * Separate from a failure on purpose: nothing was written, nothing is wrong, and the screen keeps
+ * every edit and simply says what is outstanding.
+ */
+class ReviewIncompleteError extends Error {
+  readonly blockers: string[];
+  constructor(blockers: string[]) {
+    super(blockers[0] || "There is still something to decide.");
+    this.name = "ReviewIncompleteError";
+    this.blockers = blockers;
+  }
 }
 
 async function postAction(touchId: string, body: Record<string, unknown>) {
@@ -270,6 +293,9 @@ async function postAction(touchId: string, body: Record<string, unknown>) {
     body: JSON.stringify(body),
   });
   const payload = (await response.json()) as TouchActionResponse;
+  if (response.status === 409 && payload.blockers?.length) {
+    throw new ReviewIncompleteError(payload.blockers);
+  }
   if (!response.ok) {
     throw new Error(payload.error || "That action failed");
   }
@@ -311,7 +337,10 @@ const ACTION_TYPICAL: Record<string, string> = {
 export function PostMeetingWorkflow({ touchId, postMeeting, qaReview }: PostMeetingWorkflowProps) {
   const [transcript, setTranscript] = useState(postMeeting?.transcript || "");
   const [error, setError] = useState<string | null>(null);
+  /** What is still left to decide before the review can be submitted, in the AM's own words. */
+  const [blockers, setBlockers] = useState<string[]>([]);
   const [activeAction, setActiveAction] = useState<string | null>(null);
+  const router = useRouter();
   const ai = useAiRun();
   const isPending = activeAction !== null;
   const [tickets, setTickets] = useState<EditableTicket[]>(() =>
@@ -369,6 +398,14 @@ export function PostMeetingWorkflow({ touchId, postMeeting, qaReview }: PostMeet
     recordedHealth?.npsReason || healthSuggestion?.suggestedNpsReason || "",
   );
   const [npsReasonEdited, setNpsReasonEdited] = useState(Boolean(recordedHealth?.npsReason));
+  /**
+   * Whether the AM has actually picked the score, as opposed to looking at the suggestion.
+   *
+   * The suggestion is pre-filled so the usual case is one click, but it stays a suggestion until
+   * that click: the score is the AM's own read of the account and it decides whether this client
+   * must be logged in the Risk Register, so it is never taken as given.
+   */
+  const [npsChosen, setNpsChosen] = useState(Boolean(recordedHealth));
   const [healthRiskTier, setHealthRiskTier] = useState<RiskTier | undefined>(
     recordedHealth?.riskTier ?? clientIntelligence?.riskTier ?? undefined,
   );
@@ -380,6 +417,7 @@ export function PostMeetingWorkflow({ touchId, postMeeting, qaReview }: PostMeet
   /** Pick a score and pull in its suggested reason, unless the AM wrote their own. */
   function chooseNps(score: number | null) {
     setNpsScore(score);
+    setNpsChosen(true);
     if (npsReasonEdited) return;
     const suggested =
       score === null
@@ -528,42 +566,74 @@ export function PostMeetingWorkflow({ touchId, postMeeting, qaReview }: PostMeet
     ]);
   }
 
-  // Confirm is gated: every ticket must be decided, approved tickets need content,
-  // and an approved email needs a subject + body.
-  const allTicketsDecided = tickets.every(
-    (ticket) => ticket.decision === "approved" || ticket.decision === "declined",
-  );
-  const approvedTicketsValid = tickets.every((ticket) => {
-    if (ticket.decision !== "approved") return true;
-    if (!ticket.title.trim() || !ticket.description.trim()) return false;
-    // Billing tickets need a change type before they can be filed.
-    if (ticket.ticketType === "billing" && !ticket.billingChangeType) return false;
-    return true;
-  });
   const emailValid = !approveEmail || Boolean(emailSubject.trim() && emailBody.trim());
-  /**
-   * The score comes first. It is the header line of the internal notes written when the decisions are
-   * applied, and a score of 6 or below is what requires the Risk Register entry and the Manager tag --
-   * so confirming the tickets before recording it would file the notes with the score missing. Only
-   * gated when the health panel is actually on screen; if Client Intelligence didn't run there is
-   * nothing to record and nothing to wait for.
-   */
-  const healthPending = Boolean(clientIntelligence) && !recordedHealth;
-  const confirmDisabled =
-    isPending || !allTicketsDecided || !approvedTicketsValid || !emailValid || healthPending;
 
-  /** Not wrapped in startTransition -- see ai-progress.tsx for why that hides the panel. */
+  /**
+   * Is this client required to go on the Risk Register? The score decides, and only the score:
+   * 6 or below is mandatory, 7 or above is not.
+   */
+  const registerRequired = riskRegisterRequired(npsChosen ? npsScore : null);
+
+  const approvedCount = tickets.filter((ticket) => ticket.decision === "approved").length;
+
+  /**
+   * Everything still outstanding before the one submission can go.
+   *
+   * Computed from the same rules the server checks, so the screen and the server never disagree
+   * about whether a review is finished -- and so a 409 from the server can only ever be a race,
+   * never a surprise.
+   */
+  const reviewLeft = blockers.length
+    ? blockers
+    : reviewBlockers({
+        nps: npsScore,
+        npsReason,
+        npsChosen,
+        tickets: tickets.map((ticket) => ({
+          decision: ticket.decision,
+          title: ticket.title,
+          description: ticket.description,
+          ticketType: ticket.ticketType,
+          billingChangeType: ticket.billingChangeType,
+        })),
+        risk: {
+          decision: riskDecision,
+          entry: { ...riskEntry, riskScore: riskFlagCount, riskTier: derivedRiskTier },
+          offered: Boolean(clientIntelligence?.riskRegister),
+        },
+        ...(clientIntelligence?.stakeholderMap
+          ? { stakeholder: { decision: stakeDecision, entry: stakeEntry, offered: true } }
+          : {}),
+        email: { subject: emailSubject, body: emailBody, approve: approveEmail },
+      });
+
+  /**
+   * Run one action and pull the fresh server state in.
+   *
+   * `router.refresh()`, never a page reload. A reload threw away every edit on this screen that
+   * had not been submitted yet -- which is exactly what made the old three-button sequence
+   * unusable: recording the score wiped the ticket edits, so the AM had to start over. A refresh
+   * re-renders the server components and merges the result without touching client state, so the
+   * panel updates around whatever the AM is still typing.
+   *
+   * Not wrapped in startTransition -- see ai-progress.tsx for why that hides the panel.
+   */
   function run(action: string, body: Record<string, unknown>) {
     setError(null);
+    setBlockers([]);
     setActiveAction(action);
     ai.start([ACTION_STEP[action] || "Working"], ACTION_TYPICAL[action]);
 
     void (async () => {
       try {
         await postAction(touchId, body);
-        globalThis.location.reload();
+        router.refresh();
       } catch (caught) {
-        setError(caught instanceof Error ? caught.message : "That action failed");
+        if (caught instanceof ReviewIncompleteError) {
+          setBlockers(caught.blockers);
+        } else {
+          setError(caught instanceof Error ? caught.message : "That action failed");
+        }
       } finally {
         ai.stop();
         setActiveAction(null);
@@ -578,13 +648,13 @@ export function PostMeetingWorkflow({ touchId, postMeeting, qaReview }: PostMeet
     <div className="space-y-6">
       {/* Step 1: transcript in, analysis out */}
       <div className="rounded-[24px] border border-white/8 bg-black/20 p-5">
-        <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">
+        <p className="card-title">
           Step 1 -- Meeting transcript
         </p>
         <p className="mt-1 text-sm text-slate-300">
-          For a Google Meet touch, Gemini&apos;s full notes and the verbatim transcript load
-          automatically as two labelled sections -- the analysis treats the transcript as the
-          source of truth and the notes only as a cross-check. Edit either, or replace the lot
+          For a Google Meet touch, the transcript loads from the exact selected conference.
+          The analysis treats the transcript as the
+          source of truth. Edit the text, or replace it
           with your own paste (Zoom, or a manual recap): the recap, draft follow-up tickets, and
           client email draft are grounded only in what&apos;s in this box.
         </p>
@@ -596,7 +666,7 @@ export function PostMeetingWorkflow({ touchId, postMeeting, qaReview }: PostMeet
             {isFetchingTranscript ? (
               <span className="inline-flex items-center gap-2 text-xs text-slate-400">
                 <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
-                Looking for this meeting&apos;s Gemini transcript...
+                Looking for this meeting&apos;s transcript...
               </span>
             ) : (
               <button
@@ -680,7 +750,7 @@ export function PostMeetingWorkflow({ touchId, postMeeting, qaReview }: PostMeet
       {analysisReady && postMeeting ? (
         <>
           <div className="rounded-[24px] border border-white/8 bg-black/20 p-5">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">Internal recap</p>
+            <p className="card-title">Internal recap</p>
             <p className="mt-2 text-sm leading-6 text-slate-200">{postMeeting.recapSummary}</p>
             {postMeeting.extractedCommitments?.length ? (
               <div className="mt-4 space-y-2">
@@ -694,12 +764,349 @@ export function PostMeetingWorkflow({ touchId, postMeeting, qaReview }: PostMeet
             ) : null}
           </div>
 
+          {/* Client Intelligence -- report (always saved with the client) + risk-gated forms */}
+          {clientIntelligence ? (
+            <div className="rounded-[24px] border border-white/8 bg-black/20 p-5">
+              <div className="flex items-center gap-2">
+                <Gauge className="h-4 w-4 text-[#d7f5ec]" />
+                <p className="card-title">
+                  Step 2 -- Account health score, then the registers
+                </p>
+              </div>
+              <p className="mt-1 text-xs text-slate-500">
+                Pick the score first — it decides whether this client has to go on the Risk Register. The
+                report below is saved with the client&apos;s record and never posted to ClickUp. Nothing on
+                this screen is written anywhere until you submit the review at the bottom, in one press.
+              </p>
+
+              {clientIntelligence.report ? (
+                <div className="mt-3 rounded-2xl border border-white/8 bg-white/4 p-4">
+                  <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Report</p>
+                  <p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-slate-200">
+                    {clientIntelligence.report}
+                  </p>
+                </div>
+              ) : null}
+
+              {clientIntelligence.errorMessage ? (
+                <div className="mt-3 space-y-2 rounded-2xl border border-amber-400/20 bg-amber-500/5 p-3">
+                  <p className="text-sm text-amber-200">
+                    This step didn&apos;t finish last time: {clientIntelligence.errorMessage}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => run("retry_client_intelligence", { action: "retry_client_intelligence" })}
+                    disabled={isPending}
+                    className="inline-flex items-center gap-2 rounded-full border border-white/12 bg-white/5 px-3 py-1.5 text-xs font-medium text-slate-200 transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {isPending && activeAction === "retry_client_intelligence" ? (
+                      <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Sparkles className="h-3.5 w-3.5" />
+                    )}
+                    Retry client intelligence
+                  </button>
+                </div>
+              ) : null}
+
+              {/* Client health -- NPS + risk status, suggested from the transcript and
+                  confirmed by the AM. Sits here rather than at the end of the live
+                  guide because only the transcript can tell you how the client felt. */}
+              <div className="mt-4 space-y-3 rounded-2xl border border-[#2dd4bf]/20 bg-[#2dd4bf]/5 p-4">
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div>
+                    <p className="text-sm font-semibold text-white">Client health — NPS &amp; risk status</p>
+                    <p className="mt-0.5 text-xs text-slate-400">
+                      {healthSuggestion
+                        ? healthSuggestion.npsStatedByClient
+                          ? "A number came up on the call — the score is still your judgment. Confirm or change it."
+                          : "Suggested from the transcript. Change either value and the reason updates to match."
+                        : "No suggestion was generated — set the score from how the call actually went."}
+                    </p>
+                  </div>
+                  {recordedHealth ? (
+                    <span className="rounded-full border border-emerald-400/30 bg-emerald-500/20 px-3 py-1 text-xs text-emerald-100">
+                      Recorded
+                    </span>
+                  ) : null}
+                </div>
+
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {/* A picker, not a dropdown: the AM gets through this by tapping, and the
+                      suggestion sits beside the numbers as one option among them rather than as a
+                      default that happens unless they intervene. */}
+                  <div className="block sm:col-span-2">
+                    <span className="text-xs text-slate-400">NPS / Account Health score (1–10)</span>
+                    <div className="mt-1.5 flex flex-wrap gap-1.5">
+                      {healthSuggestion?.suggestedNps !== null && healthSuggestion?.suggestedNps !== undefined ? (
+                        <button
+                          type="button"
+                          onClick={() => chooseNps(healthSuggestion.suggestedNps)}
+                          className={`rounded-full border px-3 py-1.5 text-xs font-medium transition ${npsChosen && npsScore === healthSuggestion.suggestedNps ? "border-[#2dd4bf]/50 bg-[#2dd4bf]/25 text-white" : "border-white/12 bg-white/5 text-slate-200 hover:bg-white/10"}`}
+                        >
+                          Suggested {healthSuggestion.suggestedNps}
+                        </button>
+                      ) : null}
+                      {Array.from({ length: 10 }, (_, index) => index + 1).map((score) => (
+                        <button
+                          key={score}
+                          type="button"
+                          onClick={() => chooseNps(score)}
+                          className={`h-8 w-8 rounded-full border text-xs font-medium transition ${npsChosen && npsScore === score ? "border-[#2dd4bf]/50 bg-[#2dd4bf]/25 text-white" : "border-white/12 bg-white/5 text-slate-200 hover:bg-white/10"}`}
+                        >
+                          {score}
+                        </button>
+                      ))}
+                      <button
+                        type="button"
+                        onClick={() => chooseNps(null)}
+                        className={`rounded-full border px-3 py-1.5 text-xs font-medium transition ${npsChosen && npsScore === null ? "border-amber-400/40 bg-amber-500/20 text-amber-100" : "border-white/12 bg-white/5 text-slate-300 hover:bg-white/10"}`}
+                      >
+                        No score
+                      </button>
+                    </div>
+                    <p className="mt-1.5 text-[11px] text-slate-500">
+                      Your read of the account, not something the client said — the client never gives a
+                      number. 9–10 healthy · 7–8 stable with friction · 5–6 at risk · 3–4 critical · 1–2
+                      churn imminent.
+                    </p>
+                  </div>
+
+                  <label className="block">
+                    <span className="text-xs text-slate-400">
+                      Risk status
+                      {clientIntelligence.riskTier ? ` · suggested ${clientIntelligence.riskTier}` : ""}
+                    </span>
+                    <select
+                      value={healthRiskTier || ""}
+                      onChange={(event) =>
+                        chooseRiskTier(event.target.value ? (event.target.value as RiskTier) : undefined)
+                      }
+                      className="mt-1 w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-slate-100 outline-none"
+                    >
+                      <option value="" style={{ color: "#0d1625" }}>
+                        Not set
+                      </option>
+                      {(["Healthy", "Low", "Medium", "High", "Critical"] as RiskTier[]).map((tier) => (
+                        <option key={tier} value={tier} style={{ color: "#0d1625" }}>
+                          {tier}
+                          {tier === clientIntelligence.riskTier ? " (suggested)" : ""}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+
+                <label className="block">
+                  <span className="text-xs text-slate-400">Reason for the score</span>
+                  <textarea
+                    value={npsReason}
+                    onChange={(event) => {
+                      setNpsReason(event.target.value);
+                      setNpsReasonEdited(true);
+                    }}
+                    rows={2}
+                    placeholder="One line on why this score — in the client's own terms."
+                    className="mt-1 w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-slate-100 outline-none"
+                  />
+                </label>
+
+                <label className="block">
+                  <span className="text-xs text-slate-400">Reason for the risk status</span>
+                  <textarea
+                    value={healthRiskReason}
+                    onChange={(event) => {
+                      setHealthRiskReason(event.target.value);
+                      setHealthRiskReasonEdited(true);
+                    }}
+                    rows={2}
+                    placeholder="What drives this risk read right now."
+                    className="mt-1 w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-slate-100 outline-none"
+                  />
+                </label>
+
+                {/* No button of its own. The score is part of the one submission at the bottom --
+                    recording it separately used to reload the screen and wipe every ticket edit the
+                    AM had made. What it changes right now is shown instead, because the score is a
+                    gate: 6 or below makes the Risk Register entry below mandatory. */}
+                {npsScore !== null ? (
+                  <p className={`rounded-xl border px-3 py-2 text-xs ${registerRequired ? "border-amber-400/25 bg-amber-500/5 text-amber-200" : "border-emerald-400/20 bg-emerald-500/5 text-emerald-100"}`}>
+                    {npsScore}/10 — {npsBand(npsScore)}.{" "}
+                    {registerRequired
+                      ? "A score of 6 or below requires a Risk Register entry, the matching red-flag playbook and a Manager @-tag in the client channel. The entry below has to be decided before you can submit."
+                      : "A score of 7 or above needs no Risk Register entry — nothing is logged there unless you approve it."}
+                  </p>
+                ) : (
+                  <p className="rounded-xl border border-white/10 bg-white/4 px-3 py-2 text-xs text-slate-300">
+                    Pick a score before deciding the rest. Whether this client has to go on the Risk Register
+                    is decided by the number: 6 or below is mandatory, 7 or above is not.
+                  </p>
+                )}
+                {recordedHealth ? (
+                  <p className="text-xs text-slate-400">
+                    Last recorded: {recordedHealth.nps === null ? "no score given" : `${recordedHealth.nps}/10`}
+                    {recordedHealth.riskTier ? ` · ${recordedHealth.riskTier}` : ""}
+                    {recordedHealth.overrodeSuggestion ? " · changed from the suggestion" : ""}
+                  </p>
+                ) : null}
+              </div>
+
+              {/* Stakeholder Map -- ALWAYS: every client must be listed & kept current */}
+              {clientIntelligence.stakeholderMap ? (
+                <div className="mt-4 space-y-3 rounded-2xl border border-white/8 bg-white/4 p-4">
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <div>
+                      <p className="text-sm font-semibold text-white">Stakeholder Map</p>
+                      {clientIntelligence.stakeholderUpToDate ? (
+                        <p className="mt-0.5 text-xs text-emerald-200">
+                          Client already listed &amp; up to date — approve only to push changes.
+                        </p>
+                      ) : (
+                        <p className="mt-0.5 text-xs text-slate-400">Updates this client&apos;s existing row.</p>
+                      )}
+                    </div>
+                    {clientIntelligence.stakeholderMapStatus === "approved" ? (
+                      <span className="rounded-full border border-emerald-400/30 bg-emerald-500/20 px-3 py-1 text-xs text-emerald-100">
+                        Updated
+                      </span>
+                    ) : (
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setStakeDecision("approved")}
+                          className={`rounded-full border px-3 py-1.5 text-xs font-medium transition ${stakeDecision === "approved" ? "border-emerald-400/30 bg-emerald-500/20 text-emerald-100" : "border-white/10 bg-white/5 text-slate-300 hover:bg-white/10"}`}
+                        >
+                          Approve
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setStakeDecision("declined")}
+                          className={`rounded-full border px-3 py-1.5 text-xs font-medium transition ${stakeDecision === "declined" ? "border-rose-400/30 bg-rose-500/20 text-rose-100" : "border-white/10 bg-white/5 text-slate-300 hover:bg-white/10"}`}
+                        >
+                          Skip
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <FieldInput label="Client Name" value={stakeEntry.clientName || ""} onChange={(v) => updateStake({ clientName: v })} />
+                    <FieldInput label="Assignee" value={stakeEntry.assignee || ""} onChange={(v) => updateStake({ assignee: v })} />
+                    <FieldSelect label="Client Type" value={stakeEntry.clientType || ""} onChange={(v) => updateStake({ clientType: (v || undefined) as StakeholderMapEntry["clientType"] })} options={CLIENT_TYPES} placeholder="Select…" />
+                    <FieldInput label="Role / Title" value={stakeEntry.role || ""} onChange={(v) => updateStake({ role: v })} />
+                    <FieldSelect label="Communication Preference" value={stakeEntry.communicationPreference || ""} onChange={(v) => updateStake({ communicationPreference: (v || undefined) as StakeholderMapEntry["communicationPreference"] })} options={COMM_PREFS} placeholder="Select…" />
+                    <FieldSelect label="Marketing Literacy" value={stakeEntry.marketingLiteracy || ""} onChange={(v) => updateStake({ marketingLiteracy: (v || undefined) as StakeholderMapEntry["marketingLiteracy"] })} options={LITERACIES} placeholder="Select…" />
+                  </div>
+                  <FieldInput label="Services (comma-separated)" value={(stakeEntry.services || []).join(", ")} onChange={(v) => updateStake({ services: v.split(",").map((s) => s.trim()).filter(Boolean) })} placeholder="Map Pack Dominator, GBP +, …" />
+                  <div className="grid gap-3 sm:grid-cols-3">
+                    <FieldInput label="Personality" value={stakeEntry.personality || ""} onChange={(v) => updateStake({ personality: v })} placeholder="One word, e.g. Analytical" />
+                    <FieldInput label="What They Care About" value={stakeEntry.whatTheyCareAbout || ""} onChange={(v) => updateStake({ whatTheyCareAbout: v })} placeholder="One word, e.g. Leads" />
+                    <FieldInput label="Known History" value={stakeEntry.knownHistory || ""} onChange={(v) => updateStake({ knownHistory: v })} placeholder="One word, e.g. Longtime" />
+                  </div>
+                  {clientIntelligence.stakeholderMapTaskUrl ? (
+                    <a href={clientIntelligence.stakeholderMapTaskUrl} target="_blank" rel="noreferrer" className="inline-block text-xs text-[#d7f5ec] underline">
+                      View in ClickUp
+                    </a>
+                  ) : null}
+                </div>
+              ) : null}
+
+              {/* Risk Register. Shown when the score requires it (6 or below), or when the call
+                  surfaced a flag, or when the row already carries an open case. The score is the
+                  only thing that makes it mandatory. */}
+              {registerRequired || (clientIntelligence.riskDetected && clientIntelligence.riskRegister) ? (
+                <div className="mt-4 space-y-3 rounded-2xl border border-rose-400/20 bg-rose-500/5 p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-sm font-semibold text-rose-100">
+                      {clientIntelligence.riskResolved
+                        ? "Risk Register · resolved — confirm to clear"
+                        : `Risk Register${clientIntelligence.riskTier ? ` · ${clientIntelligence.riskTier} risk` : ""}`}
+                      {registerRequired ? (
+                        <span className="ml-2 rounded-full border border-rose-400/40 bg-rose-500/20 px-2 py-0.5 text-[11px] font-medium text-rose-100">
+                          Required — score {npsScore}
+                        </span>
+                      ) : null}
+                    </p>
+                    {clientIntelligence.riskRegisterStatus === "approved" ? (
+                      <span className="rounded-full border border-emerald-400/30 bg-emerald-500/20 px-3 py-1 text-xs text-emerald-100">
+                        Registered
+                      </span>
+                    ) : (
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setRiskDecision("approved")}
+                          className={`rounded-full border px-3 py-1.5 text-xs font-medium transition ${riskDecision === "approved" ? "border-emerald-400/30 bg-emerald-500/20 text-emerald-100" : "border-white/10 bg-white/5 text-slate-300 hover:bg-white/10"}`}
+                        >
+                          Approve
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setRiskDecision("declined")}
+                          className={`rounded-full border px-3 py-1.5 text-xs font-medium transition ${riskDecision === "declined" ? "border-rose-400/30 bg-rose-500/20 text-rose-100" : "border-white/10 bg-white/5 text-slate-300 hover:bg-white/10"}`}
+                        >
+                          Decline
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <FieldInput label="Account Manager" value={riskEntry.accountManager || ""} onChange={(v) => updateRisk({ accountManager: v })} />
+                    <FieldSelect label="Client Type" value={riskEntry.clientType || ""} onChange={(v) => updateRisk({ clientType: (v || undefined) as RiskRegisterEntry["clientType"] })} options={CLIENT_TYPES} placeholder="Select…" />
+                    <FieldSelect label="Case Status" value={riskEntry.caseStatus || ""} onChange={(v) => updateRisk({ caseStatus: (v || undefined) as RiskRegisterEntry["caseStatus"] })} options={CASE_STATUSES} placeholder="Select…" />
+                    <div>
+                      <label className="text-[11px] uppercase tracking-[0.2em] text-slate-400">Risk Score / Tier (auto)</label>
+                      <div className="mt-1 w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm text-slate-200">
+                        {riskFlagCount}/6 flags · <span className="font-semibold">{derivedRiskTier}</span>
+                      </div>
+                    </div>
+                    <FieldSelect label="Primary Category" value={riskEntry.primaryCategory || ""} onChange={(v) => updateRisk({ primaryCategory: (v || undefined) as RiskRegisterEntry["primaryCategory"] })} options={RISK_CATEGORIES} placeholder="Select…" />
+                    <FieldInput label="Date Flagged" type="date" value={riskEntry.dateFlagged || ""} onChange={(v) => updateRisk({ dateFlagged: v || undefined })} />
+                    <FieldInput label="Next Action Owner" value={riskEntry.nextActionOwner || ""} onChange={(v) => updateRisk({ nextActionOwner: v })} />
+                    <FieldInput label="Due Date" type="date" value={riskEntry.dueDate || ""} onChange={(v) => updateRisk({ dueDate: v || undefined })} />
+                    <FieldInput label="Last Monthly Touch" type="date" value={riskEntry.lastMonthlyTouch || ""} onChange={(v) => updateRisk({ lastMonthlyTouch: v || undefined })} />
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-3">
+                    <FieldSelect label="Money / Cash Flow" value={riskEntry.money || ""} onChange={(v) => updateRisk({ money: (v || undefined) as RiskRegisterEntry["money"] })} options={YES_NO} />
+                    <FieldSelect label="Responsiveness" value={riskEntry.responsiveness || ""} onChange={(v) => updateRisk({ responsiveness: (v || undefined) as RiskRegisterEntry["responsiveness"] })} options={YES_NO} />
+                    <FieldSelect label="Life Change" value={riskEntry.lifeChange || ""} onChange={(v) => updateRisk({ lifeChange: (v || undefined) as RiskRegisterEntry["lifeChange"] })} options={YES_NO_MAYBE} />
+                    <FieldSelect label="Technical" value={riskEntry.technical || ""} onChange={(v) => updateRisk({ technical: (v || undefined) as RiskRegisterEntry["technical"] })} options={YES_NO} />
+                    <FieldSelect label="Other Agency" value={riskEntry.otherAgency || ""} onChange={(v) => updateRisk({ otherAgency: (v || undefined) as RiskRegisterEntry["otherAgency"] })} options={YES_NO_KINDOF} />
+                    <FieldSelect label="Performance" value={riskEntry.performance || ""} onChange={(v) => updateRisk({ performance: (v || undefined) as RiskRegisterEntry["performance"] })} options={YES_NO} />
+                  </div>
+                  <FieldInput label="Next Action" value={riskEntry.nextAction || ""} onChange={(v) => updateRisk({ nextAction: v })} placeholder="2-4 words, e.g. Schedule check-in" />
+                  <FieldTextarea label="Latest Comments (notes)" value={riskEntry.latestComments || ""} onChange={(v) => updateRisk({ latestComments: v })} rows={2} placeholder="One short sentence (optional)…" />
+                  {clientIntelligence.riskRegisterTaskUrl ? (
+                    <a href={clientIntelligence.riskRegisterTaskUrl} target="_blank" rel="noreferrer" className="inline-block text-xs text-[#d7f5ec] underline">
+                      View in ClickUp
+                    </a>
+                  ) : null}
+                </div>
+              ) : !clientIntelligence.errorMessage ? (
+                <p className="mt-4 rounded-2xl border border-emerald-400/15 bg-emerald-500/5 px-3 py-2 text-sm text-emerald-100">
+                  {npsChosen && npsScore !== null
+                    ? `No Risk Register change — score ${npsScore}, no flags, no open case.`
+                    : "No risk detected on the call. A score of 6 or below would still make a Risk Register entry mandatory."}
+                </p>
+              ) : null}
+
+              {clientIntelligence.executionNote ? (
+                <p className="mt-3 rounded-xl border border-amber-400/20 bg-amber-500/5 px-3 py-2 text-xs text-amber-200">
+                  {clientIntelligence.executionNote}
+                </p>
+              ) : null}
+
+              {/* Nothing is written from here either. Both entries go to ClickUp with the one
+                  submission at the bottom of this screen, each as its own write, so one failing
+                  still leaves the other standing. */}
+            </div>
+          ) : null}
+
           {/* Step 2: draft tickets + email, AM edits + approval gate */}
           <div className="rounded-[24px] border border-white/8 bg-black/20 p-5">
             <div className="flex items-center gap-2">
               <Ticket className="h-4 w-4 text-[#d7f5ec]" />
-              <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">
-                Step 2 -- Draft tickets (edit &amp; approve)
+              <p className="card-title">
+                Step 3 -- Tickets and the client recap email (edit &amp; approve)
               </p>
             </div>
             {!decisionsApplied ? (
@@ -1054,7 +1461,7 @@ export function PostMeetingWorkflow({ touchId, postMeeting, qaReview }: PostMeet
           <div className="rounded-[24px] border border-white/8 bg-black/20 p-5">
             <div className="flex items-center gap-2">
               <Mail className="h-4 w-4 text-[#d7f5ec]" />
-              <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">
+              <p className="card-title">
                 Client follow-up email
               </p>
             </div>
@@ -1105,400 +1512,83 @@ export function PostMeetingWorkflow({ touchId, postMeeting, qaReview }: PostMeet
             ) : null}
           </div>
 
-          {/* Client Intelligence -- report (always saved with the client) + risk-gated forms */}
-          {clientIntelligence ? (
-            <div className="rounded-[24px] border border-white/8 bg-black/20 p-5">
-              <div className="flex items-center gap-2">
-                <Gauge className="h-4 w-4 text-[#d7f5ec]" />
-                <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">
-                  Client intelligence
-                </p>
-              </div>
-              <p className="mt-1 text-xs text-slate-500">
-                This report is saved with the client&apos;s record (never posted to ClickUp). The Risk
-                Register and Stakeholder Map are filled ONLY when a risk is detected — and only after you
-                approve.
+          {/* ---------- One submission for the whole review ----------
+              Everything above is a draft until this button: the score, every ticket, the Risk
+              Register entry, the Stakeholder Map entry and the client recap email. Pressing it is
+              the AM's approval for exactly what they approved, and nothing else -- and because it
+              is one press, nothing they edited is lost on the way to it. */}
+          {!decisionsApplied ? (
+            <div className="space-y-3 rounded-[24px] border border-[#2dd4bf]/25 bg-[#2dd4bf]/5 p-5">
+              <p className="card-title">Submit the review</p>
+              <p className="text-xs text-slate-300">
+                Nothing has been created, written or filed yet. This files the approved tickets in ClickUp,
+                writes each approved entry to the client&apos;s Health Tracker row, saves the notes as a
+                subpage of this touch&apos;s Pre-Monthly Touch Notes page, and records the recap email.
+                Denied items stay in the notes as a record; deleted ones are dropped.
               </p>
 
-              {clientIntelligence.report ? (
-                <div className="mt-3 rounded-2xl border border-white/8 bg-white/4 p-4">
-                  <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Report</p>
-                  <p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-slate-200">
-                    {clientIntelligence.report}
-                  </p>
-                </div>
-              ) : null}
-
-              {clientIntelligence.errorMessage ? (
-                <div className="mt-3 space-y-2 rounded-2xl border border-amber-400/20 bg-amber-500/5 p-3">
-                  <p className="text-sm text-amber-200">
-                    This step didn&apos;t finish last time: {clientIntelligence.errorMessage}
-                  </p>
-                  <button
-                    type="button"
-                    onClick={() => run("retry_client_intelligence", { action: "retry_client_intelligence" })}
-                    disabled={isPending}
-                    className="inline-flex items-center gap-2 rounded-full border border-white/12 bg-white/5 px-3 py-1.5 text-xs font-medium text-slate-200 transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    {isPending && activeAction === "retry_client_intelligence" ? (
-                      <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
-                    ) : (
-                      <Sparkles className="h-3.5 w-3.5" />
-                    )}
-                    Retry client intelligence
-                  </button>
-                </div>
-              ) : null}
-
-              {/* Client health -- NPS + risk status, suggested from the transcript and
-                  confirmed by the AM. Sits here rather than at the end of the live
-                  guide because only the transcript can tell you how the client felt. */}
-              <div className="mt-4 space-y-3 rounded-2xl border border-[#2dd4bf]/20 bg-[#2dd4bf]/5 p-4">
-                <div className="flex flex-wrap items-start justify-between gap-2">
-                  <div>
-                    <p className="text-sm font-semibold text-white">Client health — NPS &amp; risk status</p>
-                    <p className="mt-0.5 text-xs text-slate-400">
-                      {healthSuggestion
-                        ? healthSuggestion.npsStatedByClient
-                          ? "A number came up on the call — the score is still your judgment. Confirm or change it."
-                          : "Suggested from the transcript. Change either value and the reason updates to match."
-                        : "No suggestion was generated — set the score from how the call actually went."}
-                    </p>
-                  </div>
-                  {recordedHealth ? (
-                    <span className="rounded-full border border-emerald-400/30 bg-emerald-500/20 px-3 py-1 text-xs text-emerald-100">
-                      Recorded
-                    </span>
-                  ) : null}
-                </div>
-
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <label className="block">
-                    <span className="text-xs text-slate-400">
-                      NPS (0–10)
-                      {healthSuggestion?.suggestedNps !== null && healthSuggestion?.suggestedNps !== undefined
-                        ? ` · suggested ${healthSuggestion.suggestedNps}`
-                        : ""}
-                    </span>
-                    <select
-                      value={npsScore === null ? "" : String(npsScore)}
-                      onChange={(event) =>
-                        chooseNps(event.target.value === "" ? null : Number(event.target.value))
-                      }
-                      className="mt-1 w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-slate-100 outline-none"
-                    >
-                      <option value="" style={{ color: "#0d1625" }}>
-                        Not given
-                      </option>
-                      {Array.from({ length: 11 }, (_, score) => (
-                        <option key={score} value={String(score)} style={{ color: "#0d1625" }}>
-                          {score}
-                          {score === healthSuggestion?.suggestedNps ? " (suggested)" : ""}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-
-                  <label className="block">
-                    <span className="text-xs text-slate-400">
-                      Risk status
-                      {clientIntelligence.riskTier ? ` · suggested ${clientIntelligence.riskTier}` : ""}
-                    </span>
-                    <select
-                      value={healthRiskTier || ""}
-                      onChange={(event) =>
-                        chooseRiskTier(event.target.value ? (event.target.value as RiskTier) : undefined)
-                      }
-                      className="mt-1 w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-slate-100 outline-none"
-                    >
-                      <option value="" style={{ color: "#0d1625" }}>
-                        Not set
-                      </option>
-                      {(["Healthy", "Low", "Medium", "High", "Critical"] as RiskTier[]).map((tier) => (
-                        <option key={tier} value={tier} style={{ color: "#0d1625" }}>
-                          {tier}
-                          {tier === clientIntelligence.riskTier ? " (suggested)" : ""}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                </div>
-
-                <label className="block">
-                  <span className="text-xs text-slate-400">Reason for the score</span>
-                  <textarea
-                    value={npsReason}
-                    onChange={(event) => {
-                      setNpsReason(event.target.value);
-                      setNpsReasonEdited(true);
-                    }}
-                    rows={2}
-                    placeholder="One line on why this score — in the client's own terms."
-                    className="mt-1 w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-slate-100 outline-none"
-                  />
-                </label>
-
-                <label className="block">
-                  <span className="text-xs text-slate-400">Reason for the risk status</span>
-                  <textarea
-                    value={healthRiskReason}
-                    onChange={(event) => {
-                      setHealthRiskReason(event.target.value);
-                      setHealthRiskReasonEdited(true);
-                    }}
-                    rows={2}
-                    placeholder="What drives this risk read right now."
-                    className="mt-1 w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-slate-100 outline-none"
-                  />
-                </label>
-
-                <div className="flex flex-wrap items-center gap-3">
-                  <button
-                    type="button"
-                    onClick={() =>
-                      run("record_client_health", {
-                        action: "record_client_health",
-                        nps: npsScore,
-                        npsReason,
-                        riskTier: healthRiskTier,
-                        riskReason: healthRiskReason,
-                      })
-                    }
-                    disabled={isPending || !npsReason.trim()}
-                    style={{ color: "#0d1625" }}
-                    className="inline-flex items-center gap-2 rounded-full border border-[#d7f5ec]/20 bg-[#d7f5ec] px-4 py-2 text-sm font-semibold transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    {isPending && activeAction === "record_client_health" ? (
-                      <LoaderCircle className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <CheckCircle2 className="h-4 w-4" />
-                    )}
-                    {recordedHealth ? "Update NPS & risk status" : "Record NPS & risk status"}
-                  </button>
-                  {recordedHealth ? (
-                    <span className="text-xs text-slate-400">
-                      {recordedHealth.nps === null ? "No score given" : `NPS ${recordedHealth.nps}`}
-                      {recordedHealth.riskTier ? ` · ${recordedHealth.riskTier}` : ""}
-                      {recordedHealth.overrodeSuggestion ? " · changed from the suggestion" : ""}
-                    </span>
-                  ) : null}
-                </div>
-              </div>
-
-              {/* Stakeholder Map -- ALWAYS: every client must be listed & kept current */}
-              {clientIntelligence.stakeholderMap ? (
-                <div className="mt-4 space-y-3 rounded-2xl border border-white/8 bg-white/4 p-4">
-                  <div className="flex flex-wrap items-start justify-between gap-2">
-                    <div>
-                      <p className="text-sm font-semibold text-white">Stakeholder Map</p>
-                      {clientIntelligence.stakeholderUpToDate ? (
-                        <p className="mt-0.5 text-xs text-emerald-200">
-                          Client already listed &amp; up to date — approve only to push changes.
-                        </p>
-                      ) : (
-                        <p className="mt-0.5 text-xs text-slate-400">Updates this client&apos;s existing row.</p>
-                      )}
-                    </div>
-                    {clientIntelligence.stakeholderMapStatus === "approved" ? (
-                      <span className="rounded-full border border-emerald-400/30 bg-emerald-500/20 px-3 py-1 text-xs text-emerald-100">
-                        Updated
-                      </span>
-                    ) : (
-                      <div className="flex gap-2">
-                        <button
-                          type="button"
-                          onClick={() => setStakeDecision("approved")}
-                          className={`rounded-full border px-3 py-1.5 text-xs font-medium transition ${stakeDecision === "approved" ? "border-emerald-400/30 bg-emerald-500/20 text-emerald-100" : "border-white/10 bg-white/5 text-slate-300 hover:bg-white/10"}`}
-                        >
-                          Approve
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setStakeDecision("declined")}
-                          className={`rounded-full border px-3 py-1.5 text-xs font-medium transition ${stakeDecision === "declined" ? "border-rose-400/30 bg-rose-500/20 text-rose-100" : "border-white/10 bg-white/5 text-slate-300 hover:bg-white/10"}`}
-                        >
-                          Skip
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <FieldInput label="Client Name" value={stakeEntry.clientName || ""} onChange={(v) => updateStake({ clientName: v })} />
-                    <FieldInput label="Assignee" value={stakeEntry.assignee || ""} onChange={(v) => updateStake({ assignee: v })} />
-                    <FieldSelect label="Client Type" value={stakeEntry.clientType || ""} onChange={(v) => updateStake({ clientType: (v || undefined) as StakeholderMapEntry["clientType"] })} options={CLIENT_TYPES} placeholder="Select…" />
-                    <FieldInput label="Role / Title" value={stakeEntry.role || ""} onChange={(v) => updateStake({ role: v })} />
-                    <FieldSelect label="Communication Preference" value={stakeEntry.communicationPreference || ""} onChange={(v) => updateStake({ communicationPreference: (v || undefined) as StakeholderMapEntry["communicationPreference"] })} options={COMM_PREFS} placeholder="Select…" />
-                    <FieldSelect label="Marketing Literacy" value={stakeEntry.marketingLiteracy || ""} onChange={(v) => updateStake({ marketingLiteracy: (v || undefined) as StakeholderMapEntry["marketingLiteracy"] })} options={LITERACIES} placeholder="Select…" />
-                  </div>
-                  <FieldInput label="Services (comma-separated)" value={(stakeEntry.services || []).join(", ")} onChange={(v) => updateStake({ services: v.split(",").map((s) => s.trim()).filter(Boolean) })} placeholder="Map Pack Dominator, GBP +, …" />
-                  <div className="grid gap-3 sm:grid-cols-3">
-                    <FieldInput label="Personality" value={stakeEntry.personality || ""} onChange={(v) => updateStake({ personality: v })} placeholder="One word, e.g. Analytical" />
-                    <FieldInput label="What They Care About" value={stakeEntry.whatTheyCareAbout || ""} onChange={(v) => updateStake({ whatTheyCareAbout: v })} placeholder="One word, e.g. Leads" />
-                    <FieldInput label="Known History" value={stakeEntry.knownHistory || ""} onChange={(v) => updateStake({ knownHistory: v })} placeholder="One word, e.g. Longtime" />
-                  </div>
-                  {clientIntelligence.stakeholderMapTaskUrl ? (
-                    <a href={clientIntelligence.stakeholderMapTaskUrl} target="_blank" rel="noreferrer" className="inline-block text-xs text-[#d7f5ec] underline">
-                      View in ClickUp
-                    </a>
-                  ) : null}
-                </div>
-              ) : null}
-
-              {/* Risk Register -- ONLY when a risk is detected */}
-              {clientIntelligence.riskDetected && clientIntelligence.riskRegister ? (
-                <div className="mt-4 space-y-3 rounded-2xl border border-rose-400/20 bg-rose-500/5 p-4">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <p className="text-sm font-semibold text-rose-100">
-                      {clientIntelligence.riskResolved
-                        ? "Risk Register · resolved — confirm to clear"
-                        : `Risk Register${clientIntelligence.riskTier ? ` · ${clientIntelligence.riskTier} risk` : ""}`}
-                    </p>
-                    {clientIntelligence.riskRegisterStatus === "approved" ? (
-                      <span className="rounded-full border border-emerald-400/30 bg-emerald-500/20 px-3 py-1 text-xs text-emerald-100">
-                        Registered
-                      </span>
-                    ) : (
-                      <div className="flex gap-2">
-                        <button
-                          type="button"
-                          onClick={() => setRiskDecision("approved")}
-                          className={`rounded-full border px-3 py-1.5 text-xs font-medium transition ${riskDecision === "approved" ? "border-emerald-400/30 bg-emerald-500/20 text-emerald-100" : "border-white/10 bg-white/5 text-slate-300 hover:bg-white/10"}`}
-                        >
-                          Approve
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setRiskDecision("declined")}
-                          className={`rounded-full border px-3 py-1.5 text-xs font-medium transition ${riskDecision === "declined" ? "border-rose-400/30 bg-rose-500/20 text-rose-100" : "border-white/10 bg-white/5 text-slate-300 hover:bg-white/10"}`}
-                        >
-                          Decline
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <FieldInput label="Account Manager" value={riskEntry.accountManager || ""} onChange={(v) => updateRisk({ accountManager: v })} />
-                    <FieldSelect label="Client Type" value={riskEntry.clientType || ""} onChange={(v) => updateRisk({ clientType: (v || undefined) as RiskRegisterEntry["clientType"] })} options={CLIENT_TYPES} placeholder="Select…" />
-                    <FieldSelect label="Case Status" value={riskEntry.caseStatus || ""} onChange={(v) => updateRisk({ caseStatus: (v || undefined) as RiskRegisterEntry["caseStatus"] })} options={CASE_STATUSES} placeholder="Select…" />
-                    <div>
-                      <label className="text-[11px] uppercase tracking-[0.2em] text-slate-400">Risk Score / Tier (auto)</label>
-                      <div className="mt-1 w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm text-slate-200">
-                        {riskFlagCount}/6 flags · <span className="font-semibold">{derivedRiskTier}</span>
-                      </div>
-                    </div>
-                    <FieldSelect label="Primary Category" value={riskEntry.primaryCategory || ""} onChange={(v) => updateRisk({ primaryCategory: (v || undefined) as RiskRegisterEntry["primaryCategory"] })} options={RISK_CATEGORIES} placeholder="Select…" />
-                    <FieldInput label="Date Flagged" type="date" value={riskEntry.dateFlagged || ""} onChange={(v) => updateRisk({ dateFlagged: v || undefined })} />
-                    <FieldInput label="Next Action Owner" value={riskEntry.nextActionOwner || ""} onChange={(v) => updateRisk({ nextActionOwner: v })} />
-                    <FieldInput label="Due Date" type="date" value={riskEntry.dueDate || ""} onChange={(v) => updateRisk({ dueDate: v || undefined })} />
-                    <FieldInput label="Last Monthly Touch" type="date" value={riskEntry.lastMonthlyTouch || ""} onChange={(v) => updateRisk({ lastMonthlyTouch: v || undefined })} />
-                  </div>
-                  <div className="grid gap-3 sm:grid-cols-3">
-                    <FieldSelect label="Money / Cash Flow" value={riskEntry.money || ""} onChange={(v) => updateRisk({ money: (v || undefined) as RiskRegisterEntry["money"] })} options={YES_NO} />
-                    <FieldSelect label="Responsiveness" value={riskEntry.responsiveness || ""} onChange={(v) => updateRisk({ responsiveness: (v || undefined) as RiskRegisterEntry["responsiveness"] })} options={YES_NO} />
-                    <FieldSelect label="Life Change" value={riskEntry.lifeChange || ""} onChange={(v) => updateRisk({ lifeChange: (v || undefined) as RiskRegisterEntry["lifeChange"] })} options={YES_NO_MAYBE} />
-                    <FieldSelect label="Technical" value={riskEntry.technical || ""} onChange={(v) => updateRisk({ technical: (v || undefined) as RiskRegisterEntry["technical"] })} options={YES_NO} />
-                    <FieldSelect label="Other Agency" value={riskEntry.otherAgency || ""} onChange={(v) => updateRisk({ otherAgency: (v || undefined) as RiskRegisterEntry["otherAgency"] })} options={YES_NO_KINDOF} />
-                    <FieldSelect label="Performance" value={riskEntry.performance || ""} onChange={(v) => updateRisk({ performance: (v || undefined) as RiskRegisterEntry["performance"] })} options={YES_NO} />
-                  </div>
-                  <FieldInput label="Next Action" value={riskEntry.nextAction || ""} onChange={(v) => updateRisk({ nextAction: v })} placeholder="2-4 words, e.g. Schedule check-in" />
-                  <FieldTextarea label="Latest Comments (notes)" value={riskEntry.latestComments || ""} onChange={(v) => updateRisk({ latestComments: v })} rows={2} placeholder="One short sentence (optional)…" />
-                  {clientIntelligence.riskRegisterTaskUrl ? (
-                    <a href={clientIntelligence.riskRegisterTaskUrl} target="_blank" rel="noreferrer" className="inline-block text-xs text-[#d7f5ec] underline">
-                      View in ClickUp
-                    </a>
-                  ) : null}
-                </div>
-              ) : !clientIntelligence.errorMessage ? (
-                <p className="mt-4 rounded-2xl border border-emerald-400/15 bg-emerald-500/5 px-3 py-2 text-sm text-emerald-100">
-                  No risk detected — the Risk Register is skipped for this touch.
-                </p>
-              ) : null}
-
-              {clientIntelligence.executionNote ? (
-                <p className="mt-3 rounded-xl border border-amber-400/20 bg-amber-500/5 px-3 py-2 text-xs text-amber-200">
-                  {clientIntelligence.executionNote}
-                </p>
-              ) : null}
-
-              {clientIntelligence.stakeholderMap || clientIntelligence.riskRegister ? (
-                <button
-                  type="button"
-                  onClick={() =>
-                    run("apply_client_intelligence", {
-                      action: "apply_client_intelligence",
-                      riskRegister:
-                        riskDecision && clientIntelligence.riskRegisterStatus !== "approved"
-                          ? { ...riskEntry, riskScore: riskFlagCount, riskTier: derivedRiskTier, decision: riskDecision }
-                          : undefined,
-                      stakeholderMap:
-                        stakeDecision && clientIntelligence.stakeholderMapStatus !== "approved"
-                          ? { ...stakeEntry, decision: stakeDecision }
-                          : undefined,
-                    })
-                  }
-                  disabled={
-                    isPending ||
-                    (!(riskDecision && clientIntelligence.riskRegisterStatus !== "approved") &&
-                      !(stakeDecision && clientIntelligence.stakeholderMapStatus !== "approved"))
-                  }
-                  style={{ color: "#0d1625" }}
-                  className="mt-3 inline-flex items-center gap-2 rounded-full border border-[#d7f5ec]/20 bg-[#d7f5ec] px-4 py-2 text-sm font-semibold text-[#0d1625] transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {isPending && activeAction === "apply_client_intelligence" ? (
-                    <LoaderCircle className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <CheckCircle2 className="h-4 w-4" />
-                  )}
-                  Apply to ClickUp
-                </button>
-              ) : null}
-            </div>
-          ) : null}
-
-          {!decisionsApplied && healthPending ? (
-            <p className="rounded-xl border border-amber-400/20 bg-amber-500/5 px-3 py-2 text-xs text-amber-200">
-              Record the NPS &amp; risk status first — it is the header line of the notes filed in the
-              Client&apos;s Book, so the tickets are confirmed after the score, not before it.
-            </p>
-          ) : null}
-
-          {!decisionsApplied ? (
-            <button
-              type="button"
-              onClick={() =>
-                run("apply_post_meeting_decisions", {
-                  action: "apply_post_meeting_decisions",
-                  tickets: tickets.map((ticket) => ({
-                    id: ticket.id,
-                    title: ticket.title.trim(),
-                    description: ticket.description.trim(),
-                    department: ticket.department,
-                    assigneeId: ticket.assigneeId,
-                    assignee: members.find((member) => member.id === ticket.assigneeId)?.name,
-                    businessOptionId: ticket.businessOptionId,
-                    businessName: businesses.find((business) => business.id === ticket.businessOptionId)?.name,
-                    priority: ticket.priority,
-                    timeEstimateMinutes: ticket.timeEstimateMinutes,
-                    dueDate: ticket.dueDate || undefined,
-                    ticketType: ticket.ticketType,
-                    billingChangeType: ticket.ticketType === "billing" ? ticket.billingChangeType : undefined,
-                    dateRequested: ticket.ticketType === "billing" ? ticket.dateRequested || undefined : undefined,
-                    decision: ticket.decision === "approved" ? "approved" : "declined",
-                  })),
-                  email: { subject: emailSubject.trim(), body: emailBody, approve: approveEmail },
-                })
-              }
-              disabled={confirmDisabled}
-              style={{ color: "#0d1625" }}
-              className="inline-flex items-center gap-2 rounded-full border border-[#d7f5ec]/20 bg-[#d7f5ec] px-4 py-2 text-sm font-semibold text-[#0d1625] transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {isPending && activeAction === "apply_post_meeting_decisions" ? (
-                <LoaderCircle className="h-4 w-4 animate-spin" />
+              {reviewLeft.length ? (
+                <ul className="space-y-1.5">
+                  {reviewLeft.map((item) => (
+                    <li key={item} className="rounded-xl border border-amber-400/20 bg-amber-500/5 px-3 py-2 text-xs text-amber-200">
+                      {item}
+                    </li>
+                  ))}
+                </ul>
               ) : (
-                <CheckCircle2 className="h-4 w-4" />
+                <p className="rounded-xl border border-emerald-400/20 bg-emerald-500/5 px-3 py-2 text-xs text-emerald-100">
+                  Everything is decided. {approvedCount === 1 ? "1 ticket" : `${approvedCount} tickets`} will be
+                  created{riskDecision === "approved" ? ", the Risk Register entry written" : ""}
+                  {stakeDecision === "approved" ? ", the Stakeholder Map entry written" : ""}
+                  {approveEmail ? ", and the recap email recorded as approved" : ""}.
+                </p>
               )}
-              Confirm decisions
-            </button>
+
+              <button
+                type="button"
+                onClick={() =>
+                  run("apply_post_meeting_review", {
+                    action: "apply_post_meeting_review",
+                    nps: npsScore,
+                    npsReason,
+                    riskTier: healthRiskTier,
+                    riskReason: healthRiskReason,
+                    tickets: tickets.map((ticket) => ({
+                      id: ticket.id,
+                      title: ticket.title.trim(),
+                      description: ticket.description.trim(),
+                      department: ticket.department,
+                      assigneeId: ticket.assigneeId,
+                      assignee: members.find((member) => member.id === ticket.assigneeId)?.name,
+                      businessOptionId: ticket.businessOptionId,
+                      businessName: businesses.find((business) => business.id === ticket.businessOptionId)?.name,
+                      priority: ticket.priority,
+                      timeEstimateMinutes: ticket.timeEstimateMinutes,
+                      dueDate: ticket.dueDate || undefined,
+                      ticketType: ticket.ticketType,
+                      billingChangeType: ticket.ticketType === "billing" ? ticket.billingChangeType : undefined,
+                      dateRequested: ticket.ticketType === "billing" ? ticket.dateRequested || undefined : undefined,
+                      decision: ticket.decision === "approved" ? "approved" : "declined",
+                    })),
+                    email: { subject: emailSubject.trim(), body: emailBody, approve: approveEmail },
+                    riskRegister: riskDecision
+                      ? { ...riskEntry, riskScore: riskFlagCount, riskTier: derivedRiskTier, decision: riskDecision }
+                      : undefined,
+                    stakeholderMap: stakeDecision ? { ...stakeEntry, decision: stakeDecision } : undefined,
+                  })
+                }
+                disabled={isPending || reviewLeft.length > 0}
+                style={{ color: "#0d1625" }}
+                className="inline-flex items-center gap-2 rounded-full border border-[#d7f5ec]/20 bg-[#d7f5ec] px-4 py-2 text-sm font-semibold text-[#0d1625] transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {isPending && activeAction === "apply_post_meeting_review" ? (
+                  <LoaderCircle className="h-4 w-4 animate-spin" />
+                ) : (
+                  <CheckCircle2 className="h-4 w-4" />
+                )}
+                Approve and file everything
+              </button>
+            </div>
           ) : null}
 
           {/* The internal record of the touch, written once the decisions were applied. The AM's own
@@ -1508,7 +1598,7 @@ export function PostMeetingWorkflow({ touchId, postMeeting, qaReview }: PostMeet
             <div className="rounded-[24px] border border-white/8 bg-black/20 p-5">
               <div className="flex items-center gap-2">
                 <NotebookPen className="h-4 w-4 text-[#d7f5ec]" />
-                <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">
+                <p className="card-title">
                   Post-Monthly Touch Notes
                 </p>
               </div>
@@ -1549,8 +1639,8 @@ export function PostMeetingWorkflow({ touchId, postMeeting, qaReview }: PostMeet
         <div className="rounded-[24px] border border-white/8 bg-black/20 p-5">
           <div className="flex items-center gap-2">
             <ShieldCheck className="h-4 w-4 text-[#d7f5ec]" />
-            <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">
-              Step 3 -- QA review and Victor approval
+            <p className="card-title">
+              Step 4 -- QA review and Victor approval
             </p>
           </div>
 

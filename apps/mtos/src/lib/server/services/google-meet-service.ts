@@ -241,12 +241,13 @@ async function ensureSupportEditor(context: TenantContext, token: string, id: st
 async function collectArtifacts(context: TenantContext, token: string, conference: GoogleConference) {
   const transcripts = await pages<NativeArtifact>(token, `${MEET}/${conference.name}/transcripts`, "transcripts");
   const recordings = await pages<NativeArtifact>(token, `${MEET}/${conference.name}/recordings`, "recordings");
+  const notes = await pages<NativeArtifact>(token, `${MEET}/${conference.name}/smartNotes`, "smartNotes");
   const artifacts: GoogleMeetingArtifact[] = [];
-  for (const [kind, list] of [["transcript", transcripts], ["recording", recordings]] as const) {
+  for (const [kind, list] of [["transcript", transcripts], ["recording", recordings], ["notes", notes]] as const) {
     for (const item of list) {
-      const id = kind === "transcript" ? item.docsDestination?.document : item.driveDestination?.file;
+      const id = kind !== "recording" ? item.docsDestination?.document : item.driveDestination?.file;
       if (item.state !== "FILE_GENERATED" || !id) continue;
-      const artifact: GoogleMeetingArtifact = { id, kind, url: kind === "transcript" ? `https://docs.google.com/document/d/${id}/edit` : `https://drive.google.com/file/d/${id}/view`, sharing: "editor" };
+      const artifact: GoogleMeetingArtifact = { id, kind, url: kind !== "recording" ? `https://docs.google.com/document/d/${id}/edit` : `https://drive.google.com/file/d/${id}/view`, sharing: "editor" };
       try { await ensureSupportEditor(context, token, id); }
       catch (error) { artifact.sharing = "failed"; artifact.error = error instanceof Error ? error.message : "Sharing failed"; }
       artifacts.push(artifact);
@@ -345,6 +346,10 @@ export async function runGoogleMeetingSweep() {
       const connection = await getIntegrationConnection(context, "google-meet");
       if (connection?.status !== "connected") continue;
       try {
+        if (process.env.GOOGLE_MEET_EVENTS_TOPIC) {
+          try { await (await import("./google-meet-events-service")).enableMeetEvents(context, true); }
+          catch (error) { report.push({ tenantId, userId: user.id, status: "events_renewal_failed", detail: error instanceof Error ? error.message : "Renewal failed" }); }
+        }
         const token = await tokenFor(context);
         // Retry delayed files for 3 days; today/yesterday matching is enforced separately for analysis.
         const conferences = await recordsFor(token, undefined, 3);
@@ -370,3 +375,49 @@ export async function runGoogleMeetingSweep() {
   }
   return { report, deferred: false };
 }
+
+/** Process only the conference identified by an authenticated Google event. */
+export async function processGoogleConferenceEvent(context: TenantContext, name: string, requireTranscript = false) {
+  if (!/^conferenceRecords\/[a-zA-Z0-9_-]+$/.test(name)) throw new Error("Invalid conference.");
+  const token = await tokenFor(context);
+  const conference = await google<GoogleConference>(token, `${MEET}/${name}`);
+  const collected = await collectArtifacts(context, token, conference);
+  if (collected.artifacts.some((artifact) => artifact.sharing === "failed")) throw new Error("Some meeting files could not be shared; retry delivery.");
+  const timeZone = await calendarContext(token);
+  // Delayed file events still share files, but never analyze another day's call.
+  if (!isRecentMeeting(conference.startTime, timeZone)) return;
+  const room = await google<{ meetingUri: string }>(token, `${MEET}/${conference.space}`);
+  const code = meetingCode(room.meetingUri);
+  if (!code) throw new Error("Google returned an invalid meeting URI.");
+  const touches = await getMtosDataSource(context).getMonthlyTouches();
+  const deadline = Date.now() + 200000;
+  for (const touch of touches) {
+    if (Date.now() > deadline) throw new Error("More meeting work remains; retry delivery.");
+    if (touch.googleMeeting && touch.googleMeeting.userId !== context.userId) continue;
+    if (touch.googleMeeting?.conference && touch.googleMeeting.conference.name !== name) continue;
+    if (touch.googleMeeting && meetingCode(touch.googleMeeting.meetingUrl) !== code) continue;
+    if (!touch.googleMeeting && (!touch.calendarEventId || !touch.scheduledAt || !isRecentMeeting(touch.scheduledAt, timeZone) || touch.postMeeting?.transcript)) continue;
+    const overview = await getGoogleMeetingOverview(context, touch.id);
+    if (!touch.googleMeeting) {
+      const linked = overview.meetings.find((event) => event.eventId === touch.calendarEventId);
+      if (!linked || !isRecentMeeting(linked.start, timeZone)) continue;
+      const records = await recordsFor(token, meetingCode(linked.url));
+      if (chooseConference(records, timeZone, linked.start, linked.end)?.name !== name) continue;
+      await selectGoogleMeeting(context, touch.id, linked.eventId, name);
+    } else {
+      if (!overview.conferences.some((item) => item.name === name)) continue;
+      if (!touch.googleMeeting.conference) {
+        const event = overview.meetings.find((item) => item.eventId === touch.googleMeeting?.calendarEventId);
+        const selected = chooseConference(overview.conferences, timeZone, event?.start, event?.end);
+        const uniqueRoom = touch.googleMeeting.createdByMtos && overview.conferences.filter((item) => isRecentMeeting(item.startTime, timeZone)).length === 1;
+        if (selected?.name !== name && !uniqueRoom) continue;
+        if (touch.postMeeting?.transcript) continue;
+        await pinGoogleConference(context, touch.id, name);
+      }
+    }
+    const state = await syncGoogleMeeting(context, touch.id);
+    if (state.status === "failed" || (requireTranscript && state.status === "waiting")) throw new Error("Transcript analysis is not ready; retry delivery.");
+  }
+}
+
+export { tokenFor as getGoogleMeetingAccessToken };

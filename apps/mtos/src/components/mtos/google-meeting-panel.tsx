@@ -24,6 +24,17 @@ export function GoogleMeetingPanel({ touchId, emails = [] }: { touchId: string; 
   const [conferenceName, setConferenceName] = useState("");
   const [clientEmails, setClientEmails] = useState(emails.join(", "));
 
+  async function enableNotifications() {
+    setBusy(true); setError("");
+    try {
+      const response = await fetch("/api/integrations/google-meet/events", { method: "POST" });
+      const result = await readJsonResponse<{ data?: { state: string; expireTime: string }; error?: string }>(response);
+      if (!response.ok || !result?.data) throw new Error(result?.error || "Could not enable Google notifications.");
+      setMessage(`Google notifications: ${result.data.state}. Subscription expires ${new Date(result.data.expireTime).toLocaleString()}; MTOS renews it daily.`);
+    } catch (error) { setError(error instanceof Error ? error.message : "Could not enable notifications."); }
+    finally { setBusy(false); }
+  }
+
   async function refresh() {
     const data = await meetingRequest<GoogleMeetingOverview>(touchId);
     setOverview(data);
@@ -78,7 +89,8 @@ export function GoogleMeetingPanel({ touchId, emails = [] }: { touchId: string; 
         <button className="btn btn-primary" disabled={busy} onClick={() => void run({ action: "sync" })}>Retrieve files & analyze</button>
         {!overview.selection ? <button className="btn btn-ghost" disabled={busy} onClick={() => void run({ action: "create" })}>Create a new MTOS call</button> : null}
       </div>
-      <p className="muted text-xs">Analysis matches calls from today or yesterday. A new MTOS call creates a separate link; it does not update calendar invitations. Recording and transcription must be enabled in Meet. Background processing runs daily on the current hosting schedule. Use Retrieve files & analyze after a call to process it sooner.</p>
+      <button className="btn btn-ghost btn-sm" disabled={busy} onClick={() => void enableNotifications()}>Enable Google file-ready notifications</button>
+      <p className="muted text-xs">Analysis matches calls from today or yesterday. A new MTOS call creates a separate link; it does not update calendar invitations. Recording and transcription must be enabled in Meet. When enabled and configured, Google file-ready notifications trigger processing. A daily job renews subscriptions and checks missed files. Use Retrieve files & analyze after a call to process it sooner.</p>
       {overview.selection?.message ? <p role="status" className="text-sm">{overview.selection.message}</p> : null}
       {overview.selection?.artifacts?.map((artifact) => <div key={artifact.id} className="text-sm">
         <a href={artifact.url} target="_blank" rel="noopener noreferrer" className="underline">Open {artifact.kind}</a>

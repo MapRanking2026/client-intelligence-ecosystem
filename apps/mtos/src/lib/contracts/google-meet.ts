@@ -16,7 +16,7 @@ export interface GoogleConference {
 
 export interface GoogleMeetingArtifact {
   id: string;
-  kind: "transcript" | "recording";
+  kind: "transcript" | "recording" | "notes";
   url: string;
   sharing: "editor" | "failed";
   error?: string;

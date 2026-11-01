@@ -391,6 +391,7 @@ const providerDefinitions: ProviderDefinition[] = [
         "https://www.googleapis.com/auth/drive",
         "https://www.googleapis.com/auth/meetings.space.readonly",
         "https://www.googleapis.com/auth/meetings.space.created",
+        "https://www.googleapis.com/auth/userinfo.profile",
         "https://www.googleapis.com/auth/documents.readonly",
       ],
       clientIdEnv: "GOOGLE_INTEGRATIONS_CLIENT_ID",

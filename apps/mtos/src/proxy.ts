@@ -28,6 +28,8 @@ export async function proxy(request: NextRequest) {
     path.startsWith("/api/integrations/clickup/callback") ||
     // Cron endpoints authenticate with CRON_SECRET, not a session cookie.
     path.startsWith("/api/cron/") ||
+    // Google Pub/Sub signed OIDC authentication is checked by this exact route.
+    path === "/api/integrations/google-meet/events/push" ||
     // Integration gateway authenticates with a signed S2S HMAC, not a cookie.
     path.startsWith("/api/gateway/") ||
     // Client Intelligence Engine endpoints self-authenticate (tenant_admin

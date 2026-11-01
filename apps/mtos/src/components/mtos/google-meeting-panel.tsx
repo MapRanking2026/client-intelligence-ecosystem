@@ -78,7 +78,7 @@ export function GoogleMeetingPanel({ touchId, emails = [] }: { touchId: string; 
         <button className="btn btn-primary" disabled={busy} onClick={() => void run({ action: "sync" })}>Retrieve files & analyze</button>
         {!overview.selection ? <button className="btn btn-ghost" disabled={busy} onClick={() => void run({ action: "create" })}>Create a new MTOS call</button> : null}
       </div>
-      <p className="muted text-xs">Analysis matches calls from today or yesterday. A new MTOS call creates a separate link; it does not update calendar invitations. Recording and transcription must be enabled in Meet. The background worker checks for generated files every minute when deployed and configured.</p>
+      <p className="muted text-xs">Analysis matches calls from today or yesterday. A new MTOS call creates a separate link; it does not update calendar invitations. Recording and transcription must be enabled in Meet. Background processing runs daily on the current hosting schedule. Use Retrieve files & analyze after a call to process it sooner.</p>
       {overview.selection?.message ? <p role="status" className="text-sm">{overview.selection.message}</p> : null}
       {overview.selection?.artifacts?.map((artifact) => <div key={artifact.id} className="text-sm">
         <a href={artifact.url} target="_blank" rel="noopener noreferrer" className="underline">Open {artifact.kind}</a>

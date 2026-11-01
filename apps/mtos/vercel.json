@@ -10,7 +10,7 @@
     },
     {
       "path": "/api/cron/meetings",
-      "schedule": "* * * * *"
+      "schedule": "0 8 * * *"
     }
   ]
 }

@@ -1523,7 +1523,7 @@ export function PostMeetingWorkflow({ touchId, postMeeting, qaReview }: PostMeet
               <p className="text-xs text-slate-300">
                 Nothing has been created, written or filed yet. This files the approved tickets in ClickUp,
                 writes each approved entry to the client&apos;s Health Tracker row, saves the notes as a
-                subpage of this touch&apos;s Pre-Monthly Touch Notes page, and records the recap email.
+                subpage of this touch&apos;s Monthly Touch page, and records the recap email.
                 Denied items stay in the notes as a record; deleted ones are dropped.
               </p>
 

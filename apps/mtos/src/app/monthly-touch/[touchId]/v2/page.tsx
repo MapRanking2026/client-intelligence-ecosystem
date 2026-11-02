@@ -44,7 +44,7 @@ import {
 import { EMPTY_PREP_BRIEF, approvalSummary } from "@/src/lib/contracts/prep-brief";
 import { AgendaApprovalPanel } from "@/src/components/mtos/agenda-approval-panel";
 import { readAgendaEmail } from "@/src/lib/server/services/agenda-email-service";
-import { preNotesPageName } from "@/src/lib/server/services/client-book-pages";
+import { touchPageName } from "@/src/lib/server/services/client-book-pages";
 import { getAccountManagerPreferences } from "@/src/lib/server/services/user-service";
 
 /**
@@ -312,7 +312,7 @@ export default async function RunSheetV2Page({
                     approval={touch.approval}
                     approving={sectionSummary.approving}
                     declined={sectionSummary.declined}
-                    pageName={preNotesPageName(
+                    pageName={touchPageName(
                       touch.scheduledAt || prepPack?.schedule.scheduledAt || client.touchDate,
                       profile.timeZone,
                     )}

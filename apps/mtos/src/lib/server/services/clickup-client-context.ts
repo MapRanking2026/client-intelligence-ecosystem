@@ -13,8 +13,8 @@ export const CLICKUP_V3 = "https://api.clickup.com/api/v3";
 const V3 = CLICKUP_V3;
 
 // Which Client's Book pages carry the business context an AM needs before a touch. Matched
-// case-insensitively against page names; page trees are walked so children (e.g. the latest monthly
-// note under "Pre-Monthly Touch Notes") are included.
+// case-insensitively against page names; page trees are walked so children (e.g. the write-up
+// subpage under a "Monthly Touch" page) are included.
 const BOOK_PAGE_PRIORITIES = [
   "client information",
   "offers/events",

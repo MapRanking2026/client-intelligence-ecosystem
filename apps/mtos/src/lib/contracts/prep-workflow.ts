@@ -157,18 +157,18 @@ export interface PrepFilingState {
     writtenAt: string;
   };
   /**
-   * Whether this touch already has its `Post-Monthly Touch Notes` subpage.
+   * Whether this touch already has its `Post Monthly Touch Notes` subpage.
    *
-   * False after a preparation run, always: the subpage is created after the call by the
-   * post-meeting step, as a child of the `Pre-Monthly Touch Notes` page filed here. The
-   * preparation step deliberately leaves no placeholder behind.
+   * True once the filing has run: the subpage is created empty, inside the `Monthly Touch`
+   * page, so the place the write-up will go exists before the call. Read off the recorded page
+   * id rather than set by hand, so it cannot claim a subpage that was never created.
    */
   postNotesCreated: boolean;
   filedAt?: string;
   errorMessage?: string;
   /** Which folder and page the notes went to, so the AM can confirm it is the right client. */
   destination?: string;
-  /** The page name as written (`Pre-Monthly Touch Notes 10/28/2026`), so the AM can find it. */
+  /** The page name as written (`Monthly Touch (10/28/2026)`), so the AM can find it. */
   pageName?: string;
 }
 

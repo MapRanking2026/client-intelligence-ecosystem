@@ -3,9 +3,9 @@ import type { ClientBookLinks } from "@/src/lib/mtos-data";
 import { getIntegrationConnection, getIntegrationCredentials } from "@/src/lib/server/integrations";
 import {
   findPostNotesPage,
-  findPreNotesPage,
+  findTouchPage,
   postNotesPageName,
-  preNotesPageName,
+  touchPageName,
   type BookPage,
 } from "@/src/lib/server/services/client-book-pages";
 import {
@@ -19,15 +19,16 @@ import {
  * Writing a touch's notes back into the client's ClickUp Client's Book.
  *
  * The AM's record of a touch does not live in MTOS -- it lives in the Client's Book, under
- * `Client Meetings Notes`, as ONE page per touch named `Pre-Monthly Touch Notes <date>`, with the
- * post-call write-up as a subpage of that page named `Post-Monthly Touch Notes <date>`. The post
- * notes live inside the pre notes from the same touch, never as a sibling page beside them.
+ * `Client Meetings Notes`, as ONE page per touch named `Monthly Touch (<date>)`, with the
+ * post-call write-up as a subpage of that page named `Post Monthly Touch Notes <date>`. The post
+ * notes live inside the touch page from the same call, never as a sibling page beside it.
  *
- * Two rules follow from that and are enforced below. The preparation step files the pre page and
- * nothing else -- no empty post-notes placeholder, because a placeholder makes every post-meeting
- * run look like a re-run. And the post-meeting step writes only under a pre page it actually
- * found for that date: when none matches, or more than one could, it refuses and hands the
- * candidates back rather than guessing or falling back to a top-level page.
+ * Two rules follow from that and are enforced below. The filing creates the touch page and an
+ * EMPTY post-notes subpage inside it, and records that subpage id, which is what the post-meeting
+ * step replaces -- so the placeholder is filled in rather than read as a write-up that already
+ * exists. And the post-meeting step writes only under a touch page it actually found for that
+ * date: when none matches, or more than one could, it refuses and hands the candidates back
+ * rather than guessing or falling back to a top-level page.
  *
  * Reading the book is already handled by clickup-client-context, which feeds the prep. This is
  * the other direction, and it reuses that module's workspace and folder resolution so there is
@@ -163,7 +164,7 @@ interface BookLocation {
   meetingsPageId: string;
   /** Every page in the book, flattened, for matching this touch's page by name and date. */
   pages: BookPageNode[];
-  /** The page tree, so the children of the pre-notes page can be read without a second request. */
+  /** The page tree, so the children of the touch page can be read without a second request. */
   tree: BookPageNode[];
   /** The ClickUp folder and doc the notes are going into, so the AM can confirm it is the right client. */
   destination: string;
@@ -245,6 +246,14 @@ function toBookPages(nodes: BookPageNode[]): BookPage[] {
   return nodes.map((node) => ({ id: node.id, name: String(node.name || "") }));
 }
 
+/**
+ * What the empty post-notes subpage holds until the call has happened.
+ *
+ * One line rather than nothing at all: a genuinely blank ClickUp page reads as a write-up
+ * somebody abandoned, and this says plainly that it is waiting for the call rather than unfinished.
+ */
+const POST_NOTES_PLACEHOLDER = "_Nothing filed yet. The post-call write-up lands here after the call._";
+
 export interface FilePrepNotesResult {
   links: ClientBookLinks;
   destination: string;
@@ -257,14 +266,14 @@ export interface FilePrepNotesResult {
  *
  * The destination is the account managers' own hierarchy -- Map Ranking space, the business folder,
  * the Client's Book, `Client Meetings Notes`, then one page per touch named
- * `Pre-Monthly Touch Notes <date>`. That page is the whole of this step's output.
+ * `Monthly Touch (<date>)`, with an empty `Post Monthly Touch Notes <date>` subpage inside it.
  *
- * The post-meeting subpage is NOT created here. It is created after the call, by the post-meeting
- * step, as a child of this page -- so the book never carries an empty page that reads as a
- * write-up nobody filled in, and the post-meeting step never has to decide whether an existing
- * subpage is a real re-run or a placeholder it left for itself.
+ * The subpage is created here, empty, so the place the write-up will go exists from the moment
+ * the brief is approved. Its page id is recorded on the touch, and that recorded id is what the
+ * post-meeting step replaces -- which is how an empty placeholder gets filled in rather than
+ * read as a write-up that already exists.
  *
- * Running this twice edits the page MTOS wrote before rather than stacking a second one for the
+ * Running this twice edits the pages MTOS wrote before rather than stacking a second set for the
  * same day. A page with the same name that the AM wrote by hand is left alone and a separate page
  * is created: silently overwriting someone's own notes is worse than a duplicate they can merge.
  */
@@ -283,7 +292,7 @@ export async function filePrepNotesToClientBook(
   }
 
   const { access, docId, meetingsPageId, destination } = located;
-  const name = preNotesPageName(options.touchDateIso);
+  const name = touchPageName(options.touchDateIso);
   const existing = options.existing?.docId === docId ? options.existing : undefined;
 
   let prepPageId = "";
@@ -300,6 +309,21 @@ export async function filePrepNotesToClientBook(
     prepPageId = created.id;
   }
 
+  // The empty post-notes subpage. A subpage already recorded is kept rather than replaced with a
+  // second empty one, so a re-filed brief never orphans the write-up hanging off the first.
+  let postPageId = existing?.postPageId || "";
+  let postPageUrl = existing?.postPageUrl || "";
+  if (!postPageId) {
+    const subName = postNotesPageName(name, options.touchDateIso);
+    const child = await createPage(access, docId, subName, POST_NOTES_PLACEHOLDER, prepPageId);
+    if (child) {
+      postPageId = child.id;
+      postPageUrl = pageUrl(access.workspaceId, docId, child.id);
+    }
+    // A subpage ClickUp refused is not worth failing the approval over. The brief itself is
+    // filed, and the post-meeting step creates the subpage then if it is still missing.
+  }
+
   return {
     destination,
     pageName: name,
@@ -307,26 +331,24 @@ export async function filePrepNotesToClientBook(
       docId,
       prepPageId,
       prepPageUrl: pageUrl(access.workspaceId, docId, prepPageId),
-      // Any post-notes subpage already recorded is kept, so a re-filed prep doesn't orphan the
-      // write-up that hangs off it.
-      ...(existing?.postPageId ? { postPageId: existing.postPageId } : {}),
-      ...(existing?.postPageUrl ? { postPageUrl: existing.postPageUrl } : {}),
+      ...(postPageId ? { postPageId } : {}),
+      ...(postPageUrl ? { postPageUrl } : {}),
       writtenAt: new Date().toISOString(),
     },
   };
 }
 
 /**
- * File the post-call write-up as a subpage of this touch's `Pre-Monthly Touch Notes` page.
+ * File the post-call write-up into this touch's `Post Monthly Touch Notes` subpage.
  *
  * The parent is found by name and date, across every date format the team writes, because these
  * pages are written by hand as often as by MTOS. When nothing matches, or more than one page
  * could, this refuses and names the candidates: nesting a write-up under the wrong month's page,
  * or dropping it at the top of the book, both lose it as surely as not writing it at all.
  *
- * A subpage MTOS recorded earlier is replaced. A subpage somebody else created under the same
- * parent is reported rather than overwritten -- the AM decides whether their own write-up should
- * be replaced.
+ * A subpage MTOS recorded earlier is replaced, which is how the empty page the approval created
+ * gets filled in, and how a re-run updates rather than duplicates. A subpage MTOS has no record
+ * of is reported rather than overwritten -- the AM decides whether it is theirs to keep.
  */
 export async function writePostNotesToClientBook(
   context: TenantContext,
@@ -353,22 +375,22 @@ export async function writePostNotesToClientBook(
     parentId = recorded.prepPageId;
     parentName = String(pages.find((page) => page.id === recorded.prepPageId)?.name || "");
   } else {
-    const match = findPreNotesPage(toBookPages(pages), options.touchDateIso);
+    const match = findTouchPage(toBookPages(pages), options.touchDateIso);
     if (match.kind === "ambiguous") {
       return {
-        error: `More than one page in the Client's Book could be this touch's Pre-Monthly Touch Notes: ${match.candidates
+        error: `More than one page in the Client's Book could be this touch's Monthly Touch page: ${match.candidates
           .map((page) => `"${page.name}"`)
           .join(", ")}. Say which one the post-meeting notes belong under — nothing was written.`,
       };
     }
     if (match.kind === "none") {
-      const hint = match.legacyCandidates.length
-        ? ` The closest page for that date is ${match.legacyCandidates
+      const hint = match.otherCandidates.length
+        ? ` The closest page for that date is ${match.otherCandidates
             .map((page) => `"${page.name}"`)
-            .join(", ")} — rename it to "${preNotesPageName(options.touchDateIso)}" or create that page, then file again.`
-        : ` Create "${preNotesPageName(options.touchDateIso)}" under Client Meetings Notes first, then file again.`;
+            .join(", ")} — rename it to "${touchPageName(options.touchDateIso)}" or create that page, then file again.`
+        : ` Create "${touchPageName(options.touchDateIso)}" under Client Meetings Notes first, then file again.`;
       return {
-        error: `The Client's Book has no "Pre-Monthly Touch Notes" page for this touch's date, and the post-meeting notes go inside it, never beside it.${hint} Nothing was written.`,
+        error: `The Client's Book has no "Monthly Touch" page for this touch's date, and the post-meeting notes go inside it, never beside it.${hint} Nothing was written.`,
       };
     }
     parentId = match.page.id;
@@ -399,7 +421,7 @@ export async function writePostNotesToClientBook(
   const theirs = findPostNotesPage(toBookPages(childrenOf(tree, parentId)));
   if (theirs && theirs.id !== links.postPageId) {
     return {
-      error: `"${parentName}" already has a "${theirs.name}" subpage that MTOS didn't write. The post-meeting notes are on this screen — paste them in, or delete that subpage and file again. Nothing was overwritten.`,
+      error: `"${parentName}" already has a "${theirs.name}" subpage and MTOS has no record of writing it. If that is still the empty page the approval created, delete it and file again; if somebody has written in it, the post-meeting notes are on this screen to paste in. Nothing was overwritten.`,
     };
   }
 

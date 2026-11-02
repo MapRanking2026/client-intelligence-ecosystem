@@ -110,7 +110,7 @@ export interface ApprovalPlanOptions {
   recipient: string;
   /** `guide` builds the timed run-sheet, `deck` builds the client presentation. */
   format: "guide" | "deck";
-  /** The Client's Book page this will write, e.g. `Pre-Monthly Touch Notes 11/5/2026`. */
+  /** The Client's Book page this will write, e.g. `Monthly Touch (11/5/2026)`. */
   pageName: string;
 }
 
@@ -130,7 +130,7 @@ export function approvalPlan(options: ApprovalPlanOptions): string[] {
     options.sendingEmail
       ? `Send the agenda email${options.recipient ? ` to ${options.recipient}` : ""} from support@mapranking.com through your own Intercom, so the reply comes back to you.`
       : "Not send the agenda email — you declined it, so the client is told nothing.",
-    `Post the approved brief to the client's Client's Book in ClickUp, as "${options.pageName}" under Client Meetings Notes. The post-call write-up goes inside that page after the call.`,
+    `Post the approved brief to the client's Client's Book in ClickUp, as "${options.pageName}" under Client Meetings Notes, and create the empty "Post Monthly Touch Notes" subpage inside it for the write-up after the call.`,
     options.format === "deck"
       ? "Build the Map Ranking client presentation and your presenter script from the approved sections."
       : "Build your timed call guide from the approved sections.",

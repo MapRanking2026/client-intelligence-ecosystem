@@ -564,7 +564,7 @@ export function PrepWorkflowPanel({ touchId, workflow, clientName }: PrepWorkflo
         stage="clickup_filing"
         status={stages.clickup_filing.status}
         title={PREP_STAGE_LABEL.clickup_filing}
-        summary="Files the notes as this touch's Pre-Monthly Touch Notes page under Client Meetings Notes. The post-meeting write-up is added inside this page after the call."
+        summary="Files the notes as this touch's Monthly Touch page under Client Meetings Notes, with an empty Post Monthly Touch Notes subpage inside it for the write-up after the call."
       >
         {stages.clickup_filing.status === "blocked" ? (
           <Notice tone="info">
@@ -584,12 +584,12 @@ export function PrepWorkflowPanel({ touchId, workflow, clientName }: PrepWorkflo
                 <div className="flex flex-wrap gap-3">
                   {filing.links?.prepPageUrl ? (
                     <a className="ilink inline-flex items-center gap-1.5" href={filing.links.prepPageUrl} target="_blank" rel="noreferrer">
-                      {filing.pageName || "Pre-Monthly Touch Notes"} <ExternalLink style={{ width: 13, height: 13 }} />
+                      {filing.pageName || "Monthly Touch"} <ExternalLink style={{ width: 13, height: 13 }} />
                     </a>
                   ) : null}
                   {filing.links?.postPageUrl ? (
                     <a className="ilink inline-flex items-center gap-1.5" href={filing.links.postPageUrl} target="_blank" rel="noreferrer">
-                      Post-Monthly Touch Notes <ExternalLink style={{ width: 13, height: 13 }} />
+                      Post Monthly Touch Notes <ExternalLink style={{ width: 13, height: 13 }} />
                     </a>
                   ) : null}
                 </div>

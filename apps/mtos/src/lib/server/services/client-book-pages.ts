@@ -1,20 +1,22 @@
 /**
  * Where a touch's two pages live in the Client's Book, and how to find them.
  *
- * The hierarchy is the account managers' own, and it changed: the book holds ONE page per touch
- * under `Client Meetings Notes`, named `Pre-Monthly Touch Notes <date>`, and the post-call write-up
- * is a SUBPAGE of that page named `Post-Monthly Touch Notes <date>`. The post notes live inside the
- * pre notes from the same touch, never as a page of their own beside them.
+ * The book holds ONE page per touch under `Client Meetings Notes`, named `Monthly Touch (<date>)`,
+ * and the post-call write-up is a SUBPAGE of that page named `Post Monthly Touch Notes <date>`.
+ * The post notes live inside the touch page from the same call, never beside it.
  *
- * Two consequences the rest of the service depends on:
+ * Three consequences the rest of the service depends on:
  *
- *  - The preparation step creates the pre page and nothing else. It no longer files an empty
- *    post-notes placeholder, because a placeholder makes every later post-meeting run look like a
- *    re-run of something that already exists.
- *  - The post-meeting step must find the pre page for that date. The AMs write these pages by hand
- *    with the date in whatever format they feel like, so the match is by name AND date across every
- *    format seen in real books. When nothing matches, or more than one page could, nothing is
- *    guessed: the caller is handed the candidates and asks.
+ *  - The approval step creates the touch page AND an empty post-notes subpage, so the place the
+ *    write-up will go exists from the moment the brief is approved. Its page id is recorded, and
+ *    that recorded id is what lets the post-meeting step fill the page in rather than mistake it
+ *    for a write-up somebody else already filed.
+ *  - The post-meeting step must find the touch page for that date. The AMs write these pages by
+ *    hand with the date in whatever format they feel like, so the match is by name AND date across
+ *    every format seen in real books. When nothing matches, or more than one page could, nothing
+ *    is guessed: the caller is handed the candidates and asks.
+ *  - Books already carry `Pre-Monthly Touch Notes <date>` pages from the previous naming. Those
+ *    are still matched, so a touch already filed under the old name keeps working.
  *
  * Kept free of ClickUp and Firestore so the naming and matching can be exercised directly.
  */
@@ -28,10 +30,20 @@ const PRE_NOTES_ALIASES = [
   "pre mt notes",
 ];
 
-/** Pages MTOS itself wrote under the previous naming, before the pre/post hierarchy was settled. */
-const LEGACY_TOUCH_ALIASES = ["monthly touch"];
+/** What MTOS writes now: `Monthly Touch (10/28/2026)`. */
+const TOUCH_PAGE_ALIASES = ["monthly touch"];
 
-export const POST_NOTES_PREFIX = "Post-Monthly Touch Notes";
+/**
+ * A post-notes page is never the touch page, whatever else its name contains.
+ *
+ * Load-bearing rather than defensive: "post monthly touch notes" contains "monthly touch", so
+ * without this exclusion the write-up subpage matches as its own parent, and a book with one
+ * finished touch in it reads as ambiguous.
+ */
+const POST_NOTES_ALIASES = ["post-monthly touch notes", "post monthly touch notes", "post mt notes"];
+
+export const POST_NOTES_PREFIX = "Post Monthly Touch Notes";
+export const TOUCH_PAGE_PREFIX = "Monthly Touch";
 export const PRE_NOTES_PREFIX = "Pre-Monthly Touch Notes";
 
 export interface BookPage {
@@ -56,13 +68,23 @@ export function touchDateLabel(dateIso: string, timeZone = "America/Los_Angeles"
   }).format(when);
 }
 
-/** `Pre-Monthly Touch Notes 10/28/2026` — this touch's page under `Client Meetings Notes`. */
+/** `Monthly Touch (10/28/2026)` — this touch's page under `Client Meetings Notes`. */
+export function touchPageName(dateIso: string, timeZone?: string): string {
+  return `${TOUCH_PAGE_PREFIX} (${touchDateLabel(dateIso, timeZone)})`;
+}
+
+/**
+ * `Pre-Monthly Touch Notes 10/28/2026` — the previous name for the same page.
+ *
+ * MTOS no longer writes this. It is kept because it is still matched: a book that already has
+ * one of these keeps working, and the error that asks an AM to make the page can name both forms.
+ */
 export function preNotesPageName(dateIso: string, timeZone?: string): string {
   return `${PRE_NOTES_PREFIX} ${touchDateLabel(dateIso, timeZone)}`;
 }
 
 /**
- * `Post-Monthly Touch Notes 10/28/2026` — the subpage, carrying the parent's own date format.
+ * `Post Monthly Touch Notes 10/28/2026` — the subpage, carrying the parent's own date format.
  *
  * Reading the format off the parent rather than re-deriving it is what keeps a hand-written
  * `Pre-Monthly Touch Notes Oct 28, 2026` from acquiring a child dated `10/28/2026`, which reads as
@@ -80,7 +102,7 @@ function normalize(value: string): string {
 /** The date portion of a page title, i.e. whatever follows the notes prefix. */
 function extractDateText(pageName: string): string {
   const trimmed = pageName.trim().replace(/[()]/g, " ").trim();
-  for (const alias of [...PRE_NOTES_ALIASES, ...LEGACY_TOUCH_ALIASES]) {
+  for (const alias of [...PRE_NOTES_ALIASES, ...TOUCH_PAGE_ALIASES]) {
     const index = trimmed.toLowerCase().indexOf(alias);
     if (index >= 0) {
       return trimmed.slice(index + alias.length).replace(/^[\s:\u2013\u2014-]+/, "").trim();
@@ -157,33 +179,36 @@ function hasAlias(pageName: string, aliases: string[]): boolean {
   return aliases.some((alias) => haystack.includes(alias));
 }
 
-export type PreNotesMatch =
+export type TouchPageMatch =
   | { kind: "found"; page: BookPage }
   | { kind: "ambiguous"; candidates: BookPage[] }
-  | { kind: "none"; legacyCandidates: BookPage[] };
+  | { kind: "none"; otherCandidates: BookPage[] };
 
 /**
- * This touch's `Pre-Monthly Touch Notes` page among everything in the book.
+ * This touch's `Monthly Touch (<date>)` page among everything in the book.
  *
  * Returns the three outcomes separately on purpose. `found` is the only one the post-meeting step
  * may write under; `ambiguous` and `none` both mean the account manager has to say which page, and
- * the caller must not fall back to a top-level page or invent one. `legacyCandidates` carries the
- * older `Monthly Touch (date)` pages for the same day so the AM is shown the page they probably
- * mean instead of being told nothing exists.
+ * the caller must not fall back to a top-level page or invent one. `otherCandidates` carries the
+ * pages that do name this date but read as neither a touch page nor the older pre-notes page, so
+ * the AM is shown what is actually in the book instead of being told nothing is there.
+ *
+ * Both namings count as a match, and a post-notes subpage counts as neither.
  */
-export function findPreNotesPage(pages: BookPage[], dateIso: string, timeZone?: string): PreNotesMatch {
+export function findTouchPage(pages: BookPage[], dateIso: string, timeZone?: string): TouchPageMatch {
   const dated = pages.filter((page) => pageNamesDate(page.name, dateIso, timeZone));
-  const matches = dated.filter((page) => hasAlias(page.name, PRE_NOTES_ALIASES));
+  const parents = dated.filter((page) => !hasAlias(page.name, POST_NOTES_ALIASES));
+  const matches = parents.filter((page) => hasAlias(page.name, [...TOUCH_PAGE_ALIASES, ...PRE_NOTES_ALIASES]));
   if (matches.length === 1) {
     return { kind: "found", page: matches[0] };
   }
   if (matches.length > 1) {
     return { kind: "ambiguous", candidates: matches };
   }
-  return { kind: "none", legacyCandidates: dated.filter((page) => hasAlias(page.name, LEGACY_TOUCH_ALIASES)) };
+  return { kind: "none", otherCandidates: parents };
 }
 
-/** An existing `Post-Monthly Touch Notes` page among the children of the pre-notes page. */
+/** An existing `Post Monthly Touch Notes` page among the children of the touch page. */
 export function findPostNotesPage(children: BookPage[]): BookPage | undefined {
-  return children.find((page) => normalize(page.name).startsWith("post-monthly touch notes") || normalize(page.name).startsWith("post monthly touch notes"));
+  return children.find((page) => POST_NOTES_ALIASES.some((alias) => normalize(page.name).startsWith(alias)));
 }

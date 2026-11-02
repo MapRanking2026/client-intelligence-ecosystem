@@ -159,14 +159,19 @@ const plan = approvalPlan({
   sendingEmail: true,
   recipient: "maya@oaklinedental.test",
   format: "guide",
-  pageName: "Pre-Monthly Touch Notes 11/5/2026",
+  pageName: "Monthly Touch (11/5/2026)",
 });
 
 check("one line per outward write", plan.length === 4, String(plan.length));
 check("it says how many sections are approved", plan[0].includes("all 14 brief sections"), plan[0]);
 check("it names who the email goes to", plan[1].includes("maya@oaklinedental.test"), plan[1]);
 check("it says the reply comes back to the AM", /reply comes back to you/i.test(plan[1]));
-check("it names the Client's Book page by name", plan[2].includes("Pre-Monthly Touch Notes 11/5/2026"), plan[2]);
+check("it names the Client's Book page by name", plan[2].includes("Monthly Touch (11/5/2026)"), plan[2]);
+check(
+  "and promises the empty write-up subpage inside it",
+  plan[2].includes("Post Monthly Touch Notes"),
+  plan[2],
+);
 check("it says the guide is built when the guide was chosen", /call guide/i.test(plan[3]), plan[3]);
 
 const deckPlan = approvalPlan({
@@ -175,7 +180,7 @@ const deckPlan = approvalPlan({
   sendingEmail: false,
   recipient: "",
   format: "deck",
-  pageName: "Pre-Monthly Touch Notes 11/5/2026",
+  pageName: "Monthly Touch (11/5/2026)",
 });
 
 check("declines are counted out of the total", deckPlan[0].includes("12 of 14"), deckPlan[0]);

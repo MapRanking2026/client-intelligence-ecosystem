@@ -34,9 +34,10 @@ import {
 import {
   dateVariants,
   findPostNotesPage,
-  findPreNotesPage,
+  findTouchPage,
   postNotesPageName,
   preNotesPageName,
+  touchPageName,
 } from "@/src/lib/server/services/client-book-pages";
 
 let failures = 0;
@@ -328,33 +329,43 @@ function submission(patch: Partial<ReviewSubmission> = {}): ReviewSubmission {
 }
 
 // ---------------------------------------------------------------------------
-scenario("The post notes go inside this touch's pre-notes page, never beside it");
+scenario("The post notes go inside this touch's Monthly Touch page, never beside it");
 {
   check(
-    "the prep page carries the new name and the touch's local date",
-    preNotesPageName(TOUCH_DATE) === "Pre-Monthly Touch Notes 10/28/2026",
-    preNotesPageName(TOUCH_DATE),
+    "the touch page is named Monthly Touch with the touch's local date",
+    touchPageName(TOUCH_DATE) === "Monthly Touch (10/28/2026)",
+    touchPageName(TOUCH_DATE),
   );
   check(
     "a late-evening Pacific call does not file itself under tomorrow",
-    preNotesPageName("2026-10-29T03:00:00.000Z") === "Pre-Monthly Touch Notes 10/28/2026",
-    preNotesPageName("2026-10-29T03:00:00.000Z"),
+    touchPageName("2026-10-29T03:00:00.000Z") === "Monthly Touch (10/28/2026)",
+    touchPageName("2026-10-29T03:00:00.000Z"),
+  );
+  check(
+    "the previous name is still generated, for books that already use it",
+    preNotesPageName(TOUCH_DATE) === "Pre-Monthly Touch Notes 10/28/2026",
+    preNotesPageName(TOUCH_DATE),
   );
 
   check(
+    "the subpage reads its date off the Monthly Touch page it hangs under",
+    postNotesPageName("Monthly Touch (10/28/2026)", TOUCH_DATE) === "Post Monthly Touch Notes 10/28/2026",
+    postNotesPageName("Monthly Touch (10/28/2026)", TOUCH_DATE),
+  );
+  check(
     "the subpage copies the parent's own date format",
-    postNotesPageName("Pre-Monthly Touch Notes Oct 28, 2026", TOUCH_DATE) === "Post-Monthly Touch Notes Oct 28, 2026",
-    postNotesPageName("Pre-Monthly Touch Notes Oct 28, 2026", TOUCH_DATE),
+    postNotesPageName("Monthly Touch (Oct 28, 2026)", TOUCH_DATE) === "Post Monthly Touch Notes Oct 28, 2026",
+    postNotesPageName("Monthly Touch (Oct 28, 2026)", TOUCH_DATE),
   );
   check(
     "an ISO-dated parent gets an ISO-dated child",
-    postNotesPageName("Pre-Monthly Touch Notes 2026-10-28", TOUCH_DATE) === "Post-Monthly Touch Notes 2026-10-28",
+    postNotesPageName("Pre-Monthly Touch Notes 2026-10-28", TOUCH_DATE) === "Post Monthly Touch Notes 2026-10-28",
     postNotesPageName("Pre-Monthly Touch Notes 2026-10-28", TOUCH_DATE),
   );
   check(
     "a parent whose title has no date still gets a dated child",
-    postNotesPageName("Pre-Monthly Touch Notes", TOUCH_DATE) === "Post-Monthly Touch Notes 10/28/2026",
-    postNotesPageName("Pre-Monthly Touch Notes", TOUCH_DATE),
+    postNotesPageName("Monthly Touch", TOUCH_DATE) === "Post Monthly Touch Notes 10/28/2026",
+    postNotesPageName("Monthly Touch", TOUCH_DATE),
   );
 
   const variants = dateVariants(TOUCH_DATE);
@@ -362,22 +373,28 @@ scenario("The post notes go inside this touch's pre-notes page, never beside it"
     check(`"${expected}" is a date format the match understands`, variants.includes(expected));
   }
 
-  const found = findPreNotesPage(
+  const found = findTouchPage(
     [
-      { id: "sep", name: "Pre-Monthly Touch Notes 9/28/2026" },
-      { id: "oct", name: "Pre Monthly Touch Notes Oct 28, 2026" },
+      { id: "sep", name: "Monthly Touch (9/28/2026)" },
+      { id: "oct", name: "Monthly Touch (Oct 28, 2026)" },
       { id: "plan", name: "Strategic Action Plan" },
     ],
     TOUCH_DATE,
   );
-  check("this touch's page is found across spelling and date format", found.kind === "found" && found.page.id === "oct");
+  check("this touch's page is found across date format", found.kind === "found" && found.page.id === "oct");
 
-  const wrongMonth = findPreNotesPage([{ id: "sep", name: "Pre-Monthly Touch Notes 9/28/2026" }], TOUCH_DATE);
+  const older = findTouchPage([{ id: "pre", name: "Pre Monthly Touch Notes Oct 28, 2026" }], TOUCH_DATE);
+  check(
+    "a page under the previous naming is still this touch's page",
+    older.kind === "found" && older.page.id === "pre",
+  );
+
+  const wrongMonth = findTouchPage([{ id: "sep", name: "Monthly Touch (9/28/2026)" }], TOUCH_DATE);
   check("last month's page is not this month's", wrongMonth.kind === "none");
 
-  const ambiguous = findPreNotesPage(
+  const ambiguous = findTouchPage(
     [
-      { id: "a", name: "Pre-Monthly Touch Notes 10/28/2026" },
+      { id: "a", name: "Monthly Touch (10/28/2026)" },
       { id: "b", name: "Pre-MT Notes Oct 28" },
     ],
     TOUCH_DATE,
@@ -388,17 +405,36 @@ scenario("The post notes go inside this touch's pre-notes page, never beside it"
     ambiguous.kind === "ambiguous" && ambiguous.candidates.length === 2,
   );
 
-  const legacy = findPreNotesPage([{ id: "old", name: "Monthly Touch (10/28/2026)" }], TOUCH_DATE);
-  check("a page under the old naming is not treated as a pre-notes page", legacy.kind === "none");
+  // "post monthly touch notes" contains "monthly touch", so without the exclusion the write-up
+  // subpage matches as its own parent and a finished touch reads as two candidates.
+  const withSubpage = findTouchPage(
+    [
+      { id: "parent", name: "Monthly Touch (10/28/2026)" },
+      { id: "child", name: "Post Monthly Touch Notes 10/28/2026" },
+    ],
+    TOUCH_DATE,
+  );
   check(
-    "but it is offered as the page the AM probably means",
-    legacy.kind === "none" && legacy.legacyCandidates.some((page) => page.id === "old"),
+    "the write-up subpage is never mistaken for the touch page",
+    withSubpage.kind === "found" && withSubpage.page.id === "parent",
+    withSubpage.kind,
   );
 
-  check("no pages at all means none, not a crash", findPreNotesPage([], TOUCH_DATE).kind === "none");
+  const unrecognised = findTouchPage([{ id: "old", name: "October check-in 10/28/2026" }], TOUCH_DATE);
+  check("a page that names the date but not the touch is not a match", unrecognised.kind === "none");
+  check(
+    "but it is offered as the page the AM probably means",
+    unrecognised.kind === "none" && unrecognised.otherCandidates.some((page) => page.id === "old"),
+  );
+
+  check("no pages at all means none, not a crash", findTouchPage([], TOUCH_DATE).kind === "none");
 
   check(
     "an existing post subpage is recognised",
+    findPostNotesPage([{ id: "p", name: "Post Monthly Touch Notes 10/28/2026" }])?.id === "p",
+  );
+  check(
+    "and so is the hyphenated spelling books already carry",
     findPostNotesPage([{ id: "p", name: "Post-Monthly Touch Notes 10/28/2026" }])?.id === "p",
   );
   check(

@@ -1,4 +1,5 @@
 import { normalizeChips, type SourceChip } from "@/src/lib/contracts/brief-sources";
+import { htmlToMarkdown } from "@/src/lib/contracts/rich-text";
 
 /**
  * The Pre-Monthly Touch brief: the whole document the account manager reviews before the call,
@@ -534,4 +535,79 @@ export function approvalSummary(review?: { declinedSections?: string[] }): {
     new Set(review?.declinedSections || []).has(id),
   );
   return { approving: DECLINABLE_SECTION_IDS.length - declined.length, declined };
+}
+
+// ---------------------------------------------------------------------------
+// What gets posted to the Client's Book
+// ---------------------------------------------------------------------------
+
+/**
+ * The approved brief as one markdown page.
+ *
+ * Only the sections the AM did not decline, in brief order, with the AM's own edits in place of
+ * the generated text where they made one. Three things are deliberate.
+ *
+ * **Declined sections leave a line, not a hole.** `Section 7 — Issues and what we are doing:
+ * declined` tells next month's preparation that this was considered and left out. Silently
+ * dropping it is indistinguishable from the preparation never writing it.
+ *
+ * **A section the preparation could not write says so**, for the same reason, and because the page
+ * is what the AM reads during the call.
+ *
+ * **The missing-evidence list goes at the top.** The prompt puts it there, and it is the one part
+ * of the brief that changes what the AM does in the first five minutes of the call.
+ */
+export function approvedBriefMarkdown(
+  brief: PrepBrief,
+  review: { declinedSections?: string[]; sectionEdits?: Record<string, string> } | undefined,
+  options: { clientName: string; callLabel: string; accountManager?: string },
+): string {
+  const declined = new Set(review?.declinedSections || []);
+  const edits = review?.sectionEdits || {};
+  const out: string[] = [
+    options.clientName
+      ? `# Pre-Monthly Touch brief — ${options.clientName}`
+      : "# Pre-Monthly Touch brief",
+    "",
+    [`Call: ${options.callLabel}`, options.accountManager ? `Account manager: ${options.accountManager}` : ""]
+      .filter(Boolean)
+      .join(" · "),
+    "",
+  ];
+
+  if (brief.gaps.length) {
+    out.push("## ⚠️ Missing — confirm before or during the call", "");
+    for (const gap of brief.gaps) {
+      const why = gap.whyItMatters ? ` — ${gap.whyItMatters}` : "";
+      const ask = gap.askOrCheck ? ` _Ask or check: ${gap.askOrCheck}_` : "";
+      out.push(`- **${gap.item}**${why}${ask}`);
+    }
+    out.push("");
+  }
+
+  for (const meta of BRIEF_SECTIONS) {
+    if (meta.id === "h" || !meta.declinable) continue;
+    const heading = `## ${meta.n}. ${meta.title}`;
+    if (declined.has(meta.id)) {
+      out.push(heading, "", "_Declined by the account manager — left out of this call._", "");
+      continue;
+    }
+    const edited = edits[meta.id];
+    if (edited) {
+      out.push(heading, "", htmlToMarkdown(edited), "");
+      continue;
+    }
+    const blocks = brief.sections.filter((section) => section.id === meta.id);
+    if (!blocks.length) {
+      out.push(heading, "", "_The preparation did not write this section._", "");
+      continue;
+    }
+    out.push(heading, "");
+    for (const block of blocks) {
+      if (block.subtitle) out.push(`### ${block.subtitle}`, "");
+      out.push(block.markdown.trim(), "");
+    }
+  }
+
+  return out.join("\n").replace(/\n{3,}/g, "\n\n").trim();
 }

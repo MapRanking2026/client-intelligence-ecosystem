@@ -20,7 +20,9 @@
     "check:post-meeting-review": "tsx scripts/check-post-meeting-review.ts",
     "check:google-meet": "tsx scripts/check-google-meet.ts",
     "check:touch-progress": "tsx scripts/check-touch-progress.ts",
-    "check:prep-brief": "tsx scripts/check-prep-brief.ts"
+    "check:prep-brief": "tsx scripts/check-prep-brief.ts",
+    "check:agenda-email": "tsx scripts/check-agenda-email.ts",
+    "check:touch-approval": "tsx scripts/check-touch-approval.ts"
   },
   "dependencies": {
     "@cie/engine": "*",

@@ -22,6 +22,8 @@ import {
 } from "@/src/lib/server/services/post-meeting-review-service";
 import { generateQaReview, recordVictorDecision } from "@/src/lib/server/services/qa-review-service";
 import { advanceTouchProgress, saveTouchDraft } from "@/src/lib/server/services/touch-state-service";
+import { agendaEmailPatch } from "@/src/lib/server/services/agenda-email-service";
+import { approveAndPrepareCall } from "@/src/lib/server/services/touch-approval-service";
 
 // One Generate now runs the prep pack and the live call guide back to back -- several
 // model calls plus the dashboard pulls. Matches the ceiling the other long-running
@@ -152,6 +154,13 @@ const touchRequestSchema = z.discriminatedUnion("action", [
     decision: z.enum(["approved", "changes_requested"]),
     note: z.string().optional(),
   }),
+  // The one approval at the end of the review step. Everything it does leaves MTOS, so it happens
+  // only on this explicit request and never as a side effect of loading a screen.
+  z.object({
+    action: z.literal("approve_and_go_live"),
+    format: z.enum(["guide", "deck"]).optional(),
+    makeDefault: z.boolean().optional(),
+  }),
   z.object({
     action: z.literal("advance_progress"),
     step: z.enum(["prep", "review", "live", "follow", "qa"]),
@@ -175,13 +184,16 @@ const touchRequestSchema = z.discriminatedUnion("action", [
         approvedBy: z.string().optional(),
       })
       .optional(),
+    // `sentAt`, `sentVia` and the Intercom conversation id are deliberately NOT accepted here.
+    // They are the record that the client actually received something, and only the approval
+    // service writes them, from Intercom's own answer. A screen that could set them could make a
+    // touch claim an email went out that never did.
     agendaEmail: z
       .object({
         subject: z.string().optional(),
         html: z.string().optional(),
         declined: z.boolean().optional(),
-        sentAt: z.string().optional(),
-        intercomConversationId: z.string().optional(),
+        recipient: z.string().optional(),
       })
       .optional(),
     live: z
@@ -318,8 +330,16 @@ export async function POST(
       case "save_touch_draft":
         result = await saveTouchDraft(context, touchId, {
           ...(payload.review ? { review: payload.review } : {}),
-          ...(payload.agendaEmail ? { agendaEmail: payload.agendaEmail } : {}),
+          // The HTML comes out of a rich-text editor, so it is cleaned here rather than only in
+          // the browser: this is the copy that is stored and the copy that is sent.
+          ...(payload.agendaEmail ? { agendaEmail: agendaEmailPatch(payload.agendaEmail) } : {}),
           ...(payload.live ? { live: payload.live } : {}),
+        });
+        break;
+      case "approve_and_go_live":
+        result = await approveAndPrepareCall(context, touchId, {
+          ...(payload.format ? { format: payload.format } : {}),
+          ...(payload.makeDefault !== undefined ? { makeDefault: payload.makeDefault } : {}),
         });
         break;
     }

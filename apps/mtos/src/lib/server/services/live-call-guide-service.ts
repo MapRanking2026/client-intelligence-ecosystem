@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { approvedBriefMarkdown } from "@/src/lib/contracts/prep-brief";
 import type { TenantContext } from "@/src/lib/contracts/mtos";
 import type {
   AnticipatedObjection,
@@ -69,6 +70,28 @@ function formatScorecardMetric(metric?: ScorecardMetric) {
 }
 
 /**
+ * The brief as the AM approved it, or nothing when the review step has not been through.
+ *
+ * Deliberately silent rather than falling back to the unapproved brief: the guide and the deck are
+ * built on the approval, and a deck quietly built from text nobody signed off is the failure the
+ * single approval button exists to prevent.
+ */
+function approvedBrief(touch: MonthlyTouchRecord): { markdown: string; declined: string[] } | undefined {
+  if (!touch.prepBrief || !touch.review?.approvedAt) return undefined;
+  const callLabel = touch.scheduledAt || touch.prepPack?.schedule.scheduledAt || "";
+  return {
+    markdown: approvedBriefMarkdown(touch.prepBrief, touch.review, {
+      // The touch carries a clientId and a prose summary, never a client name, and this
+      // bundle is already scoped to one touch. The title goes without it rather than
+      // guessing a name out of the summary text.
+      clientName: "",
+      callLabel,
+    }),
+    declined: touch.review.declinedSections || [],
+  };
+}
+
+/**
  * The evidence bundle a downstream module reasons over: everything the prep pack
  * gathered plus the touch's own lists. Shared so the timed run-sheet and the
  * client-facing deck are built from exactly the same facts -- if these two drifted
@@ -76,7 +99,14 @@ function formatScorecardMetric(metric?: ScorecardMetric) {
  */
 export function buildTouchEvidence(touch: MonthlyTouchRecord) {
   const prepPack = touch.prepPack;
+  const approved = approvedBrief(touch);
   return {
+    // The approved brief when the AM has been through the review step, and nothing when they have
+    // not. Both the guide and the deck are built from the APPROVED sections, so a section the AM
+    // declined must not reach either -- and `declinedSections` says which ones, because a model
+    // given only the remaining text has no way to know something was deliberately left out.
+    approvedBrief: approved?.markdown ?? null,
+    declinedSections: approved?.declined ?? null,
     agenda: touch.agenda,
     wins: touch.wins,
     risks: touch.risks,

@@ -41,7 +41,11 @@ import {
   resumeNotice,
   type TouchStep,
 } from "@/src/lib/contracts/touch-progress";
-import { EMPTY_PREP_BRIEF } from "@/src/lib/contracts/prep-brief";
+import { EMPTY_PREP_BRIEF, approvalSummary } from "@/src/lib/contracts/prep-brief";
+import { AgendaApprovalPanel } from "@/src/components/mtos/agenda-approval-panel";
+import { readAgendaEmail } from "@/src/lib/server/services/agenda-email-service";
+import { preNotesPageName } from "@/src/lib/server/services/client-book-pages";
+import { getAccountManagerPreferences } from "@/src/lib/server/services/user-service";
 
 /**
  * Run-sheet v2.
@@ -177,6 +181,13 @@ export default async function RunSheetV2Page({
     lastSavedAt: lastSavedAt(touch),
     timeZone: profile.timeZone,
   });
+  // The agenda email and the format preference are read for the review step: both are facts about
+  // this touch and this user that the screen states rather than a model restating them.
+  const [agendaEmail, preferences] = await Promise.all([
+    readAgendaEmail(context, touch, client),
+    getAccountManagerPreferences(context),
+  ]);
+  const sectionSummary = approvalSummary(touch.review);
 
   const liveLauncher = (
     <LiveModeLauncher
@@ -288,6 +299,23 @@ export default async function RunSheetV2Page({
                     touch={touch}
                     accountManager={{ name: profile.name, email: profile.email }}
                     timeZone={profile.timeZone}
+                  />
+                }
+                agendaEmail={
+                  <AgendaApprovalPanel
+                    touchId={touch.id}
+                    email={agendaEmail.state}
+                    sent={agendaEmail.sent}
+                    availableCc={agendaEmail.availableCc}
+                    ccEnabled={agendaEmail.ccEnabled}
+                    format={touch.live?.format || preferences.liveCallFormat || "guide"}
+                    approval={touch.approval}
+                    approving={sectionSummary.approving}
+                    declined={sectionSummary.declined}
+                    pageName={preNotesPageName(
+                      touch.scheduledAt || prepPack?.schedule.scheduledAt || client.touchDate,
+                      profile.timeZone,
+                    )}
                   />
                 }
               />

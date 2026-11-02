@@ -64,7 +64,14 @@ function unixToIso(value: unknown): string | undefined {
   return new Date(value * 1000).toISOString();
 }
 
-async function intercomPost(
+/**
+ * One POST to Intercom, with the permission errors turned into something an AM can act on.
+ *
+ * Exported because sending the agenda email needs the same error handling as reading the inbox:
+ * a 403 from a shared Intercom app always means a missing permission on the app, and saying which
+ * one beats a status code twice over.
+ */
+export async function intercomPost(
   token: string,
   path: string,
   body: JsonRecord,
@@ -106,7 +113,7 @@ async function intercomPost(
 }
 
 /** Contact ids for an email address. Empty means Intercom has no contact with that address. */
-async function findContactIds(token: string, email: string): Promise<{ ids: string[] } | { error: string }> {
+export async function findContactIds(token: string, email: string): Promise<{ ids: string[] } | { error: string }> {
   const result = await intercomPost(token, "/contacts/search", {
     query: { field: "email", operator: "=", value: email },
     pagination: { per_page: 25 },

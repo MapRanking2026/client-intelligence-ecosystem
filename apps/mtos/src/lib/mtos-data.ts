@@ -2,6 +2,7 @@ import type { GoogleMeetingState } from "@/src/lib/contracts/google-meet";
 import type { PrepWorkflowState } from "@/src/lib/contracts/prep-workflow";
 import type { TouchStep } from "@/src/lib/contracts/touch-progress";
 import type { PrepBrief } from "@/src/lib/contracts/prep-brief";
+import type { TouchApprovalState } from "@/src/lib/contracts/touch-approval";
 
 export type { PrepWorkflowState };
 export type { TouchStep };
@@ -1179,7 +1180,17 @@ export interface TouchAgendaEmailState {
   html: string;
   /** The AM said it is already sent, or should not be sent at all. */
   declined?: boolean;
+  /** The address it goes to. Empty is a blocking gap, never a guess from the business name. */
+  recipient?: string;
+  /** How that address was found, in plain words, so a weak source is visible as one. */
+  recipientSource?: string;
+  /** The office contact copied in, when the AM's preference says to copy one. */
+  cc?: string;
+  /** What stops this being sent -- a missing date, link or sign-off. Non-empty refuses the send. */
+  blockingGaps?: string[];
   sentAt?: string;
+  /** What actually carried it, e.g. `Intercom (jordan@mapranking.com)`. */
+  sentVia?: string;
   /** Stored so a retry can never send the agenda twice. */
   intercomConversationId?: string;
   savedAt?: string;
@@ -1242,6 +1253,8 @@ export interface MonthlyTouchRecord {
   progressUpdatedAt?: string;
   review?: TouchReviewState;
   agendaEmail?: TouchAgendaEmailState;
+  /** The four outward writes one approval performs, each with its own outcome so a retry resumes. */
+  approval?: TouchApprovalState;
   live?: TouchLiveState;
   transcript?: TouchTranscriptState;
   followThrough?: TouchFollowThroughState;

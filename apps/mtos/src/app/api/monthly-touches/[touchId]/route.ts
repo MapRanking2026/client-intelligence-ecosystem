@@ -21,6 +21,7 @@ import {
   PostMeetingReviewIncompleteError,
 } from "@/src/lib/server/services/post-meeting-review-service";
 import { generateQaReview, recordVictorDecision } from "@/src/lib/server/services/qa-review-service";
+import { advanceTouchProgress, saveTouchDraft } from "@/src/lib/server/services/touch-state-service";
 
 // One Generate now runs the prep pack and the live call guide back to back -- several
 // model calls plus the dashboard pulls. Matches the ceiling the other long-running
@@ -151,6 +152,48 @@ const touchRequestSchema = z.discriminatedUnion("action", [
     decision: z.enum(["approved", "changes_requested"]),
     note: z.string().optional(),
   }),
+  z.object({
+    action: z.literal("advance_progress"),
+    step: z.enum(["prep", "review", "live", "follow", "qa"]),
+  }),
+  // The autosave behind the review, the agenda email and the live screens. Every field is
+  // optional because the screens send only what changed; at least one of the three groups must be
+  // present, which the service enforces rather than the schema so the message can say so plainly.
+  z.object({
+    action: z.literal("save_touch_draft"),
+    review: z
+      .object({
+        declinedSections: z.array(z.string()).optional(),
+        sectionEdits: z.record(z.string(), z.string()).optional(),
+        coaching: z
+          .record(
+            z.string(),
+            z.object({ choice: z.enum(["use", "adapt", "skip"]), reason: z.string().optional() }),
+          )
+          .optional(),
+        approvedAt: z.string().optional(),
+        approvedBy: z.string().optional(),
+      })
+      .optional(),
+    agendaEmail: z
+      .object({
+        subject: z.string().optional(),
+        html: z.string().optional(),
+        declined: z.boolean().optional(),
+        sentAt: z.string().optional(),
+        intercomConversationId: z.string().optional(),
+      })
+      .optional(),
+    live: z
+      .object({
+        format: z.enum(["guide", "deck"]).optional(),
+        readyAt: z.string().optional(),
+        callStartedAt: z.string().optional(),
+        callEndedAt: z.string().optional(),
+        notes: z.record(z.string(), z.string()).optional(),
+      })
+      .optional(),
+  }),
 ]);
 
 export async function GET(
@@ -268,6 +311,16 @@ export async function POST(
         break;
       case "record_victor_decision":
         result = await recordVictorDecision(context, touchId, payload.decision, payload.note);
+        break;
+      case "advance_progress":
+        result = await advanceTouchProgress(context, touchId, payload.step);
+        break;
+      case "save_touch_draft":
+        result = await saveTouchDraft(context, touchId, {
+          ...(payload.review ? { review: payload.review } : {}),
+          ...(payload.agendaEmail ? { agendaEmail: payload.agendaEmail } : {}),
+          ...(payload.live ? { live: payload.live } : {}),
+        });
         break;
     }
 

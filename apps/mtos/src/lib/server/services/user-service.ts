@@ -69,6 +69,48 @@ export async function getAccountManagerIdentity(
   }
 }
 
+/**
+ * The AM's own time zone, used for every deadline and wall-clock label shown to them.
+ *
+ * Pacific is the fallback rather than the server's zone: the team works Pacific hours, and a
+ * deadline rendered in UTC because a profile field was blank is a deadline read eight hours wrong.
+ */
+export const DEFAULT_ACCOUNT_MANAGER_TIME_ZONE = "America/Los_Angeles";
+
+export interface AccountManagerProfile {
+  name: string;
+  email: string;
+  timeZone: string;
+}
+
+/**
+ * Name, email and time zone of the logged-in account manager. Never throws: a missing profile
+ * document means the defaults, not a failed screen.
+ */
+export async function getAccountManagerProfile(
+  context: TenantContext,
+): Promise<AccountManagerProfile> {
+  const db = getFirebaseAdminDb();
+  const fallback = { name: "", email: "", timeZone: DEFAULT_ACCOUNT_MANAGER_TIME_ZONE };
+  if (!db) return fallback;
+  try {
+    const snapshot = await db.doc(tenantUserPath(context.tenantId, context.userId)).get();
+    const data = snapshot.exists
+      ? (snapshot.data() as
+          | { email?: string; displayName?: string; name?: string; timeZone?: string }
+          | undefined)
+      : undefined;
+    const email = data?.email?.trim() || "";
+    return {
+      email,
+      name: data?.displayName?.trim() || data?.name?.trim() || toFirstName(email),
+      timeZone: data?.timeZone?.trim() || DEFAULT_ACCOUNT_MANAGER_TIME_ZONE,
+    };
+  } catch {
+    return fallback;
+  }
+}
+
 export async function getUserGreeting(context: TenantContext) {
   const db = getFirebaseAdminDb();
   const roleText = roleLabel(context.role);

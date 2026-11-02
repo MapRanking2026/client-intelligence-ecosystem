@@ -1,7 +1,9 @@
 import type { GoogleMeetingState } from "@/src/lib/contracts/google-meet";
 import type { PrepWorkflowState } from "@/src/lib/contracts/prep-workflow";
+import type { TouchStep } from "@/src/lib/contracts/touch-progress";
 
 export type { PrepWorkflowState };
+export type { TouchStep };
 
 export type Confidence = "High" | "Medium" | "Low";
 /**
@@ -1144,7 +1146,104 @@ export interface LiveSession {
   closeNotes: string;
 }
 
+/**
+ * The review of the brief, as the account manager left it.
+ *
+ * Declining a section is a real editorial decision, not a delete: the section stays in the record
+ * so the next touch can see it was considered, and is excluded from the Client's Book post and
+ * from the live guide. There are no per-section approvals -- one approval covers the whole brief.
+ */
+export interface TouchReviewState {
+  /** Section ids the AM declined. Excluded from the Client's Book post and the live guide. */
+  declinedSections: string[];
+  /** Rich-text overrides, by section id. A section with no entry keeps its generated text. */
+  sectionEdits: Record<string, string>;
+  /** The AM's answer to each coaching proposal carried over from the last QC. */
+  coaching: Record<string, TouchCoachingChoice>;
+  approvedAt?: string;
+  approvedBy?: string;
+  /** Last autosave, so a reopened touch can say when it was last touched. */
+  savedAt?: string;
+}
+
+/** A coaching proposal is a suggestion the AM answers, never an instruction they are given. */
+export interface TouchCoachingChoice {
+  choice: "use" | "adapt" | "skip";
+  reason?: string;
+}
+
+/** The client-facing agenda email: written before the call, sent through the AM's own Intercom. */
+export interface TouchAgendaEmailState {
+  subject: string;
+  html: string;
+  /** The AM said it is already sent, or should not be sent at all. */
+  declined?: boolean;
+  sentAt?: string;
+  /** Stored so a retry can never send the agenda twice. */
+  intercomConversationId?: string;
+  savedAt?: string;
+}
+
+export type LiveCallFormat = "guide" | "deck";
+
+/**
+ * The live call. `readyAt` and `callStartedAt` are deliberately separate: approving the brief puts
+ * Live into READY and nothing more, so the timer belongs to the call rather than to the approval,
+ * however many days earlier that happened.
+ */
+export interface TouchLiveState {
+  format: LiveCallFormat;
+  readyAt?: string;
+  callStartedAt?: string;
+  callEndedAt?: string;
+  /** The AM's own notes, by guide part or slide key. */
+  notes: Record<string, string>;
+  savedAt?: string;
+}
+
+export type TranscriptWatchStatus = "waiting" | "found" | "attached" | "none";
+
+/**
+ * The hunt for the call transcript after the call ends.
+ *
+ * `ignored` is kept rather than dropped: when several Gemini notes docs exist because the call was
+ * stopped and restarted, the AM needs to see which were joined and which were empty, or the notes
+ * look as though half the call never happened.
+ */
+export interface TouchTranscriptState {
+  status: TranscriptWatchStatus;
+  /** Drive ids of the notes docs used, in the order they were joined. */
+  docIds: string[];
+  ignored?: { docId: string; name: string; reason: string }[];
+  lang?: string;
+  foundAt?: string;
+  lastCheckedAt?: string;
+}
+
+/** The follow-through, and the one deadline in the whole touch. */
+export interface TouchFollowThroughState {
+  /** 24 business hours after the call ended, on the AM's own clock. */
+  dueAt?: string;
+  startedAt?: string;
+  finishedAt?: string;
+  savedAt?: string;
+}
+
 export interface MonthlyTouchRecord {
+  /**
+   * The furthest step this touch has reached: prep, review, live, follow, qa.
+   *
+   * Additive and optional -- a touch prepared before this field existed reads as "prep", which is
+   * where its screens already open. Only ever moved forward (see `advanceProgress`), so an AM
+   * reading the brief again after the call does not rewind the touch.
+   */
+  progress?: TouchStep;
+  progressUpdatedAt?: string;
+  review?: TouchReviewState;
+  agendaEmail?: TouchAgendaEmailState;
+  live?: TouchLiveState;
+  transcript?: TouchTranscriptState;
+  followThrough?: TouchFollowThroughState;
   /** Exact Google room/conference selected for this touch, owned by the connected AM. */
   googleMeeting?: GoogleMeetingState;
   id: string;

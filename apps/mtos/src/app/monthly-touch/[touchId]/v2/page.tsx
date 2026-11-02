@@ -9,7 +9,7 @@ import { DataError } from "@/src/components/mtos/data-error";
 import { Linkified } from "@/src/components/mtos/annotate";
 import { LiveModeLauncher } from "@/src/components/mtos/live-mode";
 import { PrepWorkflowPanel } from "@/src/components/mtos/prep-workflow-panel";
-import { RunSheetStages } from "@/src/components/mtos/run-sheet-stages";
+import { TouchProgressRail } from "@/src/components/mtos/touch-progress-rail";
 import { ScoreBreakdown } from "@/src/components/mtos/score-breakdown";
 import { CallGuideActions } from "@/src/components/mtos/call-guide-actions";
 import { PresentationViewer } from "@/src/components/mtos/presentation-viewer";
@@ -32,6 +32,13 @@ import {
   type RunSheetStage,
 } from "@/src/lib/server/services/prep-readiness-service";
 import { readPrepWorkflow } from "@/src/lib/server/services/prep-workflow-service";
+import { getAccountManagerProfile } from "@/src/lib/server/services/user-service";
+import {
+  isTouchStep,
+  resolveOpeningStep,
+  resumeNotice,
+  type TouchStep,
+} from "@/src/lib/contracts/touch-progress";
 
 /**
  * Run-sheet v2.
@@ -49,13 +56,45 @@ import { readPrepWorkflow } from "@/src/lib/server/services/prep-workflow-servic
  * tried on real touches.
  */
 
-const VIEWS: { id: RunSheetStage; label: string }[] = [
-  { id: "prep", label: "Prep" },
-  { id: "review", label: "Review" },
-  { id: "live", label: "Live" },
-  { id: "follow_through", label: "Follow-through" },
-  { id: "qa", label: "QA" },
-];
+/**
+ * The stored step and the stage read off the touch's real state are the same five steps under two
+ * names: `follow_through` is the stage, `follow` is the step. Mapped rather than renamed because
+ * the stage name is already in the board, the command centre and the primary-action table.
+ */
+const STEP_FOR_STAGE: Record<RunSheetStage, TouchStep> = {
+  prep: "prep",
+  review: "review",
+  live: "live",
+  follow_through: "follow",
+  qa: "qa",
+};
+
+const STAGE_FOR_STEP: Record<TouchStep, RunSheetStage> = {
+  prep: "prep",
+  review: "review",
+  live: "live",
+  follow: "follow_through",
+  qa: "qa",
+};
+
+/**
+ * When this touch was last written to, for the "last saved" line on the resume banner.
+ *
+ * The latest of the per-screen autosaves and the document's own timestamp, because an AM who spent
+ * an hour in the review and an hour in the live notes should be told about the hour they were in
+ * last, not whichever field happens to be read first.
+ */
+function lastSavedAt(touch: { progressUpdatedAt?: string; updatedAt?: string; review?: { savedAt?: string }; agendaEmail?: { savedAt?: string }; live?: { savedAt?: string } }) {
+  const stamps = [
+    touch.progressUpdatedAt,
+    touch.review?.savedAt,
+    touch.agendaEmail?.savedAt,
+    touch.live?.savedAt,
+    touch.updatedAt,
+  ].filter((value): value is string => Boolean(value) && !Number.isNaN(Date.parse(value as string)));
+  if (!stamps.length) return undefined;
+  return stamps.reduce((latest, value) => (Date.parse(value) > Date.parse(latest) ? value : latest));
+}
 
 function Section({
   eyebrow,
@@ -85,14 +124,17 @@ export default async function RunSheetV2Page({
   searchParams,
 }: {
   params: Promise<{ touchId: string }>;
-  searchParams: Promise<{ view?: string }>;
+  // `stage` is the parameter the handoff and the deep links use; `view` is kept working so links
+  // already pasted into ClickUp tickets and Slack threads do not break.
+  searchParams: Promise<{ stage?: string; view?: string }>;
 }) {
   const { touchId } = await params;
-  const { view: requestedView } = await searchParams;
+  const { stage: requestedStage, view: requestedView } = await searchParams;
+  const context = await resolveTenantContext();
 
   let payload: Awaited<ReturnType<typeof getMonthlyTouchWorkspaceView>>;
   try {
-    payload = await getMonthlyTouchWorkspaceView(await resolveTenantContext(), touchId);
+    payload = await getMonthlyTouchWorkspaceView(context, touchId);
   } catch {
     return (
       <AppShell>
@@ -108,11 +150,30 @@ export default async function RunSheetV2Page({
   const stage = deriveRunSheetStage(touch);
   const primary = RUN_SHEET_PRIMARY_ACTION[stage];
 
-  // The AM can look at any stage; the default is the one the touch is in. A stage they chose is
-  // theirs, so the view never jumps back on its own.
-  const view: RunSheetStage = VIEWS.some((entry) => entry.id === requestedView)
-    ? (requestedView as RunSheetStage)
-    : stage;
+  /**
+   * Where this touch resumes.
+   *
+   * `touch.progress` is the stored marker. A touch that predates it has none, so the stage read
+   * off its real state stands in -- an existing touch mid-follow-through must not reopen at prep
+   * just because a field was added after it started.
+   *
+   * A requested step is honoured only up to the furthest one reached: a link to the follow-through
+   * on a touch whose call hasn't happened would open a screen with no transcript, which reads as a
+   * broken page rather than as work that hasn't happened yet.
+   */
+  const progress: TouchStep = isTouchStep(touch.progress) ? touch.progress : STEP_FOR_STAGE[stage];
+  const legacyStep =
+    requestedView && requestedView in STEP_FOR_STAGE
+      ? STEP_FOR_STAGE[requestedView as RunSheetStage]
+      : undefined;
+  const step = resolveOpeningStep(progress, requestedStage || legacyStep);
+  const view: RunSheetStage = STAGE_FOR_STEP[step];
+  const profile = await getAccountManagerProfile(context);
+  const resume = resumeNotice({
+    progress,
+    lastSavedAt: lastSavedAt(touch),
+    timeZone: profile.timeZone,
+  });
 
   const liveLauncher = (
     <LiveModeLauncher
@@ -172,29 +233,18 @@ export default async function RunSheetV2Page({
 
       <GoogleMeetingPanel touchId={touch.id} emails={client.googleMeetingEmails} />
 
-      <div className="mt-4">
-        <RunSheetStages current={stage} action={primaryAction} note={primary.hint} />
-      </div>
+      <TouchProgressRail
+        touchId={touch.id}
+        progress={progress}
+        current={step}
+        resume={resume}
+        followThroughDueAt={touch.followThrough?.dueAt}
+        timeZone={profile.timeZone}
+      />
 
-      <div className="mt-4 flex flex-wrap items-center gap-3">
-        <nav className="seg" aria-label="Which stage to show">
-          {VIEWS.map((entry) => (
-            <Link
-              key={entry.id}
-              href={`/monthly-touch/${touch.id}/v2?view=${entry.id}`}
-              className={`seg-btn ${view === entry.id ? "on" : ""}`}
-              aria-current={view === entry.id ? "page" : undefined}
-            >
-              {entry.label}
-            </Link>
-          ))}
-        </nav>
-        {view !== stage ? (
-          <span className="muted text-[0.78rem]">
-            You are looking at {VIEWS.find((entry) => entry.id === view)?.label}; this touch is in{" "}
-            {VIEWS.find((entry) => entry.id === stage)?.label}.
-          </span>
-        ) : null}
+      <div className="card mt-4 flex flex-wrap items-center justify-between gap-3">
+        <p className="muted max-w-xl text-[0.84rem]">{primary.hint}</p>
+        {primaryAction}
       </div>
 
       {/* ---------- Prep and Review: the ordered workflow plus what it produced ---------- */}

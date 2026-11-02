@@ -18,7 +18,8 @@
     "check:api-errors": "tsx scripts/check-api-error-messages.ts",
     "check:prep-workflow": "tsx scripts/check-prep-workflow.ts",
     "check:post-meeting-review": "tsx scripts/check-post-meeting-review.ts",
-    "check:google-meet": "tsx scripts/check-google-meet.ts"
+    "check:google-meet": "tsx scripts/check-google-meet.ts",
+    "check:touch-progress": "tsx scripts/check-touch-progress.ts"
   },
   "dependencies": {
     "@cie/engine": "*",

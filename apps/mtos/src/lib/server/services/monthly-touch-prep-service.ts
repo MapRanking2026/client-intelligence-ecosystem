@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import type { IntegrationSnapshotRecord } from "@/src/lib/contracts/integration-sync";
 import type { TenantContext } from "@/src/lib/contracts/mtos";
+import { normalizePrepBrief, type PrepBrief } from "@/src/lib/contracts/prep-brief";
 import type {
   AdsPerformancePack,
   BusinessScorecard,
@@ -1558,7 +1559,20 @@ async function generateClaudeTouchOutput(
         maxTokens: 16000,
         temperature: 0.2,
   });
-  const parsed = claudeResponseSchema.parse(normalizeClaudeTouchPayload(llmResult.data));
+  const normalized = normalizeClaudeTouchPayload(llmResult.data);
+  const parsed = claudeResponseSchema.parse(normalized);
+
+  /**
+   * The full preparation brief, read out of the SAME response, tolerantly.
+   *
+   * Deliberately not part of `claudeResponseSchema`: that schema throws, and the six fields it
+   * guards feed the call guide and the deck, which must keep working. A model that returns
+   * thirteen good brief sections and one malformed one should cost the AM that section, not the
+   * whole preparation half an hour before a client call. A response from before the v2 prompt
+   * carries none of these fields and reads as a brief with no sections, which the review screen
+   * shows as "not written" rather than as an error.
+   */
+  const brief = normalizePrepBrief(normalized, getNowIso());
 
   const output = {
     executiveBrief: parsed.executiveBrief,
@@ -1576,7 +1590,7 @@ async function generateClaudeTouchOutput(
     })),
   } satisfies ClaudeTouchOutput;
 
-  return { output, provider: llmResult.provider, model: llmResult.model };
+  return { output, brief, provider: llmResult.provider, model: llmResult.model };
 }
 
 function isProfileInactive(
@@ -1885,6 +1899,10 @@ export async function prepareMonthlyTouch(
   // is primary evidence for the brief's lead-quality and funnel reasoning, so it must be in hand
   // BEFORE generation -- generating first would hide it from the model.
 
+  // The brief the AM reviews. Absent until a run of the v2 preparation prompt returns it; the
+  // review screen then says which sections were not written rather than showing a blank page.
+  let prepBrief: PrepBrief | undefined;
+
   if (options.includeClaude && hasAnyLlmProvider(env)) {
     const generationStartedAt = Date.now();
     try {
@@ -1898,6 +1916,7 @@ export async function prepareMonthlyTouch(
         leadVerification,
       );
       if (claudeOutput) {
+        prepBrief = claudeOutput.brief;
         executiveBrief = claudeOutput.output.executiveBrief;
         agenda = claudeOutput.output.agenda;
         talkingPoints = claudeOutput.output.talkingPoints;
@@ -1956,6 +1975,9 @@ export async function prepareMonthlyTouch(
       varietyNote,
     },
     leadVerification,
+    // Kept from the previous run when this one produced none, so a failed or model-less re-prep
+    // never wipes a brief the AM has already been editing.
+    prepBrief: prepBrief || touch.prepBrief,
     updatedAt: getNowIso(),
   });
 

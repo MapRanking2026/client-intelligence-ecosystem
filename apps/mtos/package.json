@@ -19,7 +19,8 @@
     "check:prep-workflow": "tsx scripts/check-prep-workflow.ts",
     "check:post-meeting-review": "tsx scripts/check-post-meeting-review.ts",
     "check:google-meet": "tsx scripts/check-google-meet.ts",
-    "check:touch-progress": "tsx scripts/check-touch-progress.ts"
+    "check:touch-progress": "tsx scripts/check-touch-progress.ts",
+    "check:prep-brief": "tsx scripts/check-prep-brief.ts"
   },
   "dependencies": {
     "@cie/engine": "*",

@@ -10,6 +10,8 @@ import { Linkified } from "@/src/components/mtos/annotate";
 import { LiveModeLauncher } from "@/src/components/mtos/live-mode";
 import { PrepWorkflowPanel } from "@/src/components/mtos/prep-workflow-panel";
 import { TouchProgressRail } from "@/src/components/mtos/touch-progress-rail";
+import { ReviewBrief } from "@/src/components/mtos/review-brief";
+import { BriefHeader } from "@/src/components/mtos/brief-header";
 import { ScoreBreakdown } from "@/src/components/mtos/score-breakdown";
 import { CallGuideActions } from "@/src/components/mtos/call-guide-actions";
 import { PresentationViewer } from "@/src/components/mtos/presentation-viewer";
@@ -39,6 +41,7 @@ import {
   resumeNotice,
   type TouchStep,
 } from "@/src/lib/contracts/touch-progress";
+import { EMPTY_PREP_BRIEF } from "@/src/lib/contracts/prep-brief";
 
 /**
  * Run-sheet v2.
@@ -262,6 +265,33 @@ export default async function RunSheetV2Page({
             <div className="mt-5">
               <DataGapsBanner gaps={prepPack.dataGaps} />
             </div>
+          ) : null}
+
+          {view === "review" ? (
+            <>
+              {/*
+                The full Pre-Monthly Touch brief: the same fifteen sections that are posted to the
+                Client's Book, replacing the five-question summary. The AM edits or declines them
+                here and approves the lot once, in the agenda card at the bottom.
+
+                Rendered even before the preparation has written a brief, so the screen says which
+                sections are missing instead of hiding the step until a model call succeeds.
+              */}
+              <ReviewBrief
+                touchId={touch.id}
+                clientId={client.id}
+                brief={touch.prepBrief || EMPTY_PREP_BRIEF}
+                review={touch.review}
+                header={
+                  <BriefHeader
+                    client={client}
+                    touch={touch}
+                    accountManager={{ name: profile.name, email: profile.email }}
+                    timeZone={profile.timeZone}
+                  />
+                }
+              />
+            </>
           ) : null}
 
           {view === "review" && prepPack ? (

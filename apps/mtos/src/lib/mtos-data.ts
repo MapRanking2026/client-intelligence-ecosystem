@@ -1,6 +1,7 @@
 import type { GoogleMeetingState } from "@/src/lib/contracts/google-meet";
 import type { PrepWorkflowState } from "@/src/lib/contracts/prep-workflow";
 import type { TouchStep } from "@/src/lib/contracts/touch-progress";
+import type { PrepBrief } from "@/src/lib/contracts/prep-brief";
 
 export type { PrepWorkflowState };
 export type { TouchStep };
@@ -1286,6 +1287,15 @@ export interface MonthlyTouchRecord {
    * rather than inferring success from the older fields.
    */
   prepWorkflow?: PrepWorkflowState;
+  /**
+   * The full Pre-Monthly Touch brief the AM reviews, as the preparation agent wrote it.
+   *
+   * Additive: a touch prepared before the v2 preparation prompt has none, and the review screen
+   * says which sections were not written instead of showing a blank page. The AM's edits and
+   * declines live in `review`, never in here -- the generated text stays as generated so a revert
+   * has something to go back to.
+   */
+  prepBrief?: PrepBrief;
 }
 
 const clients: ClientRecord[] = [

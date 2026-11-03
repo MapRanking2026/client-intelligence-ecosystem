@@ -19,17 +19,11 @@ import { cn } from "@/src/lib/utils";
 import { BrandMark } from "@/src/components/mtos/brand-mark";
 import { ThemeToggle } from "@/src/components/mtos/theme-toggle";
 import { AnnotationsToggle } from "@/src/components/mtos/annotations-toggle";
-import { NotificationsBell, type AppNotification } from "@/src/components/mtos/notifications-bell";
+import { NotificationsBell } from "@/src/components/mtos/notifications-bell";
 import { LogoutButton } from "@/src/components/mtos/logout-button";
 import { CommandPalette } from "@/src/components/mtos/command-palette";
 import { applyAppearance } from "@/src/lib/appearance";
 import { resolvePreferences, type UserPreferences } from "@/src/lib/contracts/user-preferences";
-
-const NOTIFICATIONS: AppNotification[] = [
-  { id: "n1", tone: "important", title: "Monthly Touches this week", detail: "Review and prep the upcoming touches", href: "/monthly-touch" },
-  { id: "n2", tone: "critical", title: "Commitments need a look", detail: "Check for anything overdue", href: "/commitments" },
-  { id: "n3", tone: "info", title: "Opportunities in the pipeline", detail: "New items ready to review", href: "/opportunities" },
-];
 
 const NAV = [
   { href: "/command-center", label: "Command Center", icon: LayoutDashboard },
@@ -165,7 +159,7 @@ export function AppChrome({ title, subtitle, children }: AppChromeProps) {
             </div>
             <AnnotationsToggle />
             <ThemeToggle />
-            <NotificationsBell items={NOTIFICATIONS} />
+            <NotificationsBell />
           </div>
         </header>
 

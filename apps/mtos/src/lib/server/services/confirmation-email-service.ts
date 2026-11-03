@@ -9,6 +9,7 @@ import {
   getIntegrationCredentials,
   getMissingIntegrationScopes,
 } from "@/src/lib/server/integrations";
+import { encodeRfc822 } from "@/src/lib/server/gmail";
 import { callLlmForJson, getNowIso, hasAnyLlmProvider } from "@/src/lib/server/services/mtos-ai";
 
 /**
@@ -311,19 +312,6 @@ export interface SendConfirmationEmailResult {
   sent: boolean;
   /** What the AM should do next when it did not send. */
   message: string;
-}
-
-function encodeRfc822(from: string, to: string, subject: string, body: string): string {
-  const headers = [
-    `From: ${from}`,
-    `To: ${to}`,
-    `Subject: ${subject}`,
-    "MIME-Version: 1.0",
-    'Content-Type: text/plain; charset="UTF-8"',
-    "Content-Transfer-Encoding: 7bit",
-  ].join("\r\n");
-  const raw = `${headers}\r\n\r\n${body}`;
-  return Buffer.from(raw, "utf8").toString("base64url");
 }
 
 /**

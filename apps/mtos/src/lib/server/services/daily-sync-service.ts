@@ -22,8 +22,11 @@ export interface TokenRefreshReport {
 /**
  * Builds a context for every registered user in a tenant, so per-user integrations (each AM's own
  * ClickUp, Google, GoHighLevel, ...) can be refreshed and synced under the right user.
+ *
+ * Exported because the notification run needs the same list for the same reason: it has to look at
+ * each AM's own touches and preferences, under their own context.
  */
-async function listTenantUserContexts(tenantId: string): Promise<TenantContext[]> {
+export async function listTenantUserContexts(tenantId: string): Promise<TenantContext[]> {
   const db = getFirebaseAdminDb();
   if (!db) {
     return [];

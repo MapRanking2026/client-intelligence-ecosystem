@@ -11,7 +11,8 @@
  *    this do when unset", so a screen and the service behind it cannot disagree.
  *  - **The UI is described here too.** `PREFERENCE_GROUPS` carries the label, the hint and, where it
  *    matters, the plain statement of what reads the value. A switch whose effect an AM cannot find
- *    is a switch they stop trusting, so the two fields nothing reads yet say so in their own hint.
+ *    is a switch they stop trusting, so the one field nothing reads yet says so in its own hint --
+ *    charts in the review brief, which waits on the brief having a chart to draw.
  */
 
 import {
@@ -115,8 +116,8 @@ export const DEFAULT_PREFERENCES: Required<Omit<UserPreferences, "notifications"
   ccOfficeContact: false,
   qaChipsInPresenterView: true,
   notifications: {
-    // The two digests are off by default because nothing in MTOS sends them yet, and a switch
-    // that ships already on is a promise the app has not kept.
+    // The two digests send real email to the AM's own address, so they stay opt-in: nobody should
+    // start receiving mail from a tool because of a default somebody else chose.
     dailyDigest: false,
     weeklyDigest: false,
     overdueFollowThrough: true,
@@ -400,8 +401,7 @@ export const PREFERENCE_GROUPS: PreferenceGroup[] = [
         key: "prepReviewReminder",
         label: "Prep review reminder",
         kind: "select",
-        hint: "How long before a touch you want reminding to review the prep. MTOS has no scheduled sender yet, so this is recorded and not yet sent.",
-        notWiredYet: true,
+        hint: "How long before a call you want reminding to review its prep. The run comes round every two hours, so it can arrive a little early, never late.",
         options: [
           { value: "2h", label: "2 hours before" },
           { value: "1d", label: "1 day before" },
@@ -415,42 +415,37 @@ export const PREFERENCE_GROUPS: PreferenceGroup[] = [
     id: "notifications",
     title: "Notifications",
     subtitle:
-      "What you want to hear about. MTOS has no scheduled sender yet, so these are recorded against your account and nothing is sent from them today.",
+      "What you want to hear about. The three events below appear in your notifications in the header; the two digests are also emailed to you through your own Gmail, and say so in the feed when they could not be.",
     fields: [
       {
         key: "notifications.dailyDigest",
         label: "Daily digest",
         kind: "switch",
-        hint: "One message a morning with the touches and commitments that need you.",
-        notWiredYet: true,
+        hint: "Once a day on your own clock: everything outstanding across your book, emailed and in your feed.",
       },
       {
         key: "notifications.weeklyDigest",
         label: "Weekly digest",
         kind: "switch",
-        hint: "A Monday summary of the week ahead across your book.",
-        notWiredYet: true,
+        hint: "The same roll-up on your Monday, for a weekly rhythm rather than a daily one.",
       },
       {
         key: "notifications.overdueFollowThrough",
         label: "Overdue follow-through",
         kind: "switch",
-        hint: "When a touch passes its 24-hour deadline with something still undecided.",
-        notWiredYet: true,
+        hint: "When a touch passes its 24-hour deadline without being processed. Raised once per touch, not once a day.",
       },
       {
         key: "notifications.clientRepliesInIntercom",
         label: "Client replies in Intercom",
         kind: "switch",
-        hint: "When a client answers an email you sent from MTOS.",
-        notWiredYet: true,
+        hint: "When a client writes and nobody has answered, for the clients whose touch is within two weeks.",
       },
       {
         key: "notifications.prepFinished",
         label: "Prep finished",
         kind: "switch",
-        hint: "When a brief you asked for has finished drafting and is ready to review.",
-        notWiredYet: true,
+        hint: "When a brief has finished drafting and is waiting on your approval.",
       },
     ],
   },

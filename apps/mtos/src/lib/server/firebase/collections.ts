@@ -161,6 +161,21 @@ export function tenantUserPath(tenantId: string, userId: string) {
   return `${tenantUsersCollectionPath(tenantId)}/${userId}`;
 }
 
+/**
+ * The notification feed behind the bell in the header, one subcollection per user.
+ *
+ * A subcollection rather than a field on the user document: the feed grows, it is written by a
+ * cron while the user may be reading it, and each row's id is its own dedupe key -- which is what
+ * makes "has this already been raised" a document existence check rather than a scan.
+ */
+export function tenantUserNotificationsCollectionPath(tenantId: string, userId: string) {
+  return `${tenantUserPath(tenantId, userId)}/notifications`;
+}
+
+export function tenantUserNotificationPath(tenantId: string, userId: string, notificationId: string) {
+  return `${tenantUserNotificationsCollectionPath(tenantId, userId)}/${notificationId}`;
+}
+
 export function tenantUserSyncedClientsCollectionPath(tenantId: string, userId: string) {
   return `${tenantUserPath(tenantId, userId)}/syncedClients`;
 }

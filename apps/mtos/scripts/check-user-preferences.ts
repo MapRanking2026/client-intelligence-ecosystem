@@ -49,7 +49,8 @@ check(
 check("the call lengths are the live-call contract's, not a second list", CALL_LENGTH_CHOICES === CALL_LENGTH_OPTIONS);
 check("highlight facts starts off", DEFAULT_PREFERENCES.highlightFacts === false);
 check("QA chips in presenter view start on", DEFAULT_PREFERENCES.qaChipsInPresenterView === true);
-// A switch that ships on is a promise the app keeps. Nothing sends digests, so neither is on.
+// The digests send real email to the AM's own address, so nobody starts receiving mail because of
+// a default somebody else chose.
 check("neither digest ships on", !DEFAULT_PREFERENCES.notifications.dailyDigest && !DEFAULT_PREFERENCES.notifications.weeklyDigest);
 check("every notification flag has a default", Object.keys(DEFAULT_PREFERENCES.notifications).length === 5);
 
@@ -179,23 +180,35 @@ check(
   ),
 );
 check("no field is listed twice", new Set(fields.map((field) => field.key)).size === fields.length);
-// The honest part: the fields nothing reads yet are marked, and they are the ones we know about.
+// The honest part: only what nothing reads yet is marked, and once a sender exists the mark goes.
 const notWired = notWiredPreferenceLabels();
-check("seven fields are marked as recorded but not yet acted on", notWired.length === 7);
-check("the two call-prep ones are named", notWired.includes("Charts in the review brief") && notWired.includes("Prep review reminder"));
+check("one field is marked as recorded but not yet acted on", notWired.length === 1);
+check("and it is the charts one, which waits on the brief having a chart", notWired[0] === "Charts in the review brief");
 check(
-  "and all five notifications are",
-  PREFERENCE_GROUPS.find((group) => group.id === "notifications")?.fields.every((field) => field.notWiredYet) === true,
+  "no notification switch is marked any more",
+  PREFERENCE_GROUPS.find((group) => group.id === "notifications")?.fields.every((field) => !field.notWiredYet) === true,
 );
+// The group has to say where each kind is delivered, because the two channels are not the same.
 check(
-  "the notifications group says so in its own subtitle too",
-  (PREFERENCE_GROUPS.find((group) => group.id === "notifications")?.subtitle || "").includes("nothing is sent"),
+  "the notifications group names both channels",
+  (() => {
+    const subtitle = PREFERENCE_GROUPS.find((group) => group.id === "notifications")?.subtitle || "";
+    return subtitle.includes("notifications in the header") && subtitle.includes("emailed");
+  })(),
 );
+check("the prep reminder is no longer marked", fields.find((field) => field.key === "prepReviewReminder")?.notWiredYet !== true);
 check(
   "every field that does work is not marked",
-  ["theme", "startPage", "highlightFacts", "liveCallFormat", "callLengthMinutes", "timeZone", "emailSignoff"].every(
-    (key) => fields.find((field) => field.key === key)?.notWiredYet !== true,
-  ),
+  [
+    "theme",
+    "startPage",
+    "highlightFacts",
+    "liveCallFormat",
+    "callLengthMinutes",
+    "timeZone",
+    "emailSignoff",
+    "prepReviewReminder",
+  ].every((key) => fields.find((field) => field.key === key)?.notWiredYet !== true),
 );
 
 console.log(`\n${passed} passed, ${failed} failed`);

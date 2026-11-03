@@ -1,7 +1,10 @@
 import type { TenantContext } from "@/src/lib/contracts/mtos";
 import { getFirebaseAdminDb } from "@/src/lib/server/firebase/admin";
 import { tenantUserPath } from "@/src/lib/server/firebase/collections";
-import { isCallLength } from "@/src/lib/contracts/live-call";
+import {
+  normalizePreferences,
+  type UserPreferences,
+} from "@/src/lib/contracts/user-preferences";
 
 function isQuotaExceededError(error: unknown) {
   if (!(error instanceof Error)) {
@@ -63,7 +66,9 @@ export async function getAccountManagerIdentity(
       ? (snapshot.data() as { email?: string; displayName?: string; name?: string } | undefined)
       : undefined;
     const email = data?.email?.trim() || "";
-    const name = data?.displayName?.trim() || data?.name?.trim() || toFirstName(email);
+    const preferences = normalizePreferences((data as Record<string, unknown> | undefined)?.[PREFERENCES_FIELD]);
+    const name =
+      preferences.displayName?.trim() || data?.displayName?.trim() || data?.name?.trim() || toFirstName(email);
     return { name, email };
   } catch {
     return { name: "", email: "" };
@@ -102,10 +107,17 @@ export async function getAccountManagerProfile(
           | undefined)
       : undefined;
     const email = data?.email?.trim() || "";
+    // Settings wins over the document's own fields: `mtosPreferences` is what the AM typed, while
+    // `displayName` and `timeZone` at the top level are whatever sign-in or an import left there.
+    const preferences = normalizePreferences((data as Record<string, unknown> | undefined)?.[PREFERENCES_FIELD]);
     return {
       email,
-      name: data?.displayName?.trim() || data?.name?.trim() || toFirstName(email),
-      timeZone: data?.timeZone?.trim() || DEFAULT_ACCOUNT_MANAGER_TIME_ZONE,
+      name:
+        preferences.displayName?.trim() ||
+        data?.displayName?.trim() ||
+        data?.name?.trim() ||
+        toFirstName(email),
+      timeZone: preferences.timeZone || data?.timeZone?.trim() || DEFAULT_ACCOUNT_MANAGER_TIME_ZONE,
     };
   } catch {
     return fallback;
@@ -113,30 +125,18 @@ export async function getAccountManagerProfile(
 }
 
 /**
- * The handful of per-user preferences the Monthly Touch reads.
+ * The per-user preferences every screen reads.
  *
- * Stored as one field on the user's own tenant document rather than in a new collection: these are
- * a few booleans and strings belonging to one user, and a collection would need its own rules, its
- * own backfill and its own failure mode. Every field is optional and every reader has a default,
- * so a user who has never opened Settings behaves exactly as before this existed.
+ * Stored as one field on the user's own tenant document rather than in a new collection: these
+ * belong to exactly one user, and a collection would need its own rules, its own backfill and its
+ * own failure mode. The shape, the defaults and what is allowed in each field all live in
+ * `@/src/lib/contracts/user-preferences`, so the screen and this service cannot disagree.
+ *
+ * `AccountManagerPreferences` is kept as the name the Monthly Touch services already import. It is
+ * the same type -- widened, not replaced, so nothing that read `liveCallFormat` or `emailSignoff`
+ * before this had to change.
  */
-export interface AccountManagerPreferences {
-  /** Which live format the Approve button prepares by default. */
-  liveCallFormat?: "guide" | "deck";
-  /** The AM's own sign-off, newline-separated, as it appears at the end of a client email. */
-  emailSignoff?: string;
-  /** Copy the other client-side attendees on the calendar event into the agenda email. */
-  ccOfficeContact?: boolean;
-  /**
-   * How long this AM books a Monthly Touch for, in minutes.
-   *
-   * The live call guide is written against 40 minutes and its parts are timed from this, so a
-   * 30-minute call does not hand the AM an eight-part guide that cannot be delivered. Absent
-   * means 40 -- see `callLengthMinutes` in the live-call contract, which is the only place the
-   * default is decided.
-   */
-  callLengthMinutes?: number;
-}
+export type AccountManagerPreferences = UserPreferences;
 
 const PREFERENCES_FIELD = "mtosPreferences";
 
@@ -151,15 +151,7 @@ export async function getAccountManagerPreferences(
     const raw = snapshot.exists
       ? (snapshot.data() as Record<string, unknown> | undefined)?.[PREFERENCES_FIELD]
       : undefined;
-    if (!raw || typeof raw !== "object") return {};
-    const row = raw as Record<string, unknown>;
-    const format = row.liveCallFormat;
-    return {
-      ...(format === "guide" || format === "deck" ? { liveCallFormat: format } : {}),
-      ...(typeof row.emailSignoff === "string" ? { emailSignoff: row.emailSignoff } : {}),
-      ...(typeof row.ccOfficeContact === "boolean" ? { ccOfficeContact: row.ccOfficeContact } : {}),
-      ...(isCallLength(row.callLengthMinutes) ? { callLengthMinutes: row.callLengthMinutes } : {}),
-    };
+    return normalizePreferences(raw);
   } catch {
     return {};
   }
@@ -170,6 +162,10 @@ export async function getAccountManagerPreferences(
  *
  * `mergeFields` rather than a whole-document merge, so saving a preference can never touch the
  * email, display name or role on the same document -- those belong to sign-in, not to Settings.
+ *
+ * The patch is normalized before it is merged, so a field MTOS does not recognise, or a value it
+ * cannot use, is dropped here rather than stored and read back later as if it were a choice the
+ * AM made. An empty string IS a choice -- it clears the field -- so it survives normalization.
  */
 export async function saveAccountManagerPreferences(
   context: TenantContext,
@@ -179,19 +175,55 @@ export async function saveAccountManagerPreferences(
   if (!db) throw new Error("Preferences cannot be saved: this deployment has no database connection.");
 
   const current = await getAccountManagerPreferences(context);
+  const clean = normalizePreferences(patch);
   const next: AccountManagerPreferences = {
     ...current,
-    ...(patch.liveCallFormat ? { liveCallFormat: patch.liveCallFormat } : {}),
-    ...(patch.emailSignoff !== undefined ? { emailSignoff: patch.emailSignoff } : {}),
-    ...(patch.ccOfficeContact !== undefined ? { ccOfficeContact: patch.ccOfficeContact } : {}),
-    // Only one of the four real lengths is stored. A number from anywhere else would scale the
-    // guide to a call nobody books, and the guide is what the AM reads out loud.
-    ...(isCallLength(patch.callLengthMinutes) ? { callLengthMinutes: patch.callLengthMinutes } : {}),
+    ...clean,
+    // Notifications are merged flag by flag: the screen may post one switch, and the four it did
+    // not mention are still the AM's own choices.
+    ...(clean.notifications
+      ? { notifications: { ...(current.notifications || {}), ...clean.notifications } }
+      : {}),
   };
   await db
     .doc(tenantUserPath(context.tenantId, context.userId))
     .set({ [PREFERENCES_FIELD]: next }, { mergeFields: [PREFERENCES_FIELD] });
   return next;
+}
+
+/**
+ * Put every preference back to its default.
+ *
+ * The field is written as an empty object rather than deleted: `mergeFields` on a deleted field
+ * needs a sentinel value, and an empty object reads back through `normalizePreferences` as "no
+ * stored preferences", which is exactly the state a new AM is in. Nothing else on the document
+ * is touched, so this can never clear a sign-in.
+ */
+export async function resetAccountManagerPreferences(
+  context: TenantContext,
+): Promise<AccountManagerPreferences> {
+  const db = getFirebaseAdminDb();
+  if (!db) throw new Error("Preferences cannot be reset: this deployment has no database connection.");
+  await db
+    .doc(tenantUserPath(context.tenantId, context.userId))
+    .set({ [PREFERENCES_FIELD]: {} }, { mergeFields: [PREFERENCES_FIELD] });
+  return {};
+}
+
+/**
+ * The address client email is sent as.
+ *
+ * Their "client emails send through" preference when they have set one, otherwise the address they
+ * sign in with. Intercom matches the sender by email address (see `findAdminByEmail`), so this is
+ * the single answer to "whose seat does this go out from" -- and sending as somebody else is the
+ * one failure the send path refuses rather than guesses at.
+ */
+export async function clientEmailSenderAddress(context: TenantContext): Promise<string> {
+  const [profile, preferences] = await Promise.all([
+    getAccountManagerProfile(context),
+    getAccountManagerPreferences(context),
+  ]);
+  return preferences.clientEmailsSendThrough?.trim() || profile.email;
 }
 
 export async function getUserGreeting(context: TenantContext) {

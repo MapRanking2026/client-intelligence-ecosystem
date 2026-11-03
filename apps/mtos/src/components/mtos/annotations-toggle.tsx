@@ -3,6 +3,15 @@
 import { useEffect, useState } from "react";
 import { Highlighter } from "lucide-react";
 
+import { applyHighlightFacts } from "@/src/lib/appearance";
+import { savePreference } from "@/src/lib/save-preference";
+
+/**
+ * The header's "Highlight facts" switch, saved against the account like the theme is.
+ *
+ * Applied to the document first, saved after, for the same reason the theme toggle does it in
+ * that order: the switch has to feel instant, and a failed save must not undo what the AM pressed.
+ */
 export function AnnotationsToggle() {
   const [on, setOn] = useState(false);
 
@@ -13,16 +22,8 @@ export function AnnotationsToggle() {
   function toggle() {
     const next = !on;
     setOn(next);
-    if (next) {
-      document.documentElement.setAttribute("data-annotations", "on");
-    } else {
-      document.documentElement.removeAttribute("data-annotations");
-    }
-    try {
-      localStorage.setItem("mtos-annotations", next ? "on" : "off");
-    } catch {
-      /* ignore */
-    }
+    applyHighlightFacts(next);
+    void savePreference({ highlightFacts: next });
   }
 
   return (

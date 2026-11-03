@@ -36,7 +36,7 @@ import {
 } from "@/src/lib/server/services/clickup-fields";
 import { sendAgendaEmailViaIntercom } from "@/src/lib/server/services/intercom-send-service";
 import { getNowIso } from "@/src/lib/server/services/mtos-ai";
-import { getAccountManagerProfile } from "@/src/lib/server/services/user-service";
+import { clientEmailSenderAddress } from "@/src/lib/server/services/user-service";
 
 /**
  * "Finish follow-through & process approved" -- the one place in the whole touch that writes out.
@@ -447,9 +447,8 @@ async function sendRecap(state: StepContext): Promise<StepResult> {
     return step("recap", "skipped", "The recap already went out, so it was not sent again.");
   }
 
-  const profile = await getAccountManagerProfile(state.context);
   const outcome = await sendAgendaEmailViaIntercom(state.context, {
-    accountManagerEmail: profile.email,
+    accountManagerEmail: await clientEmailSenderAddress(state.context),
     recipient: state.client.contact || "",
     subject: recap.subject,
     html: recap.html,

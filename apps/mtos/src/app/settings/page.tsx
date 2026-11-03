@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Settings, Plug, Sparkles, BookOpen, Users, Flag, FileText, Shield, ArrowUpRight, Palette } from "lucide-react";
+import { Settings, Plug, Sparkles, BookOpen, Users, Flag, FileText, Shield, ArrowUpRight, Palette, UserCog } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
 import { AppShell } from "@/src/components/mtos/app-shell";
@@ -13,6 +13,14 @@ interface AdminCard {
 }
 
 const ADMIN_CARDS: AdminCard[] = [
+  {
+    title: "My profile & preferences",
+    description:
+      "Your name, title and time zone, your email sign-off, the theme and start page, and what MTOS prepares for a Monthly Touch — saved against your account, so they follow you to another computer.",
+    href: "/settings/preferences",
+    icon: UserCog,
+    live: true,
+  },
   {
     title: "Integrations",
     description: "OAuth, API credentials, and token-refresh flows for ClickUp, GoHighLevel, and Google — in one managed workspace.",

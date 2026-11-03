@@ -434,6 +434,7 @@ export default async function RunSheetV2Page({
             {...(touch.callGuide?.sections ? { sections: touch.callGuide.sections } : {})}
             {...(touch.presentation ? { presentation: touch.presentation } : {})}
             {...(touch.review?.declinedSections ? { declinedSections: touch.review.declinedSections } : {})}
+            showQaChips={preferences.qaChipsInPresenterView ?? true}
           />
 
           {/*

@@ -22,6 +22,8 @@ import { ThemeToggle } from "@/src/components/mtos/theme-toggle";
 import { AnnotationsToggle } from "@/src/components/mtos/annotations-toggle";
 import { NotificationsBell, type AppNotification } from "@/src/components/mtos/notifications-bell";
 import { LogoutButton } from "@/src/components/mtos/logout-button";
+import { applyAppearance } from "@/src/lib/appearance";
+import { resolvePreferences, type UserPreferences } from "@/src/lib/contracts/user-preferences";
 
 const NOTIFICATIONS: AppNotification[] = [
   { id: "n1", tone: "important", title: "Monthly Touches this week", detail: "Review and prep the upcoming touches", href: "/monthly-touch" },
@@ -65,6 +67,7 @@ export function AppChrome({ title, subtitle, children }: AppChromeProps) {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
+  const [preferences, setPreferences] = useState<UserPreferences | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -81,8 +84,34 @@ export function AppChrome({ title, subtitle, children }: AppChromeProps) {
     };
   }, []);
 
-  const userName = currentUser?.name || "Account Manager";
-  const userRole = currentUser?.roleLabel || "Account Manager";
+  /*
+    The AM's own preferences, read once on mount.
+
+    The appearance pair is applied from here as well as from the pre-paint script in the root
+    layout, and the two are not redundant: the script reads local storage, which is per browser,
+    so the first visit from a second computer would otherwise show the default theme while the
+    account says otherwise. Applying here reconciles that -- and because the script has already
+    painted, the only visible case is exactly that first visit.
+  */
+  useEffect(() => {
+    let active = true;
+    fetch("/api/settings/preferences", { headers: { accept: "application/json" } })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((payload) => {
+        if (!active) return;
+        const stored = (payload?.data || {}) as UserPreferences;
+        setPreferences(stored);
+        applyAppearance(resolvePreferences(stored));
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const userName = preferences?.displayName?.trim() || currentUser?.name || "Account Manager";
+  // Their own title when they have set one; otherwise the role their access gives them.
+  const userRole = preferences?.jobTitle?.trim() || currentUser?.roleLabel || "Account Manager";
 
   return (
     <div className="shell">

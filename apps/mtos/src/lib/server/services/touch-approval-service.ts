@@ -231,7 +231,8 @@ export async function approveAndPrepareCall(
       };
     } else {
       const sent = await sendAgendaEmailViaIntercom(context, {
-        accountManagerEmail: profile.email,
+        // Their own preference when they set one, else the address they sign in with.
+        accountManagerEmail: preferences.clientEmailsSendThrough?.trim() || profile.email,
         recipient: email.recipient || "",
         cc: view.ccEnabled ? view.availableCc : [],
         subject: email.subject,

@@ -445,7 +445,7 @@ export default async function RunSheetV2Page({
             touchId={touch.id}
             {...(touch.live?.callEndedAt ? { callEndedAt: touch.live.callEndedAt } : {})}
             {...(touch.transcript ? { transcript: touch.transcript } : {})}
-            followThroughHref={`/monthly-touch/${touch.id}/summary`}
+            followThroughHref={`/monthly-touch/${touch.id}/follow-through`}
           />
 
           <div className="card mt-4">

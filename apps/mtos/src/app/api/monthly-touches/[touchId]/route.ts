@@ -28,6 +28,13 @@ import {
   attachTouchTranscript,
   watchTouchTranscript,
 } from "@/src/lib/server/services/transcript-watch-service";
+import {
+  ScoreGateIncompleteError,
+  analyzeScoreGate,
+  confirmScoreGate,
+  reopenScoreGate,
+  saveScoreGate,
+} from "@/src/lib/server/services/follow-through-score-service";
 
 // One Generate now runs the prep pack and the live call guide back to back -- several
 // model calls plus the dashboard pulls. Matches the ceiling the other long-running
@@ -70,6 +77,32 @@ const stakeholderMapSchema = z.object({
   decision: z.enum(["approved", "declined"]),
 });
 
+/**
+ * The score gate as the screen sends it back.
+ *
+ * `score` is nullable on purpose and the three states are all different: absent means the AM has
+ * not picked yet, null means they recorded that the call did not support a score, and a number is
+ * a score. Collapsing null into absent would turn a decision into an omission.
+ */
+const scoreGateSchema = z.object({
+  score: z.number().int().min(1).max(10).nullable().optional(),
+  justification: z.string().optional(),
+  justificationEdited: z.boolean().optional(),
+  suggested: z.number().int().min(1).max(10).optional(),
+  findings: z
+    .array(
+      z.object({
+        id: z.enum(["money", "responsiveness", "lifeChange", "technical", "otherAgency", "performance"]),
+        found: z.boolean(),
+        evidence: z.string().optional(),
+        timestamps: z.array(z.string()).optional(),
+        severe: z.boolean().optional(),
+      }),
+    )
+    .max(6)
+    .optional(),
+});
+
 const touchRequestSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("prepare") }),
   z.object({ action: z.literal("prepare_with_ai") }),
@@ -84,6 +117,13 @@ const touchRequestSchema = z.discriminatedUnion("action", [
   // The AM pasting the dialogue themselves: a call on Zoom, a call hosted by the client, a call
   // nobody transcribed. Stored as attached, so no later poll overrules it.
   z.object({ action: z.literal("attach_transcript"), transcript: z.string().min(1) }),
+  // The follow-through's first screen. `analyze_score_gate` reads the transcript for the six red
+  // flags; the other three are the AM's own decisions about the score, so each is its own action
+  // rather than one "save" that could not tell a draft from a confirmation.
+  z.object({ action: z.literal("analyze_score_gate") }),
+  z.object({ action: z.literal("save_score_gate"), gate: scoreGateSchema }),
+  z.object({ action: z.literal("confirm_score_gate"), gate: scoreGateSchema }),
+  z.object({ action: z.literal("reopen_score_gate") }),
   z.object({
     action: z.literal("apply_post_meeting_decisions"),
     tickets: z.array(
@@ -293,6 +333,18 @@ export async function POST(
       case "attach_transcript":
         result = await attachTouchTranscript(context, touchId, payload.transcript);
         break;
+      case "analyze_score_gate":
+        result = await analyzeScoreGate(context, touchId);
+        break;
+      case "save_score_gate":
+        result = { gate: await saveScoreGate(context, touchId, payload.gate) };
+        break;
+      case "confirm_score_gate":
+        result = { gate: await confirmScoreGate(context, touchId, payload.gate) };
+        break;
+      case "reopen_score_gate":
+        result = { gate: await reopenScoreGate(context, touchId) };
+        break;
       case "analyze_transcript":
         result = await analyzePostMeetingTranscript(context, touchId, payload.transcript);
         break;
@@ -368,6 +420,15 @@ export async function POST(
   } catch (error) {
     // An incomplete review is the AM having more to decide, not a bad request. 409 and the list of
     // what is left keeps the screen's state intact so nothing they typed has to be retyped.
+    // The same shape as the review's own refusal: the first sentence for the toast, the whole
+    // list for the screen, and 409 because nothing is wrong with the request -- the AM has not
+    // finished deciding.
+    if (error instanceof ScoreGateIncompleteError) {
+      return NextResponse.json(
+        { error: error.blockers[0], blockers: error.blockers },
+        { status: 409 },
+      );
+    }
     if (error instanceof PostMeetingReviewIncompleteError) {
       return NextResponse.json(
         { error: error.blockers[0], blockers: error.blockers },

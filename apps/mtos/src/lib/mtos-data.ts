@@ -1,3 +1,4 @@
+import type { ScoreGateState } from "@/src/lib/contracts/follow-through-score";
 import type { GoogleMeetingState } from "@/src/lib/contracts/google-meet";
 import type { PrepWorkflowState } from "@/src/lib/contracts/prep-workflow";
 import type { TouchStep } from "@/src/lib/contracts/touch-progress";
@@ -1311,6 +1312,14 @@ export interface TouchFollowThroughState {
   startedAt?: string;
   finishedAt?: string;
   savedAt?: string;
+  /**
+   * The account health score and the red-flag check it was picked against.
+   *
+   * The first screen of the follow-through and the gate on the rest of it: nothing below is
+   * drafted until this is confirmed, because the score decides whether a Risk Register row, a
+   * playbook and a Manager tag belong in the notes at all.
+   */
+  score?: ScoreGateState;
 }
 
 export interface MonthlyTouchRecord {

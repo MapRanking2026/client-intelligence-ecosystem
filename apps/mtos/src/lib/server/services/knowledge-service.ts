@@ -13,6 +13,7 @@ import { getMtosDataSource } from "@/src/lib/server/data/seed-mtos-data-source";
 import { fetchClickupDocPages, getClickupAccess, listClickupDocs } from "@/src/lib/server/services/clickup-docs";
 import { getServerEnv } from "@/src/lib/server/env";
 import { getFirebaseAdminDb } from "@/src/lib/server/firebase/admin";
+import { withQuotaFallback } from "@/src/lib/server/firebase/quota";
 import { knowledgeChunkPath, knowledgeChunksCollectionPath } from "@/src/lib/server/firebase/collections";
 import {
   cosineSimilarity,
@@ -168,26 +169,30 @@ export async function listKnowledge(context: TenantContext): Promise<KnowledgeDo
   if (!db) {
     return [];
   }
-  const snapshot = await db.collection(knowledgeChunksCollectionPath(context.tenantId)).get();
-  const byDoc = new Map<string, KnowledgeDocSummary>();
-  for (const doc of snapshot.docs) {
-    const chunk = doc.data() as KnowledgeChunk;
-    const existing = byDoc.get(chunk.docId);
-    if (existing) {
-      existing.chunkCount += 1;
-    } else {
-      byDoc.set(chunk.docId, {
-        docId: chunk.docId,
-        title: chunk.title,
-        source: chunk.source,
-        sourceType: chunk.sourceType,
-        tags: chunk.tags || [],
-        chunkCount: 1,
-        createdAt: chunk.createdAt,
-      });
+  // An empty list rather than a thrown error when the quota is spent: this page is prerendered
+  // at build time, and a knowledge base nobody can read today is not a reason to fail a deploy.
+  return withQuotaFallback("the knowledge base", [], async () => {
+    const snapshot = await db.collection(knowledgeChunksCollectionPath(context.tenantId)).get();
+    const byDoc = new Map<string, KnowledgeDocSummary>();
+    for (const doc of snapshot.docs) {
+      const chunk = doc.data() as KnowledgeChunk;
+      const existing = byDoc.get(chunk.docId);
+      if (existing) {
+        existing.chunkCount += 1;
+      } else {
+        byDoc.set(chunk.docId, {
+          docId: chunk.docId,
+          title: chunk.title,
+          source: chunk.source,
+          sourceType: chunk.sourceType,
+          tags: chunk.tags || [],
+          chunkCount: 1,
+          createdAt: chunk.createdAt,
+        });
+      }
     }
-  }
-  return [...byDoc.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    return [...byDoc.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  });
 }
 
 /** Delete every chunk belonging to a document. */

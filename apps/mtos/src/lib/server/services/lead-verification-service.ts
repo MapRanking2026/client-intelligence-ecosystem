@@ -17,6 +17,7 @@ import type {
 import { LEAD_CHANNEL_LABEL } from "@/src/lib/mtos-data";
 import { getMtosDataSource } from "@/src/lib/server/data/seed-mtos-data-source";
 import { getFirebaseAdminDb } from "@/src/lib/server/firebase/admin";
+import { withQuotaFallback } from "@/src/lib/server/firebase/quota";
 import { integrationSnapshotPath, leadVerificationPath } from "@/src/lib/server/firebase/collections";
 import { getServerEnv } from "@/src/lib/server/env";
 import { fetchGhlClientLeadsAndCalls } from "@/src/lib/server/integration-sync";
@@ -86,8 +87,10 @@ export async function getStoredLeadVerification(
   if (!db) {
     return null;
   }
-  const doc = await db.doc(leadVerificationPath(context.tenantId, clientId)).get();
-  return doc.exists ? (doc.data() as LeadVerificationReview) : null;
+  return withQuotaFallback("a stored lead verification", null, async () => {
+    const doc = await db.doc(leadVerificationPath(context.tenantId, clientId)).get();
+    return doc.exists ? (doc.data() as LeadVerificationReview) : null;
+  });
 }
 
 // ---------------------------------------------------------------------------

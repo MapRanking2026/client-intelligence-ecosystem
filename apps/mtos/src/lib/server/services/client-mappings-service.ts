@@ -4,6 +4,7 @@ import type { IntegrationSnapshotRecord } from "@/src/lib/contracts/integration-
 import { getMtosDataSource } from "@/src/lib/server/data/seed-mtos-data-source";
 import { clientPath, integrationSnapshotPath } from "@/src/lib/server/firebase/collections";
 import { getFirebaseAdminDb } from "@/src/lib/server/firebase/admin";
+import { withQuotaFallback } from "@/src/lib/server/firebase/quota";
 import { namesLikelyMatch } from "@/src/lib/server/name-matching";
 import {
   fetchAllBusinesses,
@@ -47,11 +48,13 @@ async function readSnapshotPayload(tenantId: string, providerId: string): Promis
   if (!db) {
     return null;
   }
-  const doc = await db.doc(integrationSnapshotPath(tenantId, providerId)).get();
-  if (!doc.exists) {
-    return null;
-  }
-  return ((doc.data() as IntegrationSnapshotRecord).payload || {}) as JsonRecord;
+  return withQuotaFallback(`the ${providerId} snapshot`, null, async () => {
+    const doc = await db.doc(integrationSnapshotPath(tenantId, providerId)).get();
+    if (!doc.exists) {
+      return null;
+    }
+    return ((doc.data() as IntegrationSnapshotRecord).payload || {}) as JsonRecord;
+  });
 }
 
 export async function getClientMappingView(

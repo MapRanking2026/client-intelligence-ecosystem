@@ -2,6 +2,7 @@ import { nanoid } from "nanoid";
 
 import type { TenantContext } from "@/src/lib/contracts/mtos";
 import { getFirebaseAdminDb } from "@/src/lib/server/firebase/admin";
+import { withQuotaFallback } from "@/src/lib/server/firebase/quota";
 import {
   clientAttachmentPath,
   clientAttachmentsCollectionPath,
@@ -52,11 +53,13 @@ export async function listClientAttachments(
 export async function countClientAttachments(context: TenantContext, clientId: string): Promise<number> {
   const db = getFirebaseAdminDb();
   if (!db) return 0;
-  const snapshot = await db
-    .collection(clientAttachmentsCollectionPath(context.tenantId, clientId))
-    .count()
-    .get();
-  return snapshot.data().count;
+  return withQuotaFallback("the client attachment count", 0, async () => {
+    const snapshot = await db
+      .collection(clientAttachmentsCollectionPath(context.tenantId, clientId))
+      .count()
+      .get();
+    return snapshot.data().count;
+  });
 }
 
 export async function addClientAttachment(

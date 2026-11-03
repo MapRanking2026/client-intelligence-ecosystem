@@ -16,22 +16,12 @@ import {
   tenantUserSyncedClientsCollectionPath,
 } from "@/src/lib/server/firebase/collections";
 import { getFirebaseAdminDb } from "@/src/lib/server/firebase/admin";
+import { withQuotaFallback } from "@/src/lib/server/firebase/quota";
 
 type FirestoreClientRecord = ClientRecord & { id: string };
 type FirestoreMonthlyTouchRecord = MonthlyTouchRecord & { id: string };
 type FirestoreCommitmentRecord = CommitmentRecord & { id: string };
 type FirestoreOpportunityRecord = OpportunityRecord & { id: string };
-
-function isQuotaExceededError(error: unknown) {
-  if (!(error instanceof Error)) {
-    return false;
-  }
-
-  return (
-    error.message.includes("RESOURCE_EXHAUSTED") ||
-    error.message.includes("Quota exceeded")
-  );
-}
 
 export class FirestoreMtosDataSource implements MtosDataSource {
   private visibleClientIdsPromise: Promise<string[] | null> | null = null;
@@ -43,18 +33,12 @@ export class FirestoreMtosDataSource implements MtosDataSource {
   }
 
   private async withQuotaFallback<T>(label: string, fallback: T, operation: () => Promise<T>) {
-    try {
-      return await operation();
-    } catch (error) {
-      if (isQuotaExceededError(error)) {
-        console.warn(
-          `Firestore quota exceeded while loading ${label} for ${this.tenantId}/${this.context.userId}. Returning a safe fallback.`,
-        );
-        return fallback;
-      }
-
-      throw error;
-    }
+    // The tenant and user stay in the label so the build log still says whose read was dropped.
+    return withQuotaFallback(
+      `${label} for ${this.tenantId}/${this.context.userId}`,
+      fallback,
+      operation,
+    );
   }
 
   private async getVisibleClientIds(): Promise<string[] | null> {

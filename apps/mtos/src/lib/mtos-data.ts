@@ -1,7 +1,8 @@
 import type { GoogleMeetingState } from "@/src/lib/contracts/google-meet";
 import type { PrepWorkflowState } from "@/src/lib/contracts/prep-workflow";
 import type { TouchStep } from "@/src/lib/contracts/touch-progress";
-import type { PrepBrief } from "@/src/lib/contracts/prep-brief";
+import type { BriefSectionId, PrepBrief } from "@/src/lib/contracts/prep-brief";
+import type { SourceChip } from "@/src/lib/contracts/brief-sources";
 import type { TouchApprovalState } from "@/src/lib/contracts/touch-approval";
 
 export type { PrepWorkflowState };
@@ -531,11 +532,56 @@ export interface OpportunityRecord {
   nextStep: string;
 }
 
+/** One point the AM covers, carrying the systems the fact came out of. */
+export interface CallGuidePoint {
+  text: string;
+  /** The same source chips the review brief draws, so a number can be defended mid-call. */
+  chips?: SourceChip[];
+}
+
+/** What the client might say, and how to answer it. The guide's "If she says..." rows. */
+export interface CallGuideResponse {
+  says: string;
+  response: string;
+}
+
+/**
+ * One timed part of the live call guide.
+ *
+ * `title`, `minutes`, `talkingPoints` and `clientPrompts` are the original four and stay
+ * required: guides generated before this screen existed are still read by it, and a part with
+ * no points is a part the AM cannot present.
+ *
+ * Everything below them is optional for the same reason. The live screen renders `points` when
+ * the generator supplied them and falls back to `talkingPoints`, so an older guide loses the
+ * source chips rather than the content.
+ */
 export interface CallGuideSection {
   title: string;
   minutes: number;
   talkingPoints: string[];
   clientPrompts: string[];
+  /**
+   * Which brief section this part presents.
+   *
+   * Load-bearing rather than descriptive: a section the AM declines after the brief was
+   * approved must not still be presented, and this is the only thing that ties a generated
+   * part back to the decision. A part without one is always shown -- dropping a part that
+   * might belong to an approved section is the worse failure.
+   */
+  sectionId?: BriefSectionId;
+  /** What this part of the call is for, in one line. */
+  goal?: string;
+  /** The opening line, close to verbatim, for the AM to say or adapt. */
+  say?: string;
+  /** The points to cover, with their sources. Richer form of `talkingPoints`. */
+  points?: CallGuidePoint[];
+  /** What the client might say, and the answer. */
+  ifSays?: CallGuideResponse[];
+  /** The QC behaviours this part is judged on, shown as chips when the AM wants them. */
+  qaChips?: string[];
+  /** The bridge into the next part, so the call does not stall between them. */
+  next?: string;
 }
 
 /** A client objection the AM should be ready for, with a grounded response. */
@@ -616,6 +662,14 @@ export interface PresentationItem {
 
 export interface PresentationSlide {
   layout: PresentationLayout;
+  /**
+   * Which brief section this slide presents, when it presents one.
+   *
+   * Same job as `CallGuideSection.sectionId`: a slide for a section the AM declined after the
+   * deck was built is left out of the deck shown on the call. The cover, agenda and closing
+   * slides carry none and are always shown.
+   */
+  sectionId?: BriefSectionId;
   /** Running section label, e.g. "SECTION 03 · RANKINGS ON GOOGLE MAPS". */
   section?: string;
   title: string;

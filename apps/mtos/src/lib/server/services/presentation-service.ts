@@ -1,6 +1,8 @@
 import { z } from "zod";
 
 import type { TenantContext } from "@/src/lib/contracts/mtos";
+import { BRIEF_SECTIONS } from "@/src/lib/contracts/prep-brief";
+import type { BriefSectionId } from "@/src/lib/contracts/prep-brief";
 import type { MonthlyTouchRecord, Presentation } from "@/src/lib/mtos-data";
 import { getMtosDataSource } from "@/src/lib/server/data/seed-mtos-data-source";
 import { monthlyTouchPath } from "@/src/lib/server/firebase/collections";
@@ -24,6 +26,8 @@ import { getPromptText } from "@/src/lib/server/prompt-store";
 
 const toneSchema = z.enum(["neutral", "good", "watch", "risk"]);
 
+const BRIEF_SECTION_IDS = BRIEF_SECTIONS.map((section) => section.id) as [BriefSectionId, ...BriefSectionId[]];
+
 const slideSchema = z.object({
   layout: z.enum([
     "cover",
@@ -38,6 +42,12 @@ const slideSchema = z.object({
     "closing",
   ]),
   section: z.string().optional(),
+  /**
+   * Which brief section this slide presents. Optional because the cover, the agenda and the
+   * closing slides present none, and because a deck that answers without it is still a deck --
+   * it simply cannot have its slides dropped when a section is declined after it was built.
+   */
+  sectionId: z.enum(BRIEF_SECTION_IDS).optional(),
   title: z.string().min(1),
   subtitle: z.string().optional(),
   bullets: z.array(z.string().min(1)).max(7).optional(),
@@ -144,6 +154,10 @@ export async function generatePresentation(
   const system = await getPromptText("monthly_touch_presentation_prompt");
   const userText = [
     "Build the client-facing deck for this Monthly Touch.",
+    "",
+    `Give every content slide a sectionId -- the brief section it presents, one of ${BRIEF_SECTION_IDS.join(", ")}.`,
+    "Leave sectionId off the cover, the agenda and the closing slides. It is how a section the",
+    "account manager declines is kept out of the deck shown on the call.",
     "",
     history.length
       ? `Experience formats already used for this client, newest first: ${history.join("; ")}. Choose a different one, per the rotation rule.`

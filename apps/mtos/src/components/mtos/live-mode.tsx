@@ -538,6 +538,63 @@ export function LiveMode({
   );
 }
 
+/**
+ * Open the client's Google Meet in its own window.
+ *
+ * The window is opened inside the click and navigated afterwards: a window opened once the awaits
+ * have resolved is no longer attributable to a user gesture, and the browser blocks it silently --
+ * which an AM experiences as the Join button doing nothing while the client waits.
+ *
+ * The host is checked rather than trusted. The URL comes back from a calendar event, so a bad or
+ * tampered link would otherwise send the AM wherever it pointed.
+ */
+async function openMeetWindow(touch: MonthlyTouchRecord, callWindow: Window) {
+  const overview = await meetingRequest<GoogleMeetingOverview>(touch.id);
+  let selection = overview.selection;
+  if (!selection && touch.calendarEventId) {
+    selection = await meetingRequest<GoogleMeetingState>(touch.id, { action: "select", eventId: touch.calendarEventId });
+  }
+  if (!selection?.meetingUrl) throw new Error("Choose the call in Google meetings first, then start the call.");
+  const url = new URL(selection.meetingUrl);
+  if (url.protocol !== "https:" || url.hostname !== "meet.google.com") {
+    throw new Error("The selected meeting has an invalid Google Meet link.");
+  }
+  callWindow.location.href = url.toString();
+}
+
+/**
+ * Join the call and nothing else.
+ *
+ * The Live step has its own guide, deck and clock on the page, so it needs the Meet window without
+ * the full-screen Live mode behind it -- opening both would give the AM two sets of notes for one
+ * call, and only one of them would be saved where the follow-through reads it.
+ */
+export function JoinMeetButton({ touch, label = "Join the Google Meet" }: { touch: MonthlyTouchRecord; label?: string }) {
+  const [joining, setJoining] = useState(false);
+  const [joinError, setJoinError] = useState("");
+  async function join() {
+    const callWindow = window.open("about:blank", "_blank");
+    if (!callWindow) { setJoinError("Allow popups for MTOS, then try Join meeting again."); return; }
+    callWindow.opener = null;
+    setJoining(true); setJoinError("");
+    try {
+      await openMeetWindow(touch, callWindow);
+    } catch (error) {
+      callWindow.close();
+      setJoinError(error instanceof Error ? error.message : "Could not open Google Meet.");
+    } finally { setJoining(false); }
+  }
+  return (
+    <>
+      <button type="button" className="btn btn-ghost" disabled={joining} onClick={() => void join()}>
+        <PlayCircle />
+        {joining ? "Opening Google Meet…" : label}
+      </button>
+      {joinError ? <p role="alert" className="text-sm text-rose-300">{joinError}</p> : null}
+    </>
+  );
+}
+
 /** The button that opens Live mode, so the run-sheet stays a server component. */
 export function LiveModeLauncher({
   touch,
@@ -560,15 +617,7 @@ export function LiveModeLauncher({
     callWindow.opener = null;
     setJoining(true); setJoinError("");
     try {
-      const overview = await meetingRequest<GoogleMeetingOverview>(touch.id);
-      let selection = overview.selection;
-      if (!selection && touch.calendarEventId) {
-        selection = await meetingRequest<GoogleMeetingState>(touch.id, { action: "select", eventId: touch.calendarEventId });
-      }
-      if (!selection?.meetingUrl) throw new Error("Choose the call in Google meetings first, then start the call.");
-      const url = new URL(selection.meetingUrl);
-      if (url.protocol !== "https:" || url.hostname !== "meet.google.com") throw new Error("The selected meeting has an invalid Google Meet link.");
-      callWindow.location.href = url.toString();
+      await openMeetWindow(touch, callWindow);
       setOpen(true);
     } catch (error) {
       callWindow.close();

@@ -211,6 +211,9 @@ a { color: inherit; text-decoration: none; }
 .btn-primary:hover { background: var(--accent-hover); }
 .btn-ghost { border-color: var(--hair-strong); background: var(--surface); color: var(--text); box-shadow: var(--sh-sm); }
 .btn-ghost:hover { background: var(--surface-2); }
+/* "End call" and nothing else so far: the one button on a live screen that stops something. */
+.btn-risk { background: var(--risk); color: #ffffff; }
+.btn-risk:hover { filter: brightness(0.92); }
 .btn-sm { padding: 6px 12px; font-size: 0.8rem; }
 .btn-block { width: 100%; }
 

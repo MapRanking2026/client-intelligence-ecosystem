@@ -7,7 +7,8 @@ import { ArrowLeft, ClipboardCheck, ExternalLink, FileText, Sparkles } from "luc
 import { AppShell } from "@/src/components/mtos/app-shell";
 import { DataError } from "@/src/components/mtos/data-error";
 import { Linkified } from "@/src/components/mtos/annotate";
-import { LiveModeLauncher } from "@/src/components/mtos/live-mode";
+import { JoinMeetButton, LiveModeLauncher } from "@/src/components/mtos/live-mode";
+import { LiveCallStep } from "@/src/components/mtos/live-call-step";
 import { PrepWorkflowPanel } from "@/src/components/mtos/prep-workflow-panel";
 import { TouchProgressRail } from "@/src/components/mtos/touch-progress-rail";
 import { ReviewBrief } from "@/src/components/mtos/review-brief";
@@ -46,6 +47,7 @@ import { AgendaApprovalPanel } from "@/src/components/mtos/agenda-approval-panel
 import { readAgendaEmail } from "@/src/lib/server/services/agenda-email-service";
 import { touchPageName } from "@/src/lib/server/services/client-book-pages";
 import { getAccountManagerPreferences } from "@/src/lib/server/services/user-service";
+import { callLengthMinutes } from "@/src/lib/contracts/live-call";
 
 /**
  * Run-sheet v2.
@@ -407,35 +409,38 @@ export default async function RunSheetV2Page({
         </>
       ) : null}
 
-      {/* ---------- Live: one full-screen view, with the two delivery formats behind it ---------- */}
+      {/* ---------- Live: the call itself, with the two generators behind it ---------- */}
       {view === "live" ? (
         <>
+          <LiveCallStep
+            touchId={touch.id}
+            clientId={client.id}
+            clientName={client.name}
+            {...(touch.live ? { live: touch.live } : {})}
+            plannedMinutes={callLengthMinutes(preferences.callLengthMinutes)}
+            {...(touch.callGuide?.sections ? { sections: touch.callGuide.sections } : {})}
+            {...(touch.presentation ? { presentation: touch.presentation } : {})}
+            {...(touch.review?.declinedSections ? { declinedSections: touch.review.declinedSections } : {})}
+          />
+
           <div className="card mt-4">
             <div className="card-head">
-              <div className="card-title">Live mode</div>
-              {touch.callGuide?.status === "generated" ? (
-                <span className="chip good">
-                  <span className="sig-dot good" />
-                  Call guide ready
-                </span>
-              ) : (
-                <span className="chip watch">
-                  <span className="sig-dot watch" />
-                  No call guide generated
-                </span>
-              )}
+              <div className="card-title">The call itself</div>
             </div>
             <p className="text-[0.88rem] leading-7" style={{ color: "var(--text-2)" }}>
-              One full-screen view for the call: the five opening questions as the agenda, the call guide&apos;s talking
-              points and questions beside each one, a timer per segment, and your own notes. The client-facing slides
-              open separately — your notes and the internal recommendations are never in them.
+              Open the client&apos;s Google Meet here, then start the clock above when they join. Everything you type
+              on this screen is saved against the part of the call you were in, and goes to the follow-through with
+              the transcript.
             </p>
+            <div className="mt-4 flex flex-wrap items-center gap-2.5">
+              <JoinMeetButton touch={touch} />
+            </div>
             {touch.liveSession ? (
               <p className="muted mt-3 text-[0.8rem]">
-                You have notes on {touch.liveSession.segments.filter((segment) => segment.notes.trim()).length}{" "}
-                segments from {new Date(touch.liveSession.startedAt).toLocaleString()}, and{" "}
-                {touch.liveSession.recapStepsDone.length} of 6 close steps marked done. Opening Live mode picks up where
-                you left off.
+                This touch also has notes from the older full-screen Live mode:{" "}
+                {touch.liveSession.segments.filter((segment) => segment.notes.trim()).length} segments from{" "}
+                {new Date(touch.liveSession.startedAt).toLocaleString()}. They are kept and go to the follow-through
+                too — nothing was moved.
               </p>
             ) : null}
             <div className="mt-4 flex flex-wrap gap-2.5">{liveLauncher}</div>
@@ -444,7 +449,7 @@ export default async function RunSheetV2Page({
           <Section
             eyebrow="Live meeting"
             title="Live call guide"
-            subtitle="The same guide Live mode reads from. Generate or regenerate it here."
+            subtitle="The guide the call above reads from. Regenerate it here if the preparation changed."
           >
             <CallGuideActions
               touchId={touch.id}
@@ -457,7 +462,7 @@ export default async function RunSheetV2Page({
           <Section
             eyebrow="Live meeting"
             title="Client presentation"
-            subtitle="The client-facing deck, built from the same preparation, with private presenter notes. Live mode opens it in its own view for screen sharing."
+            subtitle="The client-facing deck, built from the same preparation, with private presenter notes. On the call it opens in its own window, which is the window you share."
           >
             <PresentationViewer touchId={touch.id} presentation={touch.presentation} />
           </Section>

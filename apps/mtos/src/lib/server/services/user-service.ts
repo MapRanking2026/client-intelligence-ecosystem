@@ -1,6 +1,7 @@
 import type { TenantContext } from "@/src/lib/contracts/mtos";
 import { getFirebaseAdminDb } from "@/src/lib/server/firebase/admin";
 import { tenantUserPath } from "@/src/lib/server/firebase/collections";
+import { isCallLength } from "@/src/lib/contracts/live-call";
 
 function isQuotaExceededError(error: unknown) {
   if (!(error instanceof Error)) {
@@ -126,6 +127,15 @@ export interface AccountManagerPreferences {
   emailSignoff?: string;
   /** Copy the other client-side attendees on the calendar event into the agenda email. */
   ccOfficeContact?: boolean;
+  /**
+   * How long this AM books a Monthly Touch for, in minutes.
+   *
+   * The live call guide is written against 40 minutes and its parts are timed from this, so a
+   * 30-minute call does not hand the AM an eight-part guide that cannot be delivered. Absent
+   * means 40 -- see `callLengthMinutes` in the live-call contract, which is the only place the
+   * default is decided.
+   */
+  callLengthMinutes?: number;
 }
 
 const PREFERENCES_FIELD = "mtosPreferences";
@@ -148,6 +158,7 @@ export async function getAccountManagerPreferences(
       ...(format === "guide" || format === "deck" ? { liveCallFormat: format } : {}),
       ...(typeof row.emailSignoff === "string" ? { emailSignoff: row.emailSignoff } : {}),
       ...(typeof row.ccOfficeContact === "boolean" ? { ccOfficeContact: row.ccOfficeContact } : {}),
+      ...(isCallLength(row.callLengthMinutes) ? { callLengthMinutes: row.callLengthMinutes } : {}),
     };
   } catch {
     return {};
@@ -173,6 +184,9 @@ export async function saveAccountManagerPreferences(
     ...(patch.liveCallFormat ? { liveCallFormat: patch.liveCallFormat } : {}),
     ...(patch.emailSignoff !== undefined ? { emailSignoff: patch.emailSignoff } : {}),
     ...(patch.ccOfficeContact !== undefined ? { ccOfficeContact: patch.ccOfficeContact } : {}),
+    // Only one of the four real lengths is stored. A number from anywhere else would scale the
+    // guide to a call nobody books, and the guide is what the AM reads out loud.
+    ...(isCallLength(patch.callLengthMinutes) ? { callLengthMinutes: patch.callLengthMinutes } : {}),
   };
   await db
     .doc(tenantUserPath(context.tenantId, context.userId))

@@ -1,6 +1,8 @@
 import { z } from "zod";
 
-import { approvedBriefMarkdown } from "@/src/lib/contracts/prep-brief";
+import { BRIEF_SECTIONS, approvedBriefMarkdown } from "@/src/lib/contracts/prep-brief";
+import type { BriefSectionId } from "@/src/lib/contracts/prep-brief";
+import { normalizeChips, rankTrackerChip } from "@/src/lib/contracts/brief-sources";
 import type { TenantContext } from "@/src/lib/contracts/mtos";
 import type {
   AnticipatedObjection,
@@ -17,18 +19,49 @@ import { getServerEnv } from "@/src/lib/server/env";
 import { callLlmForJson, getNowIso, hasAnyLlmProvider, stripUndefinedDeep } from "@/src/lib/server/services/mtos-ai";
 import { getPromptText, getPromptRecord } from "@/src/lib/server/prompt-store";
 
+const BRIEF_SECTION_IDS = BRIEF_SECTIONS.map((section) => section.id) as [BriefSectionId, ...BriefSectionId[]];
+
+/**
+ * What a guide part may come back as.
+ *
+ * The first four keys are required and the rest are not, deliberately: a model that answers
+ * with only the timed outline still produces a guide the AM can present, and the live screen
+ * falls back to the talking points when the richer fields are absent. Making them required
+ * would turn a thin answer into no guide at all, minutes before a call.
+ *
+ * `max(9)` on the parts rather than the old 7: the handoff's guide runs eight parts, and a
+ * ceiling that cuts the close off the end of the call is worse than a long left rail.
+ */
 const callGuideSchema = z.object({
   sections: z
     .array(
       z.object({
         title: z.string().min(1),
         minutes: z.number().min(1).max(30),
-        talkingPoints: z.array(z.string().min(1)).min(1).max(5),
+        talkingPoints: z.array(z.string().min(1)).min(1).max(6),
         clientPrompts: z.array(z.string().min(1)).min(1).max(3),
+        sectionId: z.enum(BRIEF_SECTION_IDS).optional(),
+        goal: z.string().optional(),
+        say: z.string().optional(),
+        points: z
+          .array(
+            z.object({
+              text: z.string().min(1),
+              chips: z.array(z.unknown()).optional(),
+            }),
+          )
+          .max(6)
+          .optional(),
+        ifSays: z
+          .array(z.object({ says: z.string().min(1), response: z.string().min(1) }))
+          .max(3)
+          .optional(),
+        qaChips: z.array(z.string().min(1)).max(3).optional(),
+        next: z.string().optional(),
       }),
     )
     .min(4)
-    .max(7),
+    .max(9),
 });
 
 const objectionsSchema = z.object({
@@ -181,10 +214,43 @@ export function buildTouchEvidence(touch: MonthlyTouchRecord) {
 /**
  * Deterministic fallback: builds a timed guide straight from the prep pack so an AM always has a
  * usable, evidence-backed guide even if Claude is unavailable. Real numbers only, nothing invented.
+ *
+ * Every part names the brief section it presents, which is what lets a section declined after
+ * approval drop out of the call. Source chips are attached only where the origin of the line is
+ * certain -- the heatmap numbers come from Rank Tracker, the promises carry the chips the brief
+ * already recorded -- because a chip that links to the wrong place teaches the AM to ignore all
+ * of them, and the scorecard lines already name their own period and source in the text.
  */
 function buildDeterministicSections(touch: MonthlyTouchRecord): CallGuideSection[] {
   const prepPack = touch.prepPack;
   const sections: CallGuideSection[] = [];
+
+  // What we promised last time and did not deliver, owned before the client raises it. First,
+  // and only when there is something to own: a part that says "nothing outstanding" wastes the
+  // opening minutes of the call.
+  const missed = (touch.prepBrief?.promises || []).filter((promise) => promise.status === "not_delivered");
+  if (missed.length) {
+    sections.push({
+      title: "What I owe you",
+      minutes: 5,
+      sectionId: "1",
+      goal: "Own the miss before she raises it, with a new date and how she will hear about it.",
+      talkingPoints: missed.map((promise) => `${promise.what} (promised ${promise.byWhen}) — ${promise.howToOwnIt}`),
+      points: missed.map((promise) => ({
+        text: `${promise.what} (promised ${promise.byWhen}) — ${promise.howToOwnIt}`,
+        ...(promise.chips?.length ? { chips: normalizeChips(promise.chips) } : {}),
+      })),
+      clientPrompts: ["Is that date workable for you, and how would you like to hear about progress?"],
+      ifSays: [
+        {
+          says: "This should have been done weeks ago.",
+          response: "Agree with her and do not defend it. Give the new date and the update you will send until it is done.",
+        },
+      ],
+      qaChips: ["Risk transparency", "Commitment clarity"],
+      next: "Then move to the month's results.",
+    });
+  }
 
   // Scorecard first -- the SOP leads with business numbers, not services.
   const scorecard = prepPack?.businessScorecard;
@@ -200,12 +266,16 @@ function buildDeterministicSections(touch: MonthlyTouchRecord): CallGuideSection
   sections.push({
     title: "Business scorecard",
     minutes: 12,
+    sectionId: "8",
+    goal: "Show the month in business terms, then let her react before you explain anything.",
     talkingPoints: scorecardPoints.length
       ? scorecardPoints
       : ["No CRM/ads numbers are connected -- gather them live using the client prompts."],
     clientPrompts: (prepPack?.leadQualityQuestions || []).slice(0, 2).length
       ? (prepPack?.leadQualityQuestions || []).slice(0, 2)
       : ["How many of this month's leads turned into real jobs?"],
+    qaChips: ["Wins with business impact", "Preparation and evidence"],
+    next: "More calls is only half of it -- next, what the numbers were caused by.",
   });
 
   // SEO / visibility, quoting month-over-month movement per keyword.
@@ -225,8 +295,13 @@ function buildDeterministicSections(touch: MonthlyTouchRecord): CallGuideSection
     sections.push({
       title: "Map visibility: this month vs last",
       minutes: 12,
+      sectionId: "10",
+      goal: "Connect the ranking movement to where her customers actually are.",
       talkingPoints: seoPoints,
+      // The scan is the source for every one of these lines, so the chip is certain.
+      points: seoPoints.map((text) => ({ text, chips: [rankTrackerChip()] })),
       clientPrompts: ["Are you feeling that visibility change in call volume?"],
+      next: "Then the issues, each one with what we are already doing about it.",
     });
   }
 
@@ -236,6 +311,10 @@ function buildDeterministicSections(touch: MonthlyTouchRecord): CallGuideSection
     sections.push({
       title: "Strategic action review",
       minutes: 8,
+      sectionId: "12",
+      goal: "Confirm the agreed action is still the right one, and agree the next move.",
+      qaChips: ["Growth conversation"],
+      next: "Then recap, with an owner and a date on everything.",
       talkingPoints: strategicAction.hasAgreedAction
         ? [
             `"${strategicAction.title}" is ${strategicAction.implementationPercent}% implemented.`,
@@ -256,8 +335,18 @@ function buildDeterministicSections(touch: MonthlyTouchRecord): CallGuideSection
     sections.push({
       title: "Issues and what we're already doing",
       minutes: 10,
+      sectionId: "9",
+      goal: "Name every issue yourself, each one arriving with a plan, an owner and a date.",
       talkingPoints: risks,
       clientPrompts: ["Anything else that felt off this month we haven't covered?"],
+      ifSays: [
+        {
+          says: "She asks for a credit or a discount.",
+          response: "Do not promise one. Say you will take it to your manager today and come back to her with an answer.",
+        },
+      ],
+      qaChips: ["Risk transparency"],
+      next: "Then the wins, and where she wants to grow.",
     });
   }
 
@@ -265,20 +354,34 @@ function buildDeterministicSections(touch: MonthlyTouchRecord): CallGuideSection
   sections.push({
     title: "Wins and growth conversation",
     minutes: 12,
+    sectionId: "11",
+    goal: "Agree the number this quarter is measured against, and the one growth move worth making.",
     talkingPoints: [...touch.wins.slice(0, 3), ...touch.talkingPoints.slice(0, 2)].filter(Boolean).length
       ? [...touch.wins.slice(0, 3), ...touch.talkingPoints.slice(0, 2)].filter(Boolean)
       : ["Anchor the conversation on measurable business value."],
     clientPrompts: ["Where do you want to grow over the next quarter?"],
+    qaChips: ["Growth conversation", "Next-step clarity"],
+    next: "One quick thing before we wrap -- the recap.",
   });
 
   // Recap -- the SOP's five-question close.
   sections.push({
     title: "Recap and close",
     minutes: 6,
+    sectionId: "14",
+    goal: "Every action has an owner and a date, and the next touch is booked on this call.",
     talkingPoints: (prepPack?.recapQuestions || []).map((item) => item.question).length
       ? (prepPack?.recapQuestions || []).map((item) => item.question)
       : ["Restate what was agreed, with owners and dates."],
     clientPrompts: ["Can you give me a tentative date for the items on your side?"],
+    ifSays: [
+      {
+        says: "She cannot commit to a date for the next touch.",
+        response: "Offer two options and send the invite for the one she picks before you hang up.",
+      },
+    ],
+    qaChips: ["Next-step clarity", "Commitment clarity"],
+    next: "End the call -- MTOS waits for the transcript and opens the follow-through.",
   });
 
   return sections;
@@ -297,6 +400,16 @@ async function generateClaudeSections(
   const userText = [
     "Return a JSON object with a single key: sections.",
     "Each section needs: title, minutes (integer), talkingPoints (array of strings), clientPrompts (array of strings).",
+    "Each section SHOULD also carry, when the preparation supports it:",
+    `  sectionId: which brief section this part presents, one of ${BRIEF_SECTION_IDS.join(", ")}.`,
+    "  goal: one line on what this part of the call must achieve.",
+    "  say: the opening line for the account manager to say, close to verbatim.",
+    "  points: the talking points again, each { text, chips }, where chips are the source chips",
+    "    copied from the brief line the point came from ({ kind, label, url }). Copy chips; never invent one.",
+    "  ifSays: up to three { says, response } pairs — what the client may push back with, and the answer.",
+    "  qaChips: up to three QC behaviours this part is judged on.",
+    "  next: the bridge sentence into the following part.",
+    "Order the parts in the order they are spoken. One part per brief section at most.",
     "Use only the preparation bundle below. Do not invent metrics or sources.",
     "",
     JSON.stringify(
@@ -313,7 +426,23 @@ async function generateClaudeSections(
   // prep. max_tokens is a ceiling, not a spend: headroom costs nothing unless it is used.
   const result = await callLlmForJson({ env, system, userText, maxTokens: 24000 });
   const parsed = callGuideSchema.parse(result.data);
-  return { sections: parsed.sections, provider: result.provider, model: result.model };
+  // The chips arrive as whatever the model wrote. `normalizeChips` keeps the ones that name a
+  // system MTOS knows and drops the rest, so an invented source cannot be rendered as a link the
+  // AM would trust on the call.
+  // `points` is pulled out of the spread rather than overwritten in place: spreading the parsed
+  // section would carry its own loose `chips?: unknown[]` into the result type.
+  const sections: CallGuideSection[] = parsed.sections.map(({ points, ...section }) => ({
+    ...section,
+    ...(points
+      ? {
+          points: points.map((point) => {
+            const chips = normalizeChips(point.chips);
+            return { text: point.text, ...(chips.length ? { chips } : {}) };
+          }),
+        }
+      : {}),
+  }));
+  return { sections, provider: result.provider, model: result.model };
 }
 
 /**

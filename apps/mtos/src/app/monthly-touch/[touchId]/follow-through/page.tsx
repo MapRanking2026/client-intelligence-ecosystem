@@ -6,6 +6,7 @@ import { AppShell } from "@/src/components/mtos/app-shell";
 import { FollowThroughGate } from "@/src/components/mtos/follow-through-gate";
 import { FollowThroughItems } from "@/src/components/mtos/follow-through-items";
 import { FollowThroughNotes } from "@/src/components/mtos/follow-through-notes";
+import { FollowThroughRecap } from "@/src/components/mtos/follow-through-recap";
 import { FollowThroughTrackers } from "@/src/components/mtos/follow-through-trackers";
 import { SectionCard } from "@/src/components/mtos/section-card";
 import { resolveTenantContext } from "@/src/lib/auth/resolve-tenant-context";
@@ -106,6 +107,19 @@ export default async function FollowThroughPage({
           <FollowThroughTrackers
             touchId={touch.id}
             {...(touch.followThrough?.trackerCards ? { cards: touch.followThrough.trackerCards } : {})}
+          />
+        </SectionCard>
+      ) : null}
+
+      {confirmed && hasNotes ? (
+        <SectionCard
+          eyebrow="Step 5 of the follow-through"
+          title="Client recap email"
+          subtitle="Built from the notes and the tickets you approved, in the same design as the agenda that went out before the call."
+        >
+          <FollowThroughRecap
+            touchId={touch.id}
+            {...(touch.followThrough?.recap ? { recap: touch.followThrough.recap } : {})}
           />
         </SectionCard>
       ) : null}

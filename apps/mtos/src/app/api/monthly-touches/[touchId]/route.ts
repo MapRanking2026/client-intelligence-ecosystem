@@ -38,6 +38,10 @@ import {
   saveFollowThroughItems,
 } from "@/src/lib/server/services/follow-through-items-service";
 import {
+  buildFollowThroughRecap,
+  saveFollowThroughRecap,
+} from "@/src/lib/server/services/follow-through-recap-service";
+import {
   buildTrackerCards,
   saveTrackerCards,
 } from "@/src/lib/server/services/follow-through-trackers-service";
@@ -346,6 +350,16 @@ const touchRequestSchema = z.discriminatedUnion("action", [
   // Building keeps every item the AM has already decided on; only new action lines get a form.
   z.object({ action: z.literal("build_items") }),
   z.object({ action: z.literal("build_tracker_cards") }),
+  z.object({ action: z.literal("build_recap") }),
+  z.object({
+    action: z.literal("save_recap"),
+    recap: z.object({
+      subject: z.string(),
+      html: z.string(),
+      decision: z.enum(["approved", "denied", "deleted"]).optional(),
+      edited: z.boolean().optional(),
+    }),
+  }),
   z.object({ action: z.literal("save_tracker_cards"), cards: z.array(trackerCardSchema) }),
   z.object({
     action: z.literal("save_items"),
@@ -577,6 +591,12 @@ export async function POST(
         break;
       case "save_notes":
         result = { notes: await saveFollowThroughNotes(context, touchId, payload.notes) };
+        break;
+      case "build_recap":
+        result = await buildFollowThroughRecap(context, touchId);
+        break;
+      case "save_recap":
+        result = { recap: await saveFollowThroughRecap(context, touchId, payload.recap) };
         break;
       case "build_tracker_cards":
         result = await buildTrackerCards(context, touchId);

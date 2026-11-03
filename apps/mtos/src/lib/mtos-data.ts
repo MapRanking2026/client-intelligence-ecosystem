@@ -1,4 +1,5 @@
 import type { NotesDraft } from "@/src/lib/contracts/follow-through-notes";
+import type { RecapEmailState } from "@/src/lib/contracts/follow-through-recap-email";
 import type { FollowThroughItem } from "@/src/lib/contracts/follow-through-tickets";
 import type { TrackerCard } from "@/src/lib/contracts/follow-through-trackers";
 import type { ScoreGateState } from "@/src/lib/contracts/follow-through-score";
@@ -1342,6 +1343,8 @@ export interface TouchFollowThroughState {
   items?: FollowThroughItem[];
   /** The Health Tracker, Risk Register and Stakeholder rows this touch would write. */
   trackerCards?: TrackerCard[];
+  /** The client recap email, as the AM left it. */
+  recap?: RecapEmailState;
 }
 
 export interface MonthlyTouchRecord {

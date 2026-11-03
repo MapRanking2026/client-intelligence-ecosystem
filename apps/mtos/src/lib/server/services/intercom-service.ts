@@ -163,6 +163,23 @@ async function searchConversations(
   return { conversations: data.map(summarizeConversation).filter((row) => row.id) };
 }
 
+/**
+ * Whether Intercom is connected at all, asked once instead of per client.
+ *
+ * `readClientInbox` answers the same question on every call, which is right for a preparation run
+ * looking at one client but wrong for a caller about to loop: twenty clients meant twenty reads of
+ * the same connection record to be told twenty times that there is no connection. A caller that
+ * loops asks this first, skips the loop when it is false, and spends nothing.
+ *
+ * It is also the difference between a missing connection and a broken one. Nobody has set Intercom
+ * up yet is a state, not a fault, and a caller that reports faults should not report this.
+ */
+export async function isIntercomConnected(context: TenantContext): Promise<boolean> {
+  const connection = await getIntegrationConnection(context, "intercom").catch(() => undefined);
+  if (!connection || connection.status !== "connected") return false;
+  return Boolean(getIntegrationCredentials(connection).accessToken);
+}
+
 export interface ReadClientInboxOptions {
   clientName: string;
   /** The client's email, traced from a real source. Without it the lookup is a weak name match. */

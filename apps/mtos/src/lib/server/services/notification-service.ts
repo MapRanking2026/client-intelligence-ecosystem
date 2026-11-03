@@ -7,7 +7,7 @@ import {
 import { withQuotaFallback } from "@/src/lib/server/firebase/quota";
 import { getMtosDataSource } from "@/src/lib/server/data/seed-mtos-data-source";
 import { sendGmailText } from "@/src/lib/server/gmail";
-import { readClientInbox } from "@/src/lib/server/services/intercom-service";
+import { isIntercomConnected, readClientInbox } from "@/src/lib/server/services/intercom-service";
 import { listTenantUserContexts, listActiveTenantIds } from "@/src/lib/server/services/daily-sync-service";
 import {
   getAccountManagerPreferences,
@@ -253,7 +253,22 @@ export async function deriveCandidates(
     }
   }
 
-  // 4. Clients left waiting in Intercom.
+  /*
+    4. Clients left waiting in Intercom.
+
+    Asked once, before the loop: Intercom has no OAuth app registered yet, and until somebody
+    registers one there is nothing to look in. That is a configuration state, not a failure, so it
+    is skipped in silence rather than reported -- a run that says "could not read Intercom" every
+    two hours for a connection nobody has made yet is noise that teaches people to ignore the
+    line. Once it is connected, a refused or failed read is reported as before, because then it IS
+    a fault and the reason tells you which one.
+
+    Checking it here rather than per client also stops twenty reads of the same absent connection.
+  */
+  if (!(await isIntercomConnected(context))) {
+    return { candidates, unavailable };
+  }
+
   const active = clientReplyCandidates(clients, touches, now);
   for (const client of active) {
     const inbox = await readClientInbox(context, {
@@ -263,8 +278,11 @@ export async function deriveCandidates(
     });
     if (inbox.status !== "checked") {
       // One honest note rather than one per client: the reason is the same for all of them, and it
-      // is worth carrying, because "not connected" and "Intercom refused the search" are different
-      // problems with different fixes.
+      // is worth carrying, because "Intercom refused the search" and "no address for this client"
+      // are different problems with different fixes. `not_connected` is not reported even here --
+      // it can only mean the connection went away mid-run, which the next run will say plainly
+      // enough by finding nothing to look in.
+      if (inbox.status === "not_connected") continue;
       const note = `Intercom (${inbox.status}${inbox.detail ? `: ${inbox.detail}` : ""})`;
       if (!unavailable.includes(note)) unavailable.push(note);
       continue;

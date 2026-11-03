@@ -115,6 +115,13 @@ export interface SendAgendaEmailOptions {
   html: string;
   /** Non-empty refuses the send outright: this email already went out. */
   existingConversationId?: string;
+  /**
+   * What this email is, for the sentences the AM reads when it does not send.
+   *
+   * Defaults to the agenda, which is what this function was built for. The follow-through's
+   * recap passes its own, so "This agenda email already went out" never appears on a recap.
+   */
+  label?: string;
 }
 
 /**
@@ -129,8 +136,7 @@ export async function sendAgendaEmailViaIntercom(
     return {
       sent: false,
       sendItYourself: false,
-      detail:
-        "This agenda email already went out once, so nothing was sent again. Open the conversation in Intercom to see what the client received.",
+      detail: `This ${options.label || "agenda email"} already went out once, so nothing was sent again. Open the conversation in Intercom to see what the client received.`,
     };
   }
 

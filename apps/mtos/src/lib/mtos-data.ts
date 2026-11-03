@@ -1,4 +1,5 @@
 import type { NotesDraft } from "@/src/lib/contracts/follow-through-notes";
+import type { ProcessingResult } from "@/src/lib/contracts/follow-through-finish";
 import type { RecapEmailState } from "@/src/lib/contracts/follow-through-recap-email";
 import type { FollowThroughItem } from "@/src/lib/contracts/follow-through-tickets";
 import type { TrackerCard } from "@/src/lib/contracts/follow-through-trackers";
@@ -1345,6 +1346,17 @@ export interface TouchFollowThroughState {
   trackerCards?: TrackerCard[];
   /** The client recap email, as the AM left it. */
   recap?: RecapEmailState;
+  /**
+   * The ClickUp task ids and urls this follow-through has already created, by item id.
+   *
+   * This is what makes "Finish" safe to press twice. A run that fails halfway records every
+   * ticket it managed to file before it stopped, and the retry skips those rather than putting
+   * a second copy of each into somebody's queue.
+   */
+  ticketIds?: Record<string, string>;
+  ticketUrls?: Record<string, string>;
+  /** What the last processing run did, step by step. */
+  processing?: ProcessingResult;
 }
 
 export interface MonthlyTouchRecord {

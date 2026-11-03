@@ -255,6 +255,14 @@ export interface ClientAction {
   tentative?: boolean;
   /** What of ours this is holding up. */
   blocks?: string;
+  /**
+   * The AM's decision on it.
+   *
+   * A client action creates no ticket -- it is a line in the notes and a line in the recap email
+   * -- but it still has to be decided, because approving it is what puts it in front of the
+   * client as something they agreed to do.
+   */
+  decision?: "approved" | "denied" | "deleted";
 }
 
 export interface PendingItem {

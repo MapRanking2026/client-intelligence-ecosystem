@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useMemo, useState } from "react";
-import { AlertTriangle, Eye, Plus, RefreshCw, Save, Trash2 } from "lucide-react";
+import { AlertTriangle, Check, Eye, Plus, RefreshCw, Save, Trash2, X } from "lucide-react";
 
 import { readJsonResponse } from "@/src/lib/api/read-json-response";
 import {
@@ -578,19 +578,33 @@ export function FollowThroughNotes({
                   />
                   Tentative
                 </label>
-                <button
-                  type="button"
-                  className="icon-btn"
-                  aria-label="Remove"
-                  onClick={() =>
-                    edit((p) => ({
-                      ...p,
-                      clientActions: p.clientActions.filter((_, position) => position !== index),
-                    }))
-                  }
-                >
-                  <Trash2 />
-                </button>
+                {/*
+                  A client action creates no ticket, but approving it is what puts it in the recap
+                  email as something the client agreed to -- so it is a decision, not prose.
+                */}
+                <div className="seg" role="group" aria-label="Decision">
+                  <button
+                    type="button"
+                    className={`seg-btn ${item.decision === "approved" ? "on" : ""}`}
+                    onClick={() => updateClientAction(index, { ...item, decision: "approved" })}
+                  >
+                    <Check />
+                  </button>
+                  <button
+                    type="button"
+                    className={`seg-btn ${item.decision === "denied" ? "on" : ""}`}
+                    onClick={() => updateClientAction(index, { ...item, decision: "denied" })}
+                  >
+                    <X />
+                  </button>
+                  <button
+                    type="button"
+                    className={`seg-btn ${item.decision === "deleted" ? "on" : ""}`}
+                    onClick={() => updateClientAction(index, { ...item, decision: "deleted" })}
+                  >
+                    <Trash2 />
+                  </button>
+                </div>
               </div>
             </li>
           ))}

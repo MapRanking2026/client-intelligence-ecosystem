@@ -1,6 +1,6 @@
 import type { TenantContext } from "@/src/lib/contracts/mtos";
-import type { ActionLine } from "@/src/lib/contracts/follow-through-notes";
-import { actionWordCount } from "@/src/lib/contracts/follow-through-notes";
+import type { ActionLine, PendingItem } from "@/src/lib/contracts/follow-through-notes";
+import { actionWordCount, pendingMarker } from "@/src/lib/contracts/follow-through-notes";
 import {
   BILLING_DEFAULT_ASSIGNEE,
   OWNER_NEEDED,
@@ -208,6 +208,42 @@ function billingFromAction(
   };
 }
 
+/**
+ * A pending item as the draft ticket the handoff calls for.
+ *
+ * It carries the `[PENDING - ...]` marker in its own name rather than only in the notes, because
+ * the ticket is what somebody sees in their queue -- and a ticket that looks ready to start when
+ * the information it needs has not arrived is how work gets begun twice.
+ */
+function ticketFromPending(
+  item: PendingItem,
+  options: { businessName: string; owners: DepartmentOwners; today: Date },
+): TicketDraftForm {
+  const department = matchDepartment(item.team);
+  const owner = departmentOwner(department, options.owners) || item.owner;
+  return {
+    id: `pending-${item.id}`,
+    formType: "ticket",
+    // Keyed on the pending item so a rebuild finds the AM's edited version rather than making
+    // a second ticket for the same missing thing.
+    actionId: item.id,
+    taskName: `${pendingMarker(item)} ${item.missing.trim()}`.trim(),
+    businessName: options.businessName,
+    description: [
+      `Waiting on: ${item.waitingOn === "Client" ? "the client" : "AM review"}.`,
+      item.from.trim() ? `From: ${item.from.trim()}` : "",
+      `Chase on: ${item.reminderDate.trim() || "no date set"}.`,
+      "Do not start the work until this arrives.",
+    ]
+      .filter(Boolean)
+      .join("\n\n"),
+    ...(department ? { department } : {}),
+    assignee: owner?.trim() || OWNER_NEEDED,
+    priority: "low",
+    ...(parseIsoDay(item.reminderDate) ? { dueDate: parseIsoDay(item.reminderDate)! } : {}),
+  };
+}
+
 export interface BuildItemsResult {
   items: FollowThroughItem[];
   /** The action ids whose `what` is over the twenty-word budget, for the row chips. */
@@ -265,6 +301,11 @@ export async function buildFollowThroughItems(
             }),
       );
     }
+  }
+
+  for (const item of notes.pending) {
+    const kept = byActionId.get(item.id);
+    items.push(kept || ticketFromPending(item, { businessName, owners, today }));
   }
 
   // Items the AM added by hand have no action line behind them, so they survive every rebuild.

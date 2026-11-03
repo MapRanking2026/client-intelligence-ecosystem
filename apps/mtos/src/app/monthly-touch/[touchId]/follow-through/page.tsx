@@ -4,6 +4,7 @@ import { ArrowLeft } from "lucide-react";
 
 import { AppShell } from "@/src/components/mtos/app-shell";
 import { FollowThroughGate } from "@/src/components/mtos/follow-through-gate";
+import { FollowThroughFinish } from "@/src/components/mtos/follow-through-finish";
 import { FollowThroughItems } from "@/src/components/mtos/follow-through-items";
 import { FollowThroughNotes } from "@/src/components/mtos/follow-through-notes";
 import { FollowThroughRecap } from "@/src/components/mtos/follow-through-recap";
@@ -120,6 +121,24 @@ export default async function FollowThroughPage({
           <FollowThroughRecap
             touchId={touch.id}
             {...(touch.followThrough?.recap ? { recap: touch.followThrough.recap } : {})}
+          />
+        </SectionCard>
+      ) : null}
+
+      {confirmed && hasNotes ? (
+        <SectionCard
+          eyebrow="Step 6 of the follow-through"
+          title="Finish and process"
+          subtitle="Nothing above has left MTOS yet. This button creates the tickets, files the notes, updates the trackers and sends the email — in that order, and only what you approved."
+        >
+          <FollowThroughFinish
+            touchId={touch.id}
+            {...(touch.followThrough?.notes ? { notes: touch.followThrough.notes } : {})}
+            {...(touch.followThrough?.items ? { items: touch.followThrough.items } : {})}
+            {...(touch.followThrough?.trackerCards ? { trackerCards: touch.followThrough.trackerCards } : {})}
+            {...(touch.followThrough?.recap ? { recap: touch.followThrough.recap } : {})}
+            {...(touch.followThrough?.processing ? { processing: touch.followThrough.processing } : {})}
+            qaHref={`/qa/${touch.clientId}/${touch.id}`}
           />
         </SectionCard>
       ) : null}

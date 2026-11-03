@@ -38,6 +38,10 @@ import {
   saveFollowThroughItems,
 } from "@/src/lib/server/services/follow-through-items-service";
 import {
+  FollowThroughNotReadyError,
+  processFollowThrough,
+} from "@/src/lib/server/services/follow-through-process-service";
+import {
   buildFollowThroughRecap,
   saveFollowThroughRecap,
 } from "@/src/lib/server/services/follow-through-recap-service";
@@ -169,6 +173,7 @@ const notesDraftSchema = z.object({
       due: z.string(),
       tentative: z.boolean().optional(),
       blocks: z.string().optional(),
+      decision: z.enum(["approved", "denied", "deleted"]).optional(),
     }),
   ),
   pending: z.array(
@@ -351,6 +356,9 @@ const touchRequestSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("build_items") }),
   z.object({ action: z.literal("build_tracker_cards") }),
   z.object({ action: z.literal("build_recap") }),
+  // The one action in the whole touch that writes outward. Everything it does was approved item
+  // by item on the screen first, and every step of it is idempotent.
+  z.object({ action: z.literal("process_follow_through") }),
   z.object({
     action: z.literal("save_recap"),
     recap: z.object({
@@ -592,6 +600,9 @@ export async function POST(
       case "save_notes":
         result = { notes: await saveFollowThroughNotes(context, touchId, payload.notes) };
         break;
+      case "process_follow_through":
+        result = await processFollowThrough(context, touchId);
+        break;
       case "build_recap":
         result = await buildFollowThroughRecap(context, touchId);
         break;
@@ -688,6 +699,12 @@ export async function POST(
     // The same shape as the review's own refusal: the first sentence for the toast, the whole
     // list for the screen, and 409 because nothing is wrong with the request -- the AM has not
     // finished deciding.
+    if (error instanceof FollowThroughNotReadyError) {
+      return NextResponse.json(
+        { error: error.blockers[0], blockers: error.blockers },
+        { status: 409 },
+      );
+    }
     if (error instanceof ScoreGateIncompleteError) {
       return NextResponse.json(
         { error: error.blockers[0], blockers: error.blockers },

@@ -12,7 +12,6 @@ import {
   BriefcaseBusiness,
   ClipboardCheck,
   Settings,
-  Search,
   Menu,
 } from "lucide-react";
 
@@ -22,6 +21,7 @@ import { ThemeToggle } from "@/src/components/mtos/theme-toggle";
 import { AnnotationsToggle } from "@/src/components/mtos/annotations-toggle";
 import { NotificationsBell, type AppNotification } from "@/src/components/mtos/notifications-bell";
 import { LogoutButton } from "@/src/components/mtos/logout-button";
+import { CommandPalette } from "@/src/components/mtos/command-palette";
 import { applyAppearance } from "@/src/lib/appearance";
 import { resolvePreferences, type UserPreferences } from "@/src/lib/contracts/user-preferences";
 
@@ -157,11 +157,7 @@ export function AppChrome({ title, subtitle, children }: AppChromeProps) {
           <button className="menu-btn" onClick={() => setOpen(true)} aria-label="Open menu" type="button">
             <Menu />
           </button>
-          <div className="search">
-            <Search />
-            <span>Search clients, commitments, opportunities…</span>
-            <span className="kbd">⌘K</span>
-          </div>
+          <CommandPalette />
           <div className="top-actions">
             <div className="pill-live">
               <span className="live-dot" />

@@ -35,7 +35,8 @@
     "check:user-preferences": "tsx scripts/check-user-preferences.ts",
     "check:integration-permissions": "tsx scripts/check-integration-permissions.ts",
     "check:global-search": "tsx scripts/check-global-search.ts",
-    "check:notifications": "tsx scripts/check-notifications.ts"
+    "check:notifications": "tsx scripts/check-notifications.ts",
+    "run:notifications": "tsx scripts/run-notifications.ts"
   },
   "dependencies": {
     "@cie/engine": "*",

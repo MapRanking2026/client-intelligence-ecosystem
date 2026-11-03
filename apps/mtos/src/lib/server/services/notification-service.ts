@@ -262,8 +262,11 @@ export async function deriveCandidates(
       windowDays: ACTIVE_TOUCH_WINDOW_DAYS,
     });
     if (inbox.status !== "checked") {
-      // One honest note rather than one per client: the reason is the same for all of them.
-      if (!unavailable.includes("Intercom")) unavailable.push("Intercom");
+      // One honest note rather than one per client: the reason is the same for all of them, and it
+      // is worth carrying, because "not connected" and "Intercom refused the search" are different
+      // problems with different fixes.
+      const note = `Intercom (${inbox.status}${inbox.detail ? `: ${inbox.detail}` : ""})`;
+      if (!unavailable.includes(note)) unavailable.push(note);
       continue;
     }
     for (const conversation of inbox.conversations.filter((entry) => entry.awaitingUs)) {

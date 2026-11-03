@@ -38,6 +38,10 @@ import {
   saveFollowThroughItems,
 } from "@/src/lib/server/services/follow-through-items-service";
 import {
+  buildTrackerCards,
+  saveTrackerCards,
+} from "@/src/lib/server/services/follow-through-trackers-service";
+import {
   draftFollowThroughNotes,
   saveFollowThroughNotes,
 } from "@/src/lib/server/services/follow-through-notes-service";
@@ -213,6 +217,108 @@ const billingFormSchema = z.object({
   decision: decisionEnum.optional(),
 });
 
+const trackerDecision = z.enum(["approved", "denied", "deleted"]);
+
+/**
+ * The three tracker rows, each with its own field set.
+ *
+ * Written out per kind rather than as one permissive object: the Health Tracker's Case Status and
+ * the Risk Register's are different value sets under the same name, and a shared loose shape
+ * would let one be written into the other's row.
+ */
+const healthRowSchema = z.object({
+  clientName: z.string().optional(),
+  startDate: z.string().optional(),
+  assignee: z.string().optional(),
+  clientType: z.enum(["Direct", "White Label"]).optional(),
+  accountManager: z.string().optional(),
+  nps: z.number().int().min(1).max(10).nullable().optional(),
+  status: z.string().optional(),
+  caseStatus: z.enum(["—", "Watching", "Working", "downgraded"]).optional(),
+  communicationType: z.enum(["Normal", "Distant", "Needy"]).optional(),
+  mrr: z.string().optional(),
+  upselling: z.enum(["Yes!", "Possible", "No way"]).optional(),
+  health: z.enum(["Good", "Neutral", "Risk"]).optional(),
+  email: z.string().optional(),
+  services: z.array(z.string()).optional(),
+  servicesUpsell: z.array(z.string()).optional(),
+  latestComment: z.string().optional(),
+});
+
+const riskRowSchema = z.object({
+  accountManager: z.string().optional(),
+  clientType: z.enum(["Direct", "White Label"]).optional(),
+  caseStatus: z
+    .enum(["Watching", "Working", "Requested Cancellation", "Resolved-Healthy", "Downgraded"])
+    .optional(),
+  dateFlagged: z.string().optional(),
+  money: z.enum(["Yes", "No"]).optional(),
+  responsiveness: z.enum(["Yes", "No"]).optional(),
+  lifeChange: z.enum(["Yes", "No", "maybe"]).optional(),
+  technical: z.enum(["Yes", "No"]).optional(),
+  otherAgency: z.enum(["Yes", "No", "kind of"]).optional(),
+  performance: z.enum(["Yes", "No"]).optional(),
+  riskScore: z.number().int().min(0).max(6).optional(),
+  riskTier: z.enum(["Healthy", "Low", "Medium", "High", "Critical"]).optional(),
+  primaryCategory: z
+    .enum([
+      "Communication",
+      "Expectations",
+      "Gen. Business",
+      "Product",
+      "Onboarding",
+      "Money flow",
+      "Billing Issue",
+    ])
+    .optional(),
+  nextAction: z.string().optional(),
+  nextActionOwner: z.string().optional(),
+  dueDate: z.string().optional(),
+  lastMonthlyTouch: z.string().optional(),
+  latestComments: z.string().optional(),
+});
+
+const stakeholderRowSchema = z.object({
+  clientName: z.string().optional(),
+  assignee: z.string().optional(),
+  clientType: z.enum(["Direct", "White Label"]).optional(),
+  services: z.array(z.string()).optional(),
+  role: z.string().optional(),
+  communicationPreference: z.enum(["Phone", "Email", "Face-to-Face", "Text/Chat", "WhatsApp"]).optional(),
+  marketingLiteracy: z.enum(["Low", "Medium", "High"]).optional(),
+  personality: z.string().optional(),
+  whatTheyCareAbout: z.string().optional(),
+  knownHistory: z.string().optional(),
+});
+
+const trackerCardSchema = z.discriminatedUnion("kind", [
+  z.object({
+    id: z.string().min(1),
+    kind: z.literal("health"),
+    isNewRow: z.boolean().optional(),
+    current: healthRowSchema.optional(),
+    next: healthRowSchema,
+    decision: trackerDecision.optional(),
+  }),
+  z.object({
+    id: z.string().min(1),
+    kind: z.literal("risk"),
+    isNewRow: z.boolean().optional(),
+    current: riskRowSchema.optional(),
+    next: riskRowSchema,
+    decision: trackerDecision.optional(),
+  }),
+  z.object({
+    id: z.string().min(1),
+    kind: z.literal("stakeholder"),
+    personName: z.string().optional(),
+    isNewRow: z.boolean().optional(),
+    current: stakeholderRowSchema.optional(),
+    next: stakeholderRowSchema,
+    decision: trackerDecision.optional(),
+  }),
+]);
+
 const touchRequestSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("prepare") }),
   z.object({ action: z.literal("prepare_with_ai") }),
@@ -239,6 +345,8 @@ const touchRequestSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("save_notes"), notes: notesDraftSchema }),
   // Building keeps every item the AM has already decided on; only new action lines get a form.
   z.object({ action: z.literal("build_items") }),
+  z.object({ action: z.literal("build_tracker_cards") }),
+  z.object({ action: z.literal("save_tracker_cards"), cards: z.array(trackerCardSchema) }),
   z.object({
     action: z.literal("save_items"),
     items: z.array(z.discriminatedUnion("formType", [ticketFormSchema, billingFormSchema])),
@@ -469,6 +577,12 @@ export async function POST(
         break;
       case "save_notes":
         result = { notes: await saveFollowThroughNotes(context, touchId, payload.notes) };
+        break;
+      case "build_tracker_cards":
+        result = await buildTrackerCards(context, touchId);
+        break;
+      case "save_tracker_cards":
+        result = { cards: await saveTrackerCards(context, touchId, payload.cards) };
         break;
       case "build_items":
         result = await buildFollowThroughItems(context, touchId);

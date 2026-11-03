@@ -23,6 +23,7 @@
     "check:prep-brief": "tsx scripts/check-prep-brief.ts",
     "check:agenda-email": "tsx scripts/check-agenda-email.ts",
     "check:touch-approval": "tsx scripts/check-touch-approval.ts",
+    "check:follow-through-trackers": "tsx scripts/check-follow-through-trackers.ts",
     "check:follow-through-tickets": "tsx scripts/check-follow-through-tickets.ts",
     "check:follow-through-notes": "tsx scripts/check-follow-through-notes.ts",
     "check:follow-through-score": "tsx scripts/check-follow-through-score.ts",

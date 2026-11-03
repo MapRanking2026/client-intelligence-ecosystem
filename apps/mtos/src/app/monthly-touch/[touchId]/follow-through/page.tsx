@@ -6,6 +6,7 @@ import { AppShell } from "@/src/components/mtos/app-shell";
 import { FollowThroughGate } from "@/src/components/mtos/follow-through-gate";
 import { FollowThroughItems } from "@/src/components/mtos/follow-through-items";
 import { FollowThroughNotes } from "@/src/components/mtos/follow-through-notes";
+import { FollowThroughTrackers } from "@/src/components/mtos/follow-through-trackers";
 import { SectionCard } from "@/src/components/mtos/section-card";
 import { resolveTenantContext } from "@/src/lib/auth/resolve-tenant-context";
 import { scoreConfirmed } from "@/src/lib/contracts/follow-through-score";
@@ -92,6 +93,19 @@ export default async function FollowThroughPage({
             {...(tags.reason ? { tagsReason: tags.reason } : {})}
             members={roster.members.map((member) => member.name)}
             owners={owners}
+          />
+        </SectionCard>
+      ) : null}
+
+      {confirmed && hasNotes ? (
+        <SectionCard
+          eyebrow="Step 4 of the follow-through"
+          title="Tracker rows"
+          subtitle="The Health Tracker, the Risk Register and the Stakeholder Map, each shown against the row as it stands today. Every field that changes says what it was."
+        >
+          <FollowThroughTrackers
+            touchId={touch.id}
+            {...(touch.followThrough?.trackerCards ? { cards: touch.followThrough.trackerCards } : {})}
           />
         </SectionCard>
       ) : null}

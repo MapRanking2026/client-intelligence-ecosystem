@@ -1,5 +1,6 @@
 import type { NotesDraft } from "@/src/lib/contracts/follow-through-notes";
 import type { FollowThroughItem } from "@/src/lib/contracts/follow-through-tickets";
+import type { TrackerCard } from "@/src/lib/contracts/follow-through-trackers";
 import type { ScoreGateState } from "@/src/lib/contracts/follow-through-score";
 import type { GoogleMeetingState } from "@/src/lib/contracts/google-meet";
 import type { PrepWorkflowState } from "@/src/lib/contracts/prep-workflow";
@@ -1339,6 +1340,8 @@ export interface TouchFollowThroughState {
    * the action lines would throw them away every time a word in the notes changed.
    */
   items?: FollowThroughItem[];
+  /** The Health Tracker, Risk Register and Stakeholder rows this touch would write. */
+  trackerCards?: TrackerCard[];
 }
 
 export interface MonthlyTouchRecord {

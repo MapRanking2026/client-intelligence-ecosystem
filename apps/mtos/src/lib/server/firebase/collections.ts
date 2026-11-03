@@ -134,6 +134,16 @@ export function reportBrandPath(tenantId: string) {
   return `${tenantSettingsCollectionPath(tenantId)}/reportBrand`;
 }
 
+/**
+ * Any other tenant-scoped settings document, by its own id.
+ *
+ * Added rather than a second named helper per setting: the department-owner mapping is the first
+ * of several small configuration documents the follow-through and Settings both read.
+ */
+export function tenantSettingsPath(tenantId: string, settingId: string) {
+  return `${tenantSettingsCollectionPath(tenantId)}/${settingId}`;
+}
+
 /** AM-run emergency retention sessions for a client (assembled case + generated report metadata). */
 export function retentionSessionsCollectionPath(tenantId: string, clientId: string) {
   return `${clientPath(tenantId, clientId)}/retentionSessions`;

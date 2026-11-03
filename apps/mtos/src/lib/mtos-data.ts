@@ -1,4 +1,5 @@
 import type { NotesDraft } from "@/src/lib/contracts/follow-through-notes";
+import type { FollowThroughItem } from "@/src/lib/contracts/follow-through-tickets";
 import type { ScoreGateState } from "@/src/lib/contracts/follow-through-score";
 import type { GoogleMeetingState } from "@/src/lib/contracts/google-meet";
 import type { PrepWorkflowState } from "@/src/lib/contracts/prep-workflow";
@@ -1330,6 +1331,14 @@ export interface TouchFollowThroughState {
   notes?: NotesDraft;
   /** When the notes were last drafted from the call, as distinct from last edited. */
   notesDraftedAt?: string;
+  /**
+   * Every action from the notes as the ClickUp form it will become, with the AM's decision on it.
+   *
+   * Stored alongside the notes rather than derived from them on each render: once the AM has set
+   * a department, an owner and an estimate, those are decisions, and re-deriving the list from
+   * the action lines would throw them away every time a word in the notes changed.
+   */
+  items?: FollowThroughItem[];
 }
 
 export interface MonthlyTouchRecord {

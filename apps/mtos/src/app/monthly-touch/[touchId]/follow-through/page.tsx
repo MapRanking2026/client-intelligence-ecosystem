@@ -4,11 +4,17 @@ import { ArrowLeft } from "lucide-react";
 
 import { AppShell } from "@/src/components/mtos/app-shell";
 import { FollowThroughGate } from "@/src/components/mtos/follow-through-gate";
+import { FollowThroughItems } from "@/src/components/mtos/follow-through-items";
 import { FollowThroughNotes } from "@/src/components/mtos/follow-through-notes";
 import { SectionCard } from "@/src/components/mtos/section-card";
 import { resolveTenantContext } from "@/src/lib/auth/resolve-tenant-context";
 import { scoreConfirmed } from "@/src/lib/contracts/follow-through-score";
+import {
+  listTicketTags,
+  readDepartmentOwners,
+} from "@/src/lib/server/services/follow-through-items-service";
 import { getMonthlyTouchWorkspaceView } from "@/src/lib/server/services/monthly-touch-service";
+import { listAssignableMembers } from "@/src/lib/server/services/post-meeting-service";
 
 /**
  * Rendered per request, never prerendered.
@@ -28,7 +34,8 @@ export default async function FollowThroughPage({
   params: Promise<{ touchId: string }>;
 }) {
   const { touchId } = await params;
-  const payload = await getMonthlyTouchWorkspaceView(await resolveTenantContext(), touchId);
+  const context = await resolveTenantContext();
+  const payload = await getMonthlyTouchWorkspaceView(context, touchId);
 
   if (!payload) {
     notFound();
@@ -37,6 +44,14 @@ export default async function FollowThroughPage({
   const { touch, client } = payload;
   const gate = touch.followThrough?.score;
   const confirmed = scoreConfirmed(gate);
+  const hasNotes = Boolean(touch.followThrough?.notes);
+
+  // Read once on the server and handed down, so the ticket forms open on real departments, real
+  // people and the tags that actually exist rather than on a dropdown of guesses. Each of these
+  // reports its own reason when it comes back empty; none of them throws.
+  const [tags, owners, roster] = hasNotes
+    ? await Promise.all([listTicketTags(context), readDepartmentOwners(context), listAssignableMembers(context)])
+    : [{ tags: [] }, {}, { members: [] }];
 
   return (
     <AppShell
@@ -60,6 +75,23 @@ export default async function FollowThroughPage({
           <FollowThroughNotes
             touchId={touch.id}
             {...(touch.followThrough?.notes ? { notes: touch.followThrough.notes } : {})}
+          />
+        </SectionCard>
+      ) : null}
+
+      {confirmed && hasNotes ? (
+        <SectionCard
+          eyebrow="Step 3 of the follow-through"
+          title="Tickets"
+          subtitle="Every action from the notes on the real ClickUp form. What you approve here is what gets created, so the form is the whole form."
+        >
+          <FollowThroughItems
+            touchId={touch.id}
+            {...(touch.followThrough?.items ? { items: touch.followThrough.items } : {})}
+            tags={tags.tags}
+            {...(tags.reason ? { tagsReason: tags.reason } : {})}
+            members={roster.members.map((member) => member.name)}
+            owners={owners}
           />
         </SectionCard>
       ) : null}

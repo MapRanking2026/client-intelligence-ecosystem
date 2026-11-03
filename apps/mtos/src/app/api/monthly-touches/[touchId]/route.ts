@@ -30,6 +30,14 @@ import {
 } from "@/src/lib/server/services/transcript-watch-service";
 import { GOAL_STATUSES } from "@/src/lib/contracts/follow-through-notes";
 import {
+  CANCEL_SPLIT_CATEGORIES,
+  TICKET_PRIORITIES,
+} from "@/src/lib/contracts/follow-through-tickets";
+import {
+  buildFollowThroughItems,
+  saveFollowThroughItems,
+} from "@/src/lib/server/services/follow-through-items-service";
+import {
   draftFollowThroughNotes,
   saveFollowThroughNotes,
 } from "@/src/lib/server/services/follow-through-notes-service";
@@ -168,6 +176,43 @@ const notesDraftSchema = z.object({
   ),
 });
 
+const decisionEnum = z.enum(["approved", "denied", "deleted"]);
+
+/** The ClickUp New Ticket form as the screen sends it back. */
+const ticketFormSchema = z.object({
+  id: z.string().min(1),
+  formType: z.literal("ticket"),
+  actionId: z.string().optional(),
+  taskName: z.string(),
+  businessName: z.string().optional(),
+  description: z.string(),
+  attachments: z.array(z.string()).optional(),
+  timeEstimateMinutes: z.number().int().positive().optional(),
+  department: z.string().optional(),
+  assignee: z.string().optional(),
+  priority: z.enum(TICKET_PRIORITIES).optional(),
+  dueDate: z.string().optional(),
+  dueDateAgreedOnCall: z.boolean().optional(),
+  tags: z.array(z.string()).optional(),
+  decision: decisionEnum.optional(),
+});
+
+/** The Billing Change form, which is a different form rather than a ticket with extra fields. */
+const billingFormSchema = z.object({
+  id: z.string().min(1),
+  formType: z.literal("billing"),
+  actionId: z.string().optional(),
+  businessName: z.string().optional(),
+  changeType: z.enum(["Upsell", "Downsell", "New Sale", "Pause", "Cancel", "Payment Failed"]).optional(),
+  dateRequested: z.string().optional(),
+  dueDate: z.string().optional(),
+  assignee: z.string().optional(),
+  attachments: z.array(z.string()).optional(),
+  details: z.string(),
+  cancelSplit: z.record(z.enum(CANCEL_SPLIT_CATEGORIES), z.number().int().min(0).max(5)).optional(),
+  decision: decisionEnum.optional(),
+});
+
 const touchRequestSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("prepare") }),
   z.object({ action: z.literal("prepare_with_ai") }),
@@ -192,6 +237,12 @@ const touchRequestSchema = z.discriminatedUnion("action", [
   // Drafting is its own action and overwrites the AM's edits, so the screen warns before it.
   z.object({ action: z.literal("draft_notes") }),
   z.object({ action: z.literal("save_notes"), notes: notesDraftSchema }),
+  // Building keeps every item the AM has already decided on; only new action lines get a form.
+  z.object({ action: z.literal("build_items") }),
+  z.object({
+    action: z.literal("save_items"),
+    items: z.array(z.discriminatedUnion("formType", [ticketFormSchema, billingFormSchema])),
+  }),
   z.object({
     action: z.literal("apply_post_meeting_decisions"),
     tickets: z.array(
@@ -418,6 +469,12 @@ export async function POST(
         break;
       case "save_notes":
         result = { notes: await saveFollowThroughNotes(context, touchId, payload.notes) };
+        break;
+      case "build_items":
+        result = await buildFollowThroughItems(context, touchId);
+        break;
+      case "save_items":
+        result = { items: await saveFollowThroughItems(context, touchId, payload.items) };
         break;
       case "analyze_transcript":
         result = await analyzePostMeetingTranscript(context, touchId, payload.transcript);

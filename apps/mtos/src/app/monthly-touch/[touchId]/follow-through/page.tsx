@@ -4,6 +4,7 @@ import { ArrowLeft } from "lucide-react";
 
 import { AppShell } from "@/src/components/mtos/app-shell";
 import { FollowThroughGate } from "@/src/components/mtos/follow-through-gate";
+import { FollowThroughNotes } from "@/src/components/mtos/follow-through-notes";
 import { SectionCard } from "@/src/components/mtos/section-card";
 import { resolveTenantContext } from "@/src/lib/auth/resolve-tenant-context";
 import { scoreConfirmed } from "@/src/lib/contracts/follow-through-score";
@@ -52,14 +53,14 @@ export default async function FollowThroughPage({
 
       {confirmed ? (
         <SectionCard
-          eyebrow="Next"
-          title="The notes, the tickets and the recap"
-          subtitle="Drafted from this call and this score."
+          eyebrow="Step 2 of the follow-through"
+          title="Post Monthly Touch Notes"
+          subtitle="The numbering here is the numbering in the Client's Book, so what you read on this screen is what the next AM reads on the account."
         >
-          <p className="muted text-[0.86rem] leading-7">
-            The drafting steps are being built. The score above is saved, so this screen will open
-            on them as soon as they land.
-          </p>
+          <FollowThroughNotes
+            touchId={touch.id}
+            {...(touch.followThrough?.notes ? { notes: touch.followThrough.notes } : {})}
+          />
         </SectionCard>
       ) : null}
 

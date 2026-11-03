@@ -28,6 +28,11 @@ import {
   attachTouchTranscript,
   watchTouchTranscript,
 } from "@/src/lib/server/services/transcript-watch-service";
+import { GOAL_STATUSES } from "@/src/lib/contracts/follow-through-notes";
+import {
+  draftFollowThroughNotes,
+  saveFollowThroughNotes,
+} from "@/src/lib/server/services/follow-through-notes-service";
 import {
   ScoreGateIncompleteError,
   analyzeScoreGate,
@@ -103,6 +108,66 @@ const scoreGateSchema = z.object({
     .optional(),
 });
 
+const actionLineSchema = z.object({
+  id: z.string().min(1),
+  what: z.string(),
+  team: z.string(),
+  due: z.string(),
+  carryOver: z.boolean().optional(),
+  crossDepartment: z.string().optional(),
+  dependsOn: z.string().optional(),
+});
+
+/**
+ * The notes as the editor sends them back.
+ *
+ * `amContext` is optional and may be the empty string, and the two mean different things: absent
+ * is a box the AM never opened, empty is one they opened and left blank. Section 2 renumbers to
+ * 2A/2B on the second, so collapsing them would silently change the document's headings.
+ */
+const notesDraftSchema = z.object({
+  title: z.string(),
+  nps: z.number().int().min(1).max(10).nullable(),
+  npsJustification: z.string(),
+  goalQuarter: z.string(),
+  goalText: z.string(),
+  goalStatus: z.enum(GOAL_STATUSES),
+  goalEvidence: z.string(),
+  summary: z.string(),
+  bullets: z.record(z.string(), z.string()),
+  amContext: z.string().optional(),
+  departments: z.array(
+    z.object({
+      department: z.string(),
+      clientFeedback: z.string(),
+      actions: z.array(actionLineSchema),
+    }),
+  ),
+  healthRisk: z
+    .object({ playbook: z.string(), registerNote: z.string(), managerTag: z.string() })
+    .optional(),
+  clientActions: z.array(
+    z.object({
+      id: z.string().min(1),
+      what: z.string(),
+      due: z.string(),
+      tentative: z.boolean().optional(),
+      blocks: z.string().optional(),
+    }),
+  ),
+  pending: z.array(
+    z.object({
+      id: z.string().min(1),
+      waitingOn: z.enum(["Client", "AM review"]),
+      missing: z.string(),
+      from: z.string(),
+      team: z.string(),
+      owner: z.string(),
+      reminderDate: z.string(),
+    }),
+  ),
+});
+
 const touchRequestSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("prepare") }),
   z.object({ action: z.literal("prepare_with_ai") }),
@@ -124,6 +189,9 @@ const touchRequestSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("save_score_gate"), gate: scoreGateSchema }),
   z.object({ action: z.literal("confirm_score_gate"), gate: scoreGateSchema }),
   z.object({ action: z.literal("reopen_score_gate") }),
+  // Drafting is its own action and overwrites the AM's edits, so the screen warns before it.
+  z.object({ action: z.literal("draft_notes") }),
+  z.object({ action: z.literal("save_notes"), notes: notesDraftSchema }),
   z.object({
     action: z.literal("apply_post_meeting_decisions"),
     tickets: z.array(
@@ -344,6 +412,12 @@ export async function POST(
         break;
       case "reopen_score_gate":
         result = { gate: await reopenScoreGate(context, touchId) };
+        break;
+      case "draft_notes":
+        result = await draftFollowThroughNotes(context, touchId);
+        break;
+      case "save_notes":
+        result = { notes: await saveFollowThroughNotes(context, touchId, payload.notes) };
         break;
       case "analyze_transcript":
         result = await analyzePostMeetingTranscript(context, touchId, payload.transcript);

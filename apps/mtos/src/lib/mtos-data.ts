@@ -1,3 +1,4 @@
+import type { NotesDraft } from "@/src/lib/contracts/follow-through-notes";
 import type { ScoreGateState } from "@/src/lib/contracts/follow-through-score";
 import type { GoogleMeetingState } from "@/src/lib/contracts/google-meet";
 import type { PrepWorkflowState } from "@/src/lib/contracts/prep-workflow";
@@ -1320,6 +1321,15 @@ export interface TouchFollowThroughState {
    * playbook and a Manager tag belong in the notes at all.
    */
   score?: ScoreGateState;
+  /**
+   * The Post Monthly Touch Notes as they stand: MTOS's draft with every AM edit on top of it.
+   *
+   * Stored on the touch rather than regenerated, because the AM's wording IS the notes once they
+   * have touched them -- a re-draft that overwrote it would lose the only part no model can write.
+   */
+  notes?: NotesDraft;
+  /** When the notes were last drafted from the call, as distinct from last edited. */
+  notesDraftedAt?: string;
 }
 
 export interface MonthlyTouchRecord {

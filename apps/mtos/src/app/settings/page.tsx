@@ -3,6 +3,18 @@ import { Settings, Plug, Sparkles, BookOpen, Users, Flag, FileText, Shield, Arro
 import type { LucideIcon } from "lucide-react";
 
 import { AppShell } from "@/src/components/mtos/app-shell";
+import { resolveTenantContext } from "@/src/lib/auth/resolve-tenant-context";
+import { permissionAttentionCount } from "@/src/lib/server/services/integration-permissions-service";
+
+/**
+ * Rendered per request, never prerendered.
+ *
+ * This used to be a page of static cards. It now reads how many integration permissions are
+ * waiting on this AM, which makes it per-tenant: a build-time copy would show one tenant's count
+ * to everyone, and the build would have to reach Firestore to make it. See the same note on the
+ * other per-tenant pages.
+ */
+export const dynamic = "force-dynamic";
 
 interface AdminCard {
   title: string;
@@ -55,7 +67,11 @@ const ADMIN_CARDS: AdminCard[] = [
   { title: "Security & sessions", description: "Session controls, credential safety, and account protections.", icon: Shield },
 ];
 
-export default function SettingsPage() {
+export default async function SettingsPage() {
+  const context = await resolveTenantContext();
+  // Never throws: a failed read is nothing to report, not a broken Settings page.
+  const permissionsNeedingAttention = await permissionAttentionCount(context);
+
   return (
     <AppShell>
       <div className="section-head" style={{ marginTop: 0 }}>
@@ -83,7 +99,11 @@ export default function SettingsPage() {
                 >
                   <Icon style={{ width: 19, height: 19 }} />
                 </span>
-                {c.live ? (
+                {c.href === "/settings/integrations" && permissionsNeedingAttention ? (
+                  <span className="chip watch">
+                    {permissionsNeedingAttention} need{permissionsNeedingAttention === 1 ? "s" : ""} attention
+                  </span>
+                ) : c.live ? (
                   <span className="chip good">
                     <span className="sig-dot good" />
                     Live

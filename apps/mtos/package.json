@@ -32,7 +32,8 @@
     "check:firestore-quota": "tsx scripts/check-firestore-quota.ts",
     "check:live-call": "tsx scripts/check-live-call.ts",
     "check:transcript-watch": "tsx scripts/check-transcript-watch.ts",
-    "check:user-preferences": "tsx scripts/check-user-preferences.ts"
+    "check:user-preferences": "tsx scripts/check-user-preferences.ts",
+    "check:integration-permissions": "tsx scripts/check-integration-permissions.ts"
   },
   "dependencies": {
     "@cie/engine": "*",

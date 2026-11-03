@@ -37,6 +37,7 @@ import {
 import { sendAgendaEmailViaIntercom } from "@/src/lib/server/services/intercom-send-service";
 import { getNowIso } from "@/src/lib/server/services/mtos-ai";
 import { clientEmailSenderAddress } from "@/src/lib/server/services/user-service";
+import { hasPermission } from "@/src/lib/server/services/integration-permissions-service";
 
 /**
  * "Finish follow-through & process approved" -- the one place in the whole touch that writes out.
@@ -54,7 +55,6 @@ import { clientEmailSenderAddress } from "@/src/lib/server/services/user-service
  */
 
 const CLICKUP_API = "https://api.clickup.com/api/v2";
-const CALENDAR_WRITE_SCOPE = "https://www.googleapis.com/auth/calendar.events";
 
 interface StepContext {
   context: TenantContext;
@@ -524,16 +524,16 @@ async function postBrief(state: StepContext): Promise<StepResult> {
 /**
  * Book the next Monthly Touch, or say plainly why it was not booked.
  *
- * Today this always takes the fallback. The Google connection MTOS holds is authorised for
- * `calendar.readonly` and nothing more, so there is no token in the system that can create an
- * event -- and adding a write scope is an OAuth change, not a code change. Rather than fail
- * silently or pretend, this checks the scopes it actually has, warns, and creates the reminder
- * ticket the handoff asks for so the booking does not simply evaporate.
+ * Today this always takes the fallback, and the "calendar-write" permission reports why: MTOS
+ * does not request the calendar write scope anywhere, so no AM can grant it by reconnecting and
+ * no token in the system can create an event. Adding the request is a change to the Google app,
+ * not a code change. Rather than fail silently or pretend, this asks what it is actually allowed
+ * to do, warns, and creates the reminder ticket so the booking does not simply evaporate.
  */
 async function bookNextTouch(state: StepContext): Promise<StepResult> {
-  const connection = await getIntegrationConnection(state.context, "google-meet").catch(() => undefined);
-  const granted = new Set(connection?.scopes || []);
-  const canWrite = granted.has(CALENDAR_WRITE_SCOPE);
+  // Asked of the shared permission read rather than by comparing a scope string here, so this
+  // step and the Settings screen can never disagree about whether booking is allowed.
+  const canWrite = await hasPermission(state.context, "calendar-write");
 
   if (canWrite) {
     // Deliberately not implemented past the permission check. The scope has never been granted

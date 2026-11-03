@@ -24,6 +24,10 @@ import { generateQaReview, recordVictorDecision } from "@/src/lib/server/service
 import { advanceTouchProgress, saveTouchDraft } from "@/src/lib/server/services/touch-state-service";
 import { agendaEmailPatch } from "@/src/lib/server/services/agenda-email-service";
 import { approveAndPrepareCall } from "@/src/lib/server/services/touch-approval-service";
+import {
+  attachTouchTranscript,
+  watchTouchTranscript,
+} from "@/src/lib/server/services/transcript-watch-service";
 
 // One Generate now runs the prep pack and the live call guide back to back -- several
 // model calls plus the dashboard pulls. Matches the ceiling the other long-running
@@ -73,6 +77,13 @@ const touchRequestSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("generate_call_guide") }),
   z.object({ action: z.literal("generate_presentation") }),
   z.object({ action: z.literal("analyze_transcript"), transcript: z.string().min(1) }),
+  // The one-minute poll the Live step runs after "End call". A POST rather than the read-only
+  // GET beside it because a GET route handler can be prerendered or cached under Cache
+  // Components, and a cached answer to "has the transcript arrived yet" would say no forever.
+  z.object({ action: z.literal("watch_transcript") }),
+  // The AM pasting the dialogue themselves: a call on Zoom, a call hosted by the client, a call
+  // nobody transcribed. Stored as attached, so no later poll overrules it.
+  z.object({ action: z.literal("attach_transcript"), transcript: z.string().min(1) }),
   z.object({
     action: z.literal("apply_post_meeting_decisions"),
     tickets: z.array(
@@ -275,6 +286,12 @@ export async function POST(
         // Generate: the AM picks a format after reading the prep, and building both
         // every time would double the model spend on a deck half of them never open.
         result = await generatePresentation(context, touchId);
+        break;
+      case "watch_transcript":
+        result = await watchTouchTranscript(context, touchId);
+        break;
+      case "attach_transcript":
+        result = await attachTouchTranscript(context, touchId, payload.transcript);
         break;
       case "analyze_transcript":
         result = await analyzePostMeetingTranscript(context, touchId, payload.transcript);

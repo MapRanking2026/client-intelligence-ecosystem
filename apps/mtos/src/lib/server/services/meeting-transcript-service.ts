@@ -1,4 +1,5 @@
 import type { TenantContext } from "@/src/lib/contracts/mtos";
+import { FULL_NOTES_TAB_PATTERN, TRANSCRIPT_TAB_PATTERN } from "@/src/lib/contracts/transcript-watch";
 import {
   MATCH_STRENGTH,
   extractTitleCandidate,
@@ -39,7 +40,7 @@ import {
  * separate Doc per language.
  */
 
-const CALENDAR_API = "https://www.googleapis.com/calendar/v3";
+export const CALENDAR_API = "https://www.googleapis.com/calendar/v3";
 const DRIVE_API = "https://www.googleapis.com/drive/v3";
 const DOCS_API = "https://docs.googleapis.com/v1";
 const SHORTCUT_MIME = "application/vnd.google-apps.shortcut";
@@ -140,12 +141,12 @@ interface CalendarEvent {
   attachments?: { fileUrl?: string; title?: string; mimeType?: string }[];
 }
 
-function docUrl(docId: string) {
+export function docUrl(docId: string) {
   return `https://docs.google.com/document/d/${docId}/edit`;
 }
 
 /** Google returns errors as JSON; surface the message rather than a bare status code. */
-async function googleGet(url: string, accessToken: string) {
+export async function googleGet(url: string, accessToken: string) {
   const response = await fetch(url, {
     headers: { authorization: `Bearer ${accessToken}`, accept: "application/json" },
   });
@@ -176,7 +177,7 @@ async function googleGetText(url: string, accessToken: string) {
  * added keeps refreshing happily and then 403s on the first Drive call, which would otherwise
  * surface as a confusing "failed". Catching it up front lets the UI say "reconnect".
  */
-async function resolveAccessToken(
+export async function resolveAccessToken(
   context: TenantContext,
 ): Promise<{ ok: true; accessToken: string } | { ok: false; lookup: MeetingTranscriptLookup }> {
   const definition = getIntegrationDefinition(TRANSCRIPT_PROVIDER);
@@ -226,7 +227,7 @@ async function resolveAccessToken(
 }
 
 /** Extract a Docs file id from any Google Docs URL shape. */
-function parseDocIdFromUrl(url: string): string | undefined {
+export function parseDocIdFromUrl(url: string): string | undefined {
   return /\/document\/d\/([a-zA-Z0-9_-]{20,})/.exec(url)?.[1];
 }
 
@@ -493,9 +494,14 @@ async function findNotesDocCandidates(
 async function describeDoc(
   accessToken: string,
   docId: string,
-): Promise<{ ok: true; id: string; title: string } | { ok: false; status: number; message: string }> {
+): Promise<
+  | { ok: true; id: string; title: string; createdTime?: string }
+  | { ok: false; status: number; message: string }
+> {
   const url = new URL(`${DRIVE_API}/files/${docId}`);
-  url.searchParams.set("fields", "id,name,mimeType,shortcutDetails(targetId,targetMimeType)");
+  // `createdTime` orders the parts of a call that was stopped and restarted when Gemini's
+  // title carries no clock to sort on.
+  url.searchParams.set("fields", "id,name,mimeType,createdTime,shortcutDetails(targetId,targetMimeType)");
   url.searchParams.set("supportsAllDrives", "true");
 
   const result = await googleGet(url.toString(), accessToken);
@@ -507,7 +513,12 @@ async function describeDoc(
   if (file.mimeType === SHORTCUT_MIME && file.shortcutDetails?.targetId) {
     return describeDoc(accessToken, file.shortcutDetails.targetId);
   }
-  return { ok: true, id: file.id || docId, title: file.name || "Notes by Gemini" };
+  return {
+    ok: true,
+    id: file.id || docId,
+    title: file.name || "Notes by Gemini",
+    ...(file.createdTime ? { createdTime: file.createdTime } : {}),
+  };
 }
 
 interface DocsTab {
@@ -588,8 +599,11 @@ async function readTabsViaDocsApi(
   return {
     ok: true,
     // "Full notes" must not match the "Quick notes" tab, which is an abbreviated duplicate.
-    fullNotes: readTab(/full\s*notes/i),
-    transcript: readTab(/transcript/i),
+    // Both patterns match the Spanish tab names too: `/transcript/i` does NOT match
+    // "Transcripción" -- its tenth letter is a `c` -- so a Spanish call read with the
+    // English-only pattern came back as a call nobody had transcribed.
+    fullNotes: readTab(FULL_NOTES_TAB_PATTERN),
+    transcript: readTab(TRANSCRIPT_TAB_PATTERN),
   };
 }
 
@@ -733,11 +747,16 @@ export function trimGeminiTranscript(raw: string): string {
  * are often nearer the scheduled time than the real call. Reading in order and keeping the first
  * Doc with actual dialogue is what makes the right one win.
  */
-async function readNotesDoc(
+export async function readNotesDoc(
   accessToken: string,
   docId: string,
 ): Promise<
-  | { kind: "ok"; doc: { id: string; title: string; url: string }; fullNotes: string; transcript: string }
+  | {
+      kind: "ok";
+      doc: { id: string; title: string; url: string; createdTime?: string };
+      fullNotes: string;
+      transcript: string;
+    }
   | { kind: "unreadable"; docId: string }
   | { kind: "failed"; message: string; doc?: { id: string; title: string; url: string } }
 > {
@@ -749,7 +768,12 @@ async function readNotesDoc(
     return { kind: "failed", message: described.message };
   }
 
-  const doc = { id: described.id, title: described.title, url: docUrl(described.id) };
+  const doc = {
+    id: described.id,
+    title: described.title,
+    url: docUrl(described.id),
+    ...(described.createdTime ? { createdTime: described.createdTime } : {}),
+  };
 
   let rawFullNotes: string | undefined;
   let rawTranscript: string | undefined;
@@ -763,8 +787,8 @@ async function readNotesDoc(
     exportUrl.searchParams.set("mimeType", "text/plain");
     const exported = await googleGetText(exportUrl.toString(), accessToken);
     if (exported.ok) {
-      rawFullNotes = sliceTabFromFlatText(exported.text, /full\s*notes/);
-      rawTranscript = sliceTabFromFlatText(exported.text, /transcript/);
+      rawFullNotes = sliceTabFromFlatText(exported.text, FULL_NOTES_TAB_PATTERN);
+      rawTranscript = sliceTabFromFlatText(exported.text, TRANSCRIPT_TAB_PATTERN);
     }
   } else {
     return { kind: "failed", message: viaDocs.message, doc };

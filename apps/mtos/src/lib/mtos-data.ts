@@ -3,6 +3,7 @@ import type { PrepWorkflowState } from "@/src/lib/contracts/prep-workflow";
 import type { TouchStep } from "@/src/lib/contracts/touch-progress";
 import type { BriefSectionId, PrepBrief } from "@/src/lib/contracts/prep-brief";
 import type { SourceChip } from "@/src/lib/contracts/brief-sources";
+import type { TranscriptFile } from "@/src/lib/contracts/transcript-watch";
 import type { TouchApprovalState } from "@/src/lib/contracts/touch-approval";
 
 export type { PrepWorkflowState };
@@ -1280,10 +1281,27 @@ export interface TouchTranscriptState {
   status: TranscriptWatchStatus;
   /** Drive ids of the notes docs used, in the order they were joined. */
   docIds: string[];
+  /**
+   * Every notes Doc the calendar event carried, and what was done with each: used, ignored, or
+   * kept for reference. The AM sees this list, which is the point -- a call that was stopped and
+   * restarted leaves three or four Docs, and without the list the notes look as though half the
+   * meeting never happened.
+   */
+  files?: TranscriptFile[];
+  /** @deprecated Superseded by `files`, which carries all three decisions rather than one. */
   ignored?: { docId: string; name: string; reason: string }[];
   lang?: string;
+  /** Characters of dialogue joined, so a thin transcript can be seen for what it is. */
+  chars?: number;
   foundAt?: string;
   lastCheckedAt?: string;
+  /**
+   * Why the last look came back empty, in a sentence for the AM.
+   *
+   * Kept on the record rather than only returned from the request: the poll runs every minute and
+   * the AM may be reading the panel between two of them, so the reason has to survive a reload.
+   */
+  note?: string;
 }
 
 /** The follow-through, and the one deadline in the whole touch. */

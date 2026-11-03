@@ -23,7 +23,8 @@
     "check:prep-brief": "tsx scripts/check-prep-brief.ts",
     "check:agenda-email": "tsx scripts/check-agenda-email.ts",
     "check:touch-approval": "tsx scripts/check-touch-approval.ts",
-    "check:live-call": "tsx scripts/check-live-call.ts"
+    "check:live-call": "tsx scripts/check-live-call.ts",
+    "check:transcript-watch": "tsx scripts/check-transcript-watch.ts"
   },
   "dependencies": {
     "@cie/engine": "*",

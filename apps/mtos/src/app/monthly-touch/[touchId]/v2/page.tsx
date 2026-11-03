@@ -9,6 +9,7 @@ import { DataError } from "@/src/components/mtos/data-error";
 import { Linkified } from "@/src/components/mtos/annotate";
 import { JoinMeetButton, LiveModeLauncher } from "@/src/components/mtos/live-mode";
 import { LiveCallStep } from "@/src/components/mtos/live-call-step";
+import { TranscriptWaitPanel } from "@/src/components/mtos/transcript-wait-panel";
 import { PrepWorkflowPanel } from "@/src/components/mtos/prep-workflow-panel";
 import { TouchProgressRail } from "@/src/components/mtos/touch-progress-rail";
 import { ReviewBrief } from "@/src/components/mtos/review-brief";
@@ -421,6 +422,18 @@ export default async function RunSheetV2Page({
             {...(touch.callGuide?.sections ? { sections: touch.callGuide.sections } : {})}
             {...(touch.presentation ? { presentation: touch.presentation } : {})}
             {...(touch.review?.declinedSections ? { declinedSections: touch.review.declinedSections } : {})}
+          />
+
+          {/*
+            After "End call" the AM stays here, and this is what they wait on. Sticky at the bottom
+            of the content column rather than a separate screen: the guide and their own capture
+            notes are what they re-read while the transcript is being published.
+          */}
+          <TranscriptWaitPanel
+            touchId={touch.id}
+            {...(touch.live?.callEndedAt ? { callEndedAt: touch.live.callEndedAt } : {})}
+            {...(touch.transcript ? { transcript: touch.transcript } : {})}
+            followThroughHref={`/monthly-touch/${touch.id}/summary`}
           />
 
           <div className="card mt-4">

@@ -47,6 +47,23 @@ export function monthlyTouchPath(tenantId: string, touchId: string) {
   return `${monthlyTouchesCollectionPath(tenantId)}/${touchId}`;
 }
 
+/**
+ * Large per-touch artifacts: the joined call transcript, and anything else that would otherwise
+ * push the touch document towards Firestore's 1MB limit.
+ *
+ * A subcollection rather than a field, because the touch document already carries the whole
+ * preparation pack. A 40-minute call joined from three parts runs to tens of thousands of
+ * characters, and a transcript that fails to save because the prep pack grew is a transcript the
+ * follow-through has to be written without.
+ */
+export function monthlyTouchArtifactsCollectionPath(tenantId: string, touchId: string) {
+  return `${monthlyTouchPath(tenantId, touchId)}/artifacts`;
+}
+
+export function monthlyTouchArtifactPath(tenantId: string, touchId: string, artifactId: string) {
+  return `${monthlyTouchArtifactsCollectionPath(tenantId, touchId)}/${artifactId}`;
+}
+
 export function commitmentsCollectionPath(tenantId: string) {
   return `${tenantPath(tenantId)}/commitments`;
 }

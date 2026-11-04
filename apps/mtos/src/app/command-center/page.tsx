@@ -1,29 +1,28 @@
 import Link from "next/link";
+import type { ReactNode } from "react";
 import {
-  Sparkles,
-  ShieldAlert,
-  Target,
+  AlertTriangle,
   ArrowRight,
-  TrendingUp,
-  Clock,
   BadgeCheck,
+  CalendarRange,
+  ClipboardCheck,
+  Clock,
+  Phone,
+  ShieldAlert,
+  Sparkles,
   Users,
 } from "lucide-react";
 
 import { AppShell } from "@/src/components/mtos/app-shell";
 import { DataError } from "@/src/components/mtos/data-error";
-import { Linkified, Callout } from "@/src/components/mtos/annotate";
 import { ClientHint } from "@/src/components/mtos/client-hint";
 import { resolveTenantContext } from "@/src/lib/auth/resolve-tenant-context";
-import { getCommandCenterView } from "@/src/lib/server/services/command-center-service";
-import type { ClientRecord } from "@/src/lib/mtos-data";
+import { TONE_CLASS, TONE_LABEL } from "@/src/lib/health-display";
 import {
-  TONE_CLASS,
-  TONE_LABEL,
-  TONE_SEVERITY,
-  averageScore,
-  needsAttention,
-} from "@/src/lib/health-display";
+  getCommandCenterV2View,
+  type TouchWithClient,
+} from "@/src/lib/server/services/command-center-v2-service";
+import { deriveRunSheetStage, RUN_SHEET_PRIMARY_ACTION } from "@/src/lib/server/services/prep-readiness-service";
 
 /**
  * Rendered per request, never prerendered.
@@ -37,52 +36,80 @@ import {
  */
 export const dynamic = "force-dynamic";
 
-function initials(name: string) {
-  return name
-    .split(" ")
-    .slice(0, 2)
-    .map((w) => w[0])
-    .join("")
-    .toUpperCase();
+/**
+ * The Command Center — the AM's day, in the order it has to be worked.
+ *
+ * Today's calls, then the preparation due in the next 48 hours, then the follow-through that is
+ * late, then the QA waiting on someone, then the accounts that genuinely need attention. Each queue
+ * is built from real scheduled dates and real workflow state, and each one says plainly when it is
+ * empty rather than being padded with whatever was nearest.
+ *
+ * This is the start page. It lived at `/command-center/v2` while it was being tried; the screen it
+ * replaced is still readable at `/legacy`, and the old address still answers (see the alias there).
+ */
+
+function formatTime(date: Date | null): string {
+  if (!date) return "no time set";
+  return new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit" }).format(date);
 }
 
-function Gauge({ value, size = 78, stroke = 7 }: { value: number; size?: number; stroke?: number }) {
-  const r = (size - stroke) / 2;
-  const c = 2 * Math.PI * r;
-  const off = c * (1 - value / 100);
+function formatDay(date: Date | null): string {
+  if (!date) return "no date set";
+  return new Intl.DateTimeFormat("en-US", { weekday: "short", month: "short", day: "numeric" }).format(date);
+}
+
+function Queue({
+  icon,
+  title,
+  count,
+  subtitle,
+  empty,
+  children,
+}: {
+  icon: ReactNode;
+  title: string;
+  count: number;
+  subtitle: string;
+  empty: string;
+  children: ReactNode;
+}) {
   return (
-    <div className="gauge" style={{ width: size, height: size }}>
-      <svg width={size} height={size}>
-        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="var(--surface-3)" strokeWidth={stroke} />
-        <circle
-          cx={size / 2}
-          cy={size / 2}
-          r={r}
-          fill="none"
-          stroke="var(--accent)"
-          strokeWidth={stroke}
-          strokeLinecap="round"
-          strokeDasharray={c}
-          strokeDashoffset={off}
-        />
-      </svg>
-      <div className="gauge-val" style={{ fontSize: "1.15rem", fontWeight: 700, color: "var(--text)" }}>
-        {value}
+    <section className="card">
+      <div className="card-head">
+        <div className="card-title">
+          {icon}
+          {title}
+        </div>
+        <span className={`chip ${count > 0 ? "" : "muted"}`}>{count}</span>
       </div>
-    </div>
+      <p className="muted -mt-2 mb-3.5 text-[0.78rem]">{subtitle}</p>
+      {count === 0 ? <p className="muted text-[0.85rem]">{empty}</p> : children}
+    </section>
   );
 }
 
-function PriorityIcon({ tone }: { tone: "good" | "watch" | "risk" }) {
-  if (tone === "good") return <TrendingUp />;
-  if (tone === "watch") return <Clock />;
-  return <ShieldAlert />;
+function TouchRow({ entry, detail }: { entry: TouchWithClient; detail: string }) {
+  const stage = deriveRunSheetStage(entry.touch);
+  const tone = TONE_CLASS[entry.client.tone];
+  return (
+    <Link href={`/monthly-touch/${entry.touch.id}`} className="list-row" style={{ padding: 12 }}>
+      <span className={`sig-dot ${tone}`} aria-hidden />
+      <span className="min-w-0 flex-1">
+        <span className="block text-[0.88rem] font-semibold" style={{ color: "var(--text)" }}>
+          {entry.client.name}
+        </span>
+        <span className="muted block text-[0.78rem]">{detail}</span>
+      </span>
+      <span className="chip">{RUN_SHEET_PRIMARY_ACTION[stage].label}</span>
+      <ArrowRight style={{ width: 15, height: 15, color: "var(--slate-400)" }} />
+    </Link>
+  );
 }
 
 export default async function CommandCenterPage() {
-  let view: Awaited<ReturnType<typeof getCommandCenterView>>;
+  let view: Awaited<ReturnType<typeof getCommandCenterV2View>>;
   try {
-    view = await getCommandCenterView(await resolveTenantContext());
+    view = await getCommandCenterV2View(await resolveTenantContext());
   } catch {
     return (
       <AppShell>
@@ -90,233 +117,294 @@ export default async function CommandCenterPage() {
       </AppShell>
     );
   }
-  const { snapshot, clients, commitments } = view;
 
-  const needAttention = clients.filter((c) => needsAttention(c.tone));
-  const priority = [...clients]
-    .sort((a, b) => TONE_SEVERITY[a.tone] - TONE_SEVERITY[b.tone])
-    .slice(0, 4);
-  const unassessed = clients.filter((c) => c.tone === "unknown").length;
-  const upcoming = [...clients]
-    .sort((a, b) => Date.parse(a.touchDate) - Date.parse(b.touchDate))
-    .slice(0, 4);
-  const openCommitments = commitments.filter((c) => c.status !== "Completed");
-  const overdue = commitments.filter((c) => c.status === "Overdue").length;
-  // Averages only the clients that actually have a score. Dividing by the whole book treated every
-  // unscored client as a zero and dragged the portfolio figure toward nothing.
-  const avgGrowth = averageScore(clients.map((c) => c.growthReadiness));
+  const {
+    greeting,
+    today,
+    todaysCalls,
+    prepDueWithin48h,
+    overdueFollowThrough,
+    qaWaiting,
+    atRisk,
+    thisWeek,
+    weekLabel,
+    overdueCommitments,
+    averageGrowthScore,
+    unassessedClients,
+    clientCount,
+  } = view;
+
+  const workItems = todaysCalls.length + prepDueWithin48h.length + overdueFollowThrough.length + qaWaiting.length;
 
   const stats = [
-    { label: "Active clients", value: String(clients.length), sub: "in your book", icon: <Users /> },
     {
-      label: "Need attention",
-      value: String(needAttention.length),
-      sub: unassessed ? `${unassessed} health not set` : "flagged today",
-      icon: <ShieldAlert />,
-      tone: "risk" as const,
+      label: "Calls today",
+      value: String(todaysCalls.length),
+      sub: todaysCalls.length ? `first at ${formatTime(todaysCalls[0].scheduledAt)}` : "nothing scheduled",
+      icon: <Phone />,
     },
     {
-      label: "Open commitments",
-      value: String(openCommitments.length),
-      sub: `${overdue} overdue`,
+      label: "Prep due in 48h",
+      value: String(prepDueWithin48h.length),
+      sub: "meetings whose preparation is unfinished",
+      icon: <Clock />,
+      tone: prepDueWithin48h.length ? ("watch" as const) : undefined,
+    },
+    {
+      label: "Follow-through late",
+      value: String(overdueFollowThrough.length),
+      sub: "meetings held, decisions not applied",
+      icon: <AlertTriangle />,
+      tone: overdueFollowThrough.length ? ("risk" as const) : undefined,
+    },
+    {
+      label: "Overdue commitments",
+      value: String(overdueCommitments.length),
+      sub: "promises past their date",
       icon: <BadgeCheck />,
-      tone: overdue > 0 ? ("risk" as const) : undefined,
-    },
-    {
-      label: "Avg growth score",
-      value: avgGrowth.value === null ? "—" : String(avgGrowth.value),
-      sub: avgGrowth.counted ? `across ${avgGrowth.counted} scored` : "not scored yet",
-      icon: <TrendingUp />,
-      tone: avgGrowth.value === null ? undefined : ("good" as const),
+      tone: overdueCommitments.length ? ("risk" as const) : undefined,
     },
   ];
 
   return (
     <AppShell>
-      {/* Hero briefing */}
       <section className="flex flex-wrap items-start justify-between gap-5">
         <div className="max-w-2xl">
           <div className="eyebrow">
             <Sparkles />
-            <span>Daily Intelligence Briefing · {snapshot.focusDate}</span>
+            <span>
+              Your day ·{" "}
+              {new Intl.DateTimeFormat("en-US", { weekday: "long", month: "long", day: "numeric" }).format(today)}
+            </span>
           </div>
           <h1 className="h1 mt-3.5">
-            Good morning.
+            {greeting.label}
             <br />
             <span style={{ color: "var(--accent)" }}>
-              {needAttention.length} {needAttention.length === 1 ? "client needs" : "clients need"} your attention today.
+              {workItems === 0
+                ? "Nothing is waiting on you right now."
+                : `${workItems} ${workItems === 1 ? "thing needs" : "things need"} you today.`}
             </span>
           </h1>
           <p className="lead mt-3.5">
-            The system reviewed all {clients.length} accounts and ranked them by what moves your book. Start at the top:
-            each item is the client, what changed, and the next best action.
+            In order: the calls you have today, the preparation due within 48 hours, the follow-through that is late,
+            and the QA waiting on a decision. Accounts needing attention are below that — they matter, but they are not
+            what your day is made of.
           </p>
         </div>
-        <div className="card glow" style={{ minWidth: 230, padding: "18px 20px" }}>
-          <Link href="/command-center/v2" className="ilink mb-3 inline-block text-[0.78rem]">
-            Try the new Command Center →
-          </Link>
-          {/* Named for what it is. This gauge shows the average growth-readiness score of the
-              clients that have one -- it is not an overall health figure for the book. */}
-          <div className="stat-label">Average growth score</div>
-          <div className="mt-3 flex items-center gap-4">
-            <Gauge value={avgGrowth.value ?? 0} />
-            <div>
-              <div className="text-[0.78rem]" style={{ color: "var(--slate-400)" }}>
-                Avg growth score
-              </div>
-              <div className="mt-2 flex items-center gap-2 text-[0.82rem]">
-                <span className="sig-dot risk" />
-                {needAttention.length} need attention
-              </div>
-              <div className="mt-1.5 flex items-center gap-2 text-[0.82rem]">
-                <span className="sig-dot good" />
-                {clients.length - needAttention.length} healthy
-              </div>
-            </div>
-          </div>
-        </div>
+        <Link href="/command-center/legacy" className="btn btn-ghost btn-sm">
+          Open the original Command Center
+        </Link>
       </section>
 
-      {/* Stat strip */}
       <div className="mt-7 grid grid-cols-2 gap-4 lg:grid-cols-4">
-        {stats.map((s) => (
-          <div key={s.label} className="card" style={{ padding: "16px 18px" }}>
+        {stats.map((stat) => (
+          <div key={stat.label} className="card" style={{ padding: "16px 18px" }}>
             <div className="flex items-center justify-between">
-              <div className="stat-label">{s.label}</div>
+              <div className="stat-label">{stat.label}</div>
               <span
                 className="grid h-8 w-8 place-items-center rounded-[9px]"
                 style={{
-                  background: s.tone ? `var(--${s.tone}-bg)` : "var(--surface-2)",
-                  color: s.tone ? `var(--${s.tone})` : "var(--accent)",
+                  background: stat.tone ? `var(--${stat.tone}-bg)` : "var(--surface-2)",
+                  color: stat.tone ? `var(--${stat.tone})` : "var(--accent)",
                 }}
               >
-                {s.icon}
+                {stat.icon}
               </span>
             </div>
-            <div className="stat-val mt-3.5" style={s.tone ? { color: `var(--${s.tone})` } : undefined}>
-              {s.value}
+            <div className="stat-val mt-3.5" style={stat.tone ? { color: `var(--${stat.tone})` } : undefined}>
+              {stat.value}
             </div>
-            <div className="muted mt-1.5 text-[0.76rem]">{s.sub}</div>
+            <div className="muted mt-1.5 text-[0.76rem]">{stat.sub}</div>
           </div>
         ))}
       </div>
 
-      {/* Two columns */}
-      <div className="mt-4 grid items-start gap-4 lg:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
-        {/* Priority queue */}
-        <div>
-          <div className="section-head">
-            <div>
-              <div className="eyebrow muted">
-                <Target />
-                <span>What needs your attention</span>
-              </div>
-              <div className="h3 mt-2">Priority queue</div>
-            </div>
-          </div>
-          <div className="flex flex-col gap-3.5">
-            {priority.map((c: ClientRecord) => {
-              const tone = TONE_CLASS[c.tone];
-              return (
-                <div key={c.id} className={`insight ${tone}`}>
-                  <div className="insight-icon">
-                    <PriorityIcon tone={tone === "muted" ? "watch" : tone} />
-                  </div>
-                  <div className="min-w-0">
-                    <div className="mb-2 flex flex-wrap items-center gap-2">
-                      <span className={`chip ${tone}`}>{TONE_LABEL[c.tone]}</span>
-                      <span className="muted text-[0.76rem]">
-                        <ClientHint client={c} /> · {c.industry}
-                        {c.location ? ` · ${c.location}` : ""}
-                      </span>
-                    </div>
-                    <div className="h4" style={{ lineHeight: 1.35 }}>
-                      <Linkified text={c.summary} clients={clients} clientId={c.id} />
-                    </div>
-                    {c.topRisks?.length ? (
-                      <div className="mt-3">
-                        <Callout
-                          tone={tone === "risk" ? "critical" : tone === "watch" ? "important" : "info"}
-                          title="Top risks"
-                        >
-                          <Linkified text={c.topRisks.join(" · ")} clients={clients} clientId={c.id} />
-                        </Callout>
-                      </div>
-                    ) : null}
-                  </div>
-                  <div className="flex shrink-0 flex-col items-end gap-2.5">
-                    <span className="muted whitespace-nowrap text-[0.74rem]">Touch {c.touchDate}</span>
-                    <Link href={`/clients/${c.id}`} className="btn btn-primary btn-sm">
-                      Review client
-                      <ArrowRight />
-                    </Link>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
+      <div className="mt-4 grid items-start gap-4 lg:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)]">
+        <div className="grid gap-4">
+          <Queue
+            icon={<Phone />}
+            title="Today's calls"
+            count={todaysCalls.length}
+            subtitle="Scheduled for today, earliest first."
+            empty="No Monthly Touch is scheduled for today."
+          >
+            {todaysCalls.map((entry) => (
+              <TouchRow
+                key={entry.touch.id}
+                entry={entry}
+                detail={`${formatTime(entry.scheduledAt)} · ${entry.client.industry}`}
+              />
+            ))}
+          </Queue>
 
-        {/* Right rail */}
-        <div className="flex flex-col gap-4">
-          <div className="card">
-            <div className="card-head">
-              <div className="card-title">This week&apos;s touches</div>
-              <span className="chip">{upcoming.length}</span>
-            </div>
-            {upcoming.map((c) => {
-              const tone = TONE_CLASS[c.tone];
+          <Queue
+            icon={<Clock />}
+            title="Preparation due within 48 hours"
+            count={prepDueWithin48h.length}
+            subtitle="The meeting is close and the preparation has not finished."
+            empty="Nothing in the next 48 hours still needs preparing."
+          >
+            {prepDueWithin48h.map((entry) => (
+              <TouchRow
+                key={entry.touch.id}
+                entry={entry}
+                detail={`${formatDay(entry.scheduledAt)} at ${formatTime(entry.scheduledAt)}`}
+              />
+            ))}
+          </Queue>
+
+          <Queue
+            icon={<AlertTriangle />}
+            title="Follow-through that is late"
+            count={overdueFollowThrough.length}
+            subtitle="The meeting happened and the recap, the tickets and the notes are not done. The window is 24 business hours."
+            empty="Every meeting that has happened has had its follow-through completed."
+          >
+            {overdueFollowThrough.map((entry) => (
+              <TouchRow
+                key={entry.touch.id}
+                entry={entry}
+                detail={`met ${formatDay(entry.scheduledAt)} · ${
+                  entry.touch.postMeeting?.status === "draft_ready"
+                    ? "drafts are waiting for your decisions"
+                    : "nothing captured yet"
+                }`}
+              />
+            ))}
+          </Queue>
+
+          <Queue
+            icon={<ClipboardCheck />}
+            title="QA waiting on a decision"
+            count={qaWaiting.length}
+            subtitle="Reviewed and waiting for approval."
+            empty="No QA review is waiting on a decision."
+          >
+            {qaWaiting.map((entry) => (
+              <TouchRow
+                key={entry.touch.id}
+                entry={entry}
+                detail={`graded ${entry.touch.qaReview?.overallGrade ?? "—"} · met ${formatDay(entry.scheduledAt)}`}
+              />
+            ))}
+          </Queue>
+
+          <Queue
+            icon={<ShieldAlert />}
+            title="Accounts needing attention"
+            count={atRisk.length}
+            subtitle="Only accounts whose health says Needs attention, At risk or Critical. Healthy and Excellent accounts are not listed here."
+            empty="No account is currently flagged as needing attention."
+          >
+            {atRisk.slice(0, 8).map((client) => {
+              const tone = TONE_CLASS[client.tone];
               return (
-                <Link
-                  key={c.id}
-                  href={`/clients/${c.id}`}
-                  className="list-row"
-                  style={{ padding: 12 }}
-                >
-                  <div className="av-sm" style={{ width: 34, height: 34, background: "var(--accent)" }}>
-                    {initials(c.name)}
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="text-[0.86rem] font-semibold" style={{ color: "var(--text)" }}>
-                      {c.name}
-                    </div>
-                    <div className="muted text-[0.76rem]">
-                      {c.industry} · Touch {c.touchDate}
-                    </div>
-                  </div>
-                  <span className={`chip ${tone}`}>
-                    <span className={`sig-dot ${tone}`} />
-                    {TONE_LABEL[c.tone]}
+                <Link key={client.id} href={`/clients/${client.id}`} className="list-row" style={{ padding: 12 }}>
+                  <span className={`sig-dot ${tone}`} aria-hidden />
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-[0.88rem] font-semibold" style={{ color: "var(--text)" }}>
+                      <ClientHint client={client} />
+                    </span>
+                    <span className="muted block text-[0.78rem]">
+                      {client.topRisks?.length ? client.topRisks.join(" · ") : client.summary}
+                    </span>
                   </span>
+                  <span className={`chip ${tone}`}>{TONE_LABEL[client.tone]}</span>
                 </Link>
               );
             })}
+            {atRisk.length > 8 ? (
+              <Link href="/clients" className="ilink mt-2.5 inline-block text-[0.8rem]">
+                {atRisk.length - 8} more in Clients
+              </Link>
+            ) : null}
+          </Queue>
+        </div>
+
+        <div className="flex flex-col gap-4">
+          <div className="card">
+            <div className="card-head">
+              <div className="card-title">
+                <CalendarRange />
+                This week · {weekLabel}
+              </div>
+              <span className="chip">{thisWeek.length}</span>
+            </div>
+            {thisWeek.length === 0 ? (
+              <p className="muted text-[0.85rem]">No Monthly Touch falls in this calendar week.</p>
+            ) : (
+              thisWeek.map((entry) => (
+                <TouchRow
+                  key={entry.touch.id}
+                  entry={entry}
+                  detail={`${formatDay(entry.scheduledAt)} at ${formatTime(entry.scheduledAt)}`}
+                />
+              ))
+            )}
           </div>
 
           <div className="card">
             <div className="card-head">
-              <div className="card-title">Promise tracker</div>
-              <Link href="/commitments" className={`chip ${overdue > 0 ? "risk" : ""}`}>
-                {overdue > 0 ? `${overdue} overdue` : "On track"}
+              <div className="card-title">
+                <Users />
+                Your book
+              </div>
+            </div>
+            <div className="grid gap-3">
+              <div>
+                <div className="stat-label">Clients</div>
+                <div className="stat-val mt-1.5">{clientCount}</div>
+              </div>
+              <div>
+                <div className="stat-label">Average growth score</div>
+                <div
+                  className="stat-val mt-1.5"
+                  style={averageGrowthScore.value === null ? { color: "var(--slate-400)" } : undefined}
+                >
+                  {averageGrowthScore.value === null ? "—" : averageGrowthScore.value}
+                </div>
+                <p className="muted mt-1.5 text-[0.76rem]">
+                  {averageGrowthScore.counted
+                    ? `The average growth readiness of the ${averageGrowthScore.counted} of ${averageGrowthScore.total} clients that have one. This is not an overall health figure.`
+                    : "No client has a growth score yet, so there is nothing to average."}
+                </p>
+              </div>
+              {unassessedClients ? (
+                <p className="muted text-[0.78rem]">
+                  {unassessedClients} client{unassessedClients === 1 ? " has" : "s have"} no health set. Not assessed is
+                  not the same as unhealthy — set it on the client page.
+                </p>
+              ) : null}
+            </div>
+          </div>
+
+          <div className="card">
+            <div className="card-head">
+              <div className="card-title">
+                <BadgeCheck />
+                Overdue promises
+              </div>
+              <Link href="/commitments" className={`chip ${overdueCommitments.length ? "risk" : "good"}`}>
+                {overdueCommitments.length ? `${overdueCommitments.length} overdue` : "On track"}
               </Link>
             </div>
-            {openCommitments.slice(0, 5).map((c) => {
-              const tone = c.status === "Overdue" ? "risk" : "watch";
-              return (
-                <div key={c.id} className="border-t py-2.5" style={{ borderColor: "var(--hair)" }}>
-                  <div className="flex items-start justify-between gap-3">
-                    <span className="text-[0.84rem]" style={{ color: "var(--text)", maxWidth: "72%" }}>
-                      {c.title}
-                    </span>
-                    <span className={`chip ${tone}`} style={{ whiteSpace: "nowrap" }}>
-                      {c.status === "Overdue" ? "Overdue" : c.dueDate}
-                    </span>
-                  </div>
-                  <div className="muted mt-1.5 text-[0.72rem]">{c.owner}</div>
+            {overdueCommitments.slice(0, 5).map((commitment) => (
+              <div key={commitment.id} className="border-t py-2.5" style={{ borderColor: "var(--hair)" }}>
+                <div className="flex items-start justify-between gap-3">
+                  <span className="text-[0.84rem]" style={{ color: "var(--text)", maxWidth: "72%" }}>
+                    {commitment.title}
+                  </span>
+                  <span className="chip risk" style={{ whiteSpace: "nowrap" }}>
+                    due {commitment.dueDate}
+                  </span>
                 </div>
-              );
-            })}
+                <div className="muted mt-1.5 text-[0.72rem]">{commitment.owner}</div>
+              </div>
+            ))}
+            {overdueCommitments.length === 0 ? (
+              <p className="muted text-[0.85rem]">Nothing we promised is past its date.</p>
+            ) : null}
           </div>
         </div>
       </div>

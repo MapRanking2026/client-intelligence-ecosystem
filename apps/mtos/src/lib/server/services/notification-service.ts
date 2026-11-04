@@ -235,7 +235,7 @@ export async function deriveCandidates(
         subjectId: touch.id,
         title: `Prep ready to review — ${clientName}`,
         detail: `The brief finished drafting on ${dayLabel(preparedAt, options.timeZone)}. Nothing goes to the client until you approve it.`,
-        href: `/monthly-touch/${touch.id}/v2?view=review`,
+        href: `/monthly-touch/${touch.id}?view=review`,
         group: "Prep ready to review",
       });
     }
@@ -247,7 +247,7 @@ export async function deriveCandidates(
         subjectId: touch.id,
         title: `Review the prep before ${clientName}`,
         detail: `The call is on ${dayLabel(touch.scheduledAt, options.timeZone)} and the brief is not approved yet.`,
-        href: `/monthly-touch/${touch.id}/v2?view=review`,
+        href: `/monthly-touch/${touch.id}?view=review`,
         group: "Calls coming up",
       });
     }

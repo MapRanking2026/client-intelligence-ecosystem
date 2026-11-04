@@ -114,7 +114,7 @@ export default async function MonthlyTouchIndexPage({
                     <p className="muted text-[0.8rem]">Nothing here.</p>
                   ) : (
                     entries.map(({ touch, client }) => (
-                      <Link key={touch.id} href={`/monthly-touch/${touch.id}/v2`} className="board-card">
+                      <Link key={touch.id} href={`/monthly-touch/${touch.id}`} className="board-card">
                         <span className="block text-[0.86rem] font-semibold" style={{ color: "var(--text)" }}>
                           {client.name}
                         </span>
@@ -185,7 +185,7 @@ export default async function MonthlyTouchIndexPage({
                     </span>
                   </span>
                   <Link
-                    href={`/monthly-touch/${touch.id}/v2`}
+                    href={`/monthly-touch/${touch.id}`}
                     className="ilink inline-flex items-center gap-1 text-[0.8rem]"
                   >
                     Open run-sheet <ArrowRight style={{ width: 14, height: 14 }} />

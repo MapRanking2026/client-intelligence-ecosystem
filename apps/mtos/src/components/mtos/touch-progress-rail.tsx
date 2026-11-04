@@ -101,7 +101,7 @@ export function TouchProgressRail({
                   body
                 ) : (
                   <Link
-                    href={`/monthly-touch/${touchId}/v2?stage=${step}`}
+                    href={`/monthly-touch/${touchId}?stage=${step}`}
                     className="flex flex-col"
                     style={{ color: "inherit" }}
                   >

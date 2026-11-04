@@ -144,7 +144,7 @@ export default async function FollowThroughPage({
       ) : null}
 
       <div className="mt-4">
-        <Link href={`/monthly-touch/${touch.id}/v2`} className="btn btn-ghost btn-sm">
+        <Link href={`/monthly-touch/${touch.id}`} className="btn btn-ghost btn-sm">
           <ArrowLeft />
           Back to the call
         </Link>

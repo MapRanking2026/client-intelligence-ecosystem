@@ -553,7 +553,7 @@ function ProgressModal({
         ) : null}
 
         {done ? (
-          <a className="btn btn-primary mt-4" href={`/monthly-touch/${touchId}/v2?stage=live`}>
+          <a className="btn btn-primary mt-4" href={`/monthly-touch/${touchId}?stage=live`}>
             {format === "deck" ? "Open the presentation" : "Open the call guide"}
           </a>
         ) : null}

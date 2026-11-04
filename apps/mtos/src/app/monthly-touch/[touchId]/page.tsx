@@ -224,7 +224,7 @@ export default async function MonthlyTouchRunSheetPage({
     stage === "live" ? (
       liveLauncher
     ) : stage === "follow_through" ? (
-      <Link href={`/monthly-touch/${touch.id}/summary`} className="btn btn-primary">
+      <Link href={`/monthly-touch/${touch.id}/follow-through`} className="btn btn-primary">
         <Sparkles />
         {primary.label}
       </Link>
@@ -522,10 +522,19 @@ export default async function MonthlyTouchRunSheetPage({
               </p>
             </div>
           ) : null}
-          <div className="mt-4">
-            <Link href={`/monthly-touch/${touch.id}/summary`} className="btn btn-primary">
+          {/*
+            The follow-through proper: the NPS gate, the notes, the tickets, the tracker cards, the
+            recap and Finish. `/summary` is the screen that came before it and is still readable,
+            but it is not where this stage's work happens, and sending the AM there was the same
+            mistake as leaving the run-sheet at /v2 -- the built thing sat one URL away, unlinked.
+          */}
+          <div className="mt-4 flex flex-wrap gap-2.5">
+            <Link href={`/monthly-touch/${touch.id}/follow-through`} className="btn btn-primary">
               <Sparkles />
               Open Follow-through
+            </Link>
+            <Link href={`/monthly-touch/${touch.id}/summary`} className="btn btn-ghost">
+              The earlier post-meeting screen
             </Link>
           </div>
         </div>

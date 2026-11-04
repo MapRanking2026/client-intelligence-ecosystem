@@ -1812,3 +1812,30 @@ export function getIntegrationCredentials(record?: IntegrationConnectionRecord) 
 export function getIntegrationDefinition(providerId: IntegrationProviderId) {
   return getProviderDefinition(providerId);
 }
+
+/**
+ * What a provider needs in the environment before anybody can click Connect, and whether it is
+ * there. For the readiness report.
+ *
+ * It deliberately returns the env var NAMES and a boolean each, never the values. "Which variable
+ * is missing" is the question people are stuck on, and answering it does not require reading a
+ * secret out loud -- a report that printed a client secret would be a worse problem than the one
+ * it solves. The redirect URI is included because it has to match what is registered with the
+ * provider exactly, and getting it wrong is the second most common way this fails.
+ */
+export function describeOAuthSetup(providerId: IntegrationProviderId) {
+  const provider = getProviderDefinition(providerId);
+  if (!provider.oauth) return null;
+  const config = getOAuthClientConfig(provider);
+  return {
+    clientIdEnv: provider.oauth.clientIdEnv,
+    clientSecretEnv: provider.oauth.clientSecretEnv,
+    clientIdSet: Boolean(config?.clientId),
+    clientSecretSet: Boolean(config?.clientSecret),
+    /** Empty when neither the override nor NEXT_PUBLIC_APP_URL / APP_URL is set. */
+    redirectUri: getOAuthRedirectUri(provider),
+    ...(provider.oauth.redirectUriEnv ? { redirectUriEnv: provider.oauth.redirectUriEnv } : {}),
+    /** Intercom and the like grant permissions on the app itself, so there is no scope list. */
+    scopes: provider.oauth.scopes,
+  };
+}

@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 
 import { SmartMarkdown } from "@/src/components/mtos/annotate";
+import { BriefChartPanel } from "@/src/components/mtos/brief-chart";
 import { SourceChips } from "@/src/components/mtos/source-chip";
 import { useTouchAutosave } from "@/src/components/mtos/use-touch-autosave";
 import {
@@ -24,6 +25,7 @@ import {
   type ReviewSection,
   type SectionState,
 } from "@/src/lib/contracts/prep-brief";
+import { chartsForSection, type BriefChart } from "@/src/lib/contracts/brief-charts";
 import type { TouchCoachingChoice, TouchReviewState } from "@/src/lib/mtos-data";
 
 /**
@@ -78,6 +80,11 @@ export function ReviewBrief({
   agendaEmail,
   /** The pre-call checklist, rendered after the brief as the prompt's section 16. */
   checklist,
+  /**
+   * The charts, already derived from the stored preparation on the server. Empty when the account
+   * manager has turned them off, or when nothing readable was stored to draw.
+   */
+  charts = [],
 }: {
   touchId: string;
   clientId: string;
@@ -86,6 +93,7 @@ export function ReviewBrief({
   header?: React.ReactNode;
   agendaEmail?: React.ReactNode;
   checklist?: React.ReactNode;
+  charts?: BriefChart[];
 }) {
   const autosave = useTouchAutosave(touchId);
   const [declined, setDeclined] = useState<string[]>(review?.declinedSections || []);
@@ -149,7 +157,7 @@ export function ReviewBrief({
   );
 
   return (
-    <div className="mt-4 grid gap-5 xl:grid-cols-[220px_minmax(0,1fr)]">
+    <div className="mt-4 grid gap-5 lg:grid-cols-[200px_minmax(0,1fr)] xl:grid-cols-[220px_minmax(0,1fr)]">
       <Toc sections={sections} />
 
       <div className="min-w-0">
@@ -183,6 +191,7 @@ export function ReviewBrief({
             key={section.id}
             section={section}
             clientId={clientId}
+            charts={chartsForSection(charts, section.id)}
             editing={editing === section.id}
             onEdit={() => setEditing(section.id)}
             onCancelEdit={() => setEditing(undefined)}
@@ -259,7 +268,7 @@ function SaveLine({ autosave }: { autosave: ReturnType<typeof useTouchAutosave> 
 
 function Toc({ sections }: { sections: ReviewSection[] }) {
   return (
-    <nav className="hidden xl:block" aria-label="Brief sections">
+    <nav className="hidden lg:block" aria-label="Brief sections">
       <div className="sticky top-4 flex flex-col gap-0.5">
         {sections.map((section) => (
           <a
@@ -286,6 +295,7 @@ function Toc({ sections }: { sections: ReviewSection[] }) {
 function SectionCard({
   section,
   clientId,
+  charts,
   editing,
   onEdit,
   onCancelEdit,
@@ -296,6 +306,7 @@ function SectionCard({
 }: {
   section: ReviewSection;
   clientId: string;
+  charts: BriefChart[];
   editing: boolean;
   onEdit: () => void;
   onCancelEdit: () => void;
@@ -375,6 +386,16 @@ function SectionCard({
           ) : section.blocks.length ? (
             section.blocks.map((block, index) => (
               <div key={`${block.id}-${index}`} className={index ? "mt-4" : ""}>
+                {/*
+                  The chart before the words about it. An AM reading "calls are up" wants to have
+                  already seen by how much, and a chart underneath the paragraph gets read second
+                  or not at all.
+                */}
+                {charts
+                  .filter((chart) => chart.at === index)
+                  .map((chart) => (
+                    <BriefChartPanel key={chart.id} chart={chart} />
+                  ))}
                 {block.subtitle ? (
                   <div className="eyebrow muted mb-1.5">{block.subtitle}</div>
                 ) : null}
@@ -390,6 +411,16 @@ function SectionCard({
               Edit it to write it yourself, or decline it to leave it out.
             </p>
           ) : null}
+          {/*
+            A chart whose block is no longer there -- a section the preparation wrote shorter than
+            usual, or one the AM trimmed -- still belongs on the screen, at the end rather than
+            dropped. Losing a figure silently is worse than showing it slightly out of place.
+          */}
+          {charts
+            .filter((chart) => chart.at >= section.blocks.length)
+            .map((chart) => (
+              <BriefChartPanel key={chart.id} chart={chart} />
+            ))}
           {extra ? <div className="mt-4">{extra}</div> : null}
         </div>
       )}

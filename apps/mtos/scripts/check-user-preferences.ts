@@ -182,8 +182,11 @@ check(
 check("no field is listed twice", new Set(fields.map((field) => field.key)).size === fields.length);
 // The honest part: only what nothing reads yet is marked, and once a sender exists the mark goes.
 const notWired = notWiredPreferenceLabels();
-check("one field is marked as recorded but not yet acted on", notWired.length === 1);
-check("and it is the charts one, which waits on the brief having a chart", notWired[0] === "Charts in the review brief");
+check("nothing is marked as recorded but not yet acted on", notWired.length === 0);
+check(
+  "the charts switch is no longer marked, because the brief draws them",
+  fields.find((field) => field.key === "chartsInReviewBrief")?.notWiredYet !== true,
+);
 check(
   "no notification switch is marked any more",
   PREFERENCE_GROUPS.find((group) => group.id === "notifications")?.fields.every((field) => !field.notWiredYet) === true,

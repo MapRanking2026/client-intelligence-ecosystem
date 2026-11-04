@@ -8,7 +8,10 @@
  * here, the page renders it there -- the page does nothing to the data in between.
  *
  * It also prints each touch's resolved opening step, which is what Phase 1 is really about: every
- * route into a touch has to land on the stage the touch is actually in.
+ * route into a touch has to land on the stage the touch is actually in -- and, since Phase 2, every
+ * chart the review brief would draw for that touch, with the figures it would put on screen. That
+ * last part is the only way to tell a chart built from a real preparation apart from one built from
+ * a fixture, which is the difference that matters here.
  *
  * Read-only. It writes nothing anywhere.
  *
@@ -26,6 +29,8 @@ import {
 import { deriveRunSheetStage } from "@/src/lib/server/services/prep-readiness-service";
 import { isTouchStep, resolveOpeningStep, type TouchStep } from "@/src/lib/contracts/touch-progress";
 import { getAccountManagerProfile } from "@/src/lib/server/services/user-service";
+import { deriveBriefCharts } from "@/src/lib/contracts/brief-charts";
+import { followThroughChecklist, checklistProgress } from "@/src/lib/contracts/follow-through-checklist";
 
 /** The stage names and the stored step names are the same five steps; see the run-sheet page. */
 const STEP_FOR_STAGE: Record<string, TouchStep> = {
@@ -75,12 +80,57 @@ async function main() {
         console.log(
           `  /monthly-touch/${payload.touch.id}  ${payload.client.name} · ${payload.client.industry || "no industry"} · opens at ${resolveOpeningStep(progress, undefined)} (stage ${stage})`,
         );
+
+        // What the review brief would draw for this touch, from this touch's own stored figures.
+        const charts = deriveBriefCharts(payload.touch.prepPack);
+        if (!charts.length) {
+          console.log(
+            "      charts: none — nothing readable in the stored preparation to draw, which is the correct answer for an unprepared touch",
+          );
+        }
+        for (const chart of charts) {
+          const figures =
+            chart.cards?.map((card) => `${card.label} ${card.value}${card.detail ? ` (${card.detail})` : ""}`) ||
+            chart.funnel?.map((entry) => `${entry.label} ${entry.value}`) ||
+            chart.rank?.map((entry) => `${entry.label} ${entry.from}->${entry.to}`) ||
+            chart.stack?.map((entry) => `${entry.label} ${entry.value}`) ||
+            (chart.line ? [`${chart.line.a.join("/")} then ${chart.line.b.join("/")}`] : []);
+          console.log(`      chart §${chart.section} ${chart.kind} "${chart.title}" at block ${chart.at}`);
+          console.log(`          ${figures.join(" · ") || "(no figures)"}`);
+        }
+
+        const checklist = followThroughChecklist(payload.touch);
+        const progressed = checklistProgress(checklist);
+        console.log(
+          `      post-touch checklist: ${progressed.ok} of ${progressed.total} settled — ${checklist
+            .filter((entry) => !entry.ok)
+            .map((entry) => entry.label)
+            .join(", ") || "nothing outstanding"}`,
+        );
       }
     }
   }
 }
 
+/** Whether a thrown error is Firestore saying the day's reads are gone. */
+function isQuotaExhausted(error: unknown): boolean {
+  const code = (error as { code?: unknown })?.code;
+  const message = error instanceof Error ? error.message : String(error);
+  return code === 8 || /RESOURCE_EXHAUSTED|Quota exceeded/i.test(message);
+}
+
 main().catch((error) => {
+  /*
+    The daily read quota is a wall this project has hit three times now, and a stack trace is the
+    wrong way to say so: it reads as a broken script rather than as a limit that resets. Exits 2 so
+    "could not check" is distinguishable from "checked and something was wrong".
+  */
+  if (isQuotaExhausted(error)) {
+    console.error(
+      "Firestore's daily read quota is exhausted, so nothing could be loaded. This is a limit, not a failure: it resets at midnight Pacific. Nothing was written.",
+    );
+    process.exit(2);
+  }
   console.error(error);
   process.exit(1);
 });

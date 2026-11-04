@@ -224,6 +224,10 @@ export function LiveCallStep({
   presentation,
   declinedSections,
   showQaChips = true,
+  /** Formatted on the server, where the account manager's time zone is known. */
+  approvedAtLabel,
+  agendaSent,
+  callAtLabel,
 }: {
   touchId: string;
   clientId: string;
@@ -234,6 +238,9 @@ export function LiveCallStep({
   presentation?: Presentation;
   declinedSections?: string[];
   showQaChips?: boolean;
+  approvedAtLabel?: string;
+  agendaSent?: boolean;
+  callAtLabel?: string;
 }) {
   const router = useRouter();
   const autosave = useTouchAutosave(touchId);
@@ -265,7 +272,14 @@ export function LiveCallStep({
     () => ({ readyAt: live?.readyAt, callStartedAt: startedAt, callEndedAt: endedAt }),
     [live?.readyAt, startedAt, endedAt],
   );
-  const header = liveHeader({ live: liveState, plannedMinutes, formatLabel: FORMAT_LABEL[format] });
+  const header = liveHeader({
+    live: liveState,
+    plannedMinutes,
+    formatLabel: FORMAT_LABEL[format],
+    ...(approvedAtLabel ? { approvedAtLabel } : {}),
+    ...(agendaSent === undefined ? {} : { agendaSent }),
+    ...(callAtLabel ? { callAtLabel } : {}),
+  });
 
   const parts = useMemo(
     () => buildGuideParts({ sections, plannedMinutes, declinedSections }),

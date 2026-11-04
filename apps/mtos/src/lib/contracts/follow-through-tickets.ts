@@ -192,6 +192,36 @@ export type ItemDecision = "approved" | "denied" | "deleted";
 
 export type TicketFormType = "ticket" | "billing";
 
+/**
+ * A file the account manager actually attached, carried with the ticket until it is filed.
+ *
+ * Held as a data URL on the touch rather than uploaded somewhere first, which is the pattern the
+ * client attachments already use: one document, no second store to keep in step, and nothing
+ * uploaded anywhere until the ticket itself is approved and created. That matters here -- a file
+ * pushed to ClickUp the moment it was chosen would outlive a ticket the AM then denied.
+ *
+ * `attachments` above it is the older field and is still read. It held paths and URLs and could
+ * not carry the bytes, so it stays for tickets drafted before this and is never written now.
+ */
+export interface TicketAttachment {
+  id: string;
+  name: string;
+  mimeType?: string;
+  size?: number;
+  /** base64 data URL. Capped well under the Firestore document limit; see MAX_TICKET_ATTACHMENT_CHARS. */
+  dataUrl: string;
+}
+
+/**
+ * The cap on one attachment, in data-URL characters.
+ *
+ * A Firestore document is about a megabyte and a touch holds the whole follow-through, so a single
+ * screenshot cannot be allowed to take the document with it. 400k characters is roughly a 300 KB
+ * file, which is a screenshot or a short PDF -- and a bigger one belongs in the Client's Book,
+ * which is what the field hint says.
+ */
+export const MAX_TICKET_ATTACHMENT_CHARS = 400_000;
+
 /** The ClickUp New Ticket form, field for field. */
 export interface TicketDraftForm {
   id: string;
@@ -201,8 +231,10 @@ export interface TicketDraftForm {
   taskName: string;
   businessName?: string;
   description: string;
-  /** Local paths/urls of real uploads. Never invented. */
+  /** Local paths/urls of real uploads. Never invented. The older field; still read, never written. */
   attachments?: string[];
+  /** Files the AM attached on this screen, uploaded to the ticket when it is created. */
+  attachmentFiles?: TicketAttachment[];
   timeEstimateMinutes?: number;
   department?: string;
   assignee?: string;
@@ -257,7 +289,9 @@ export interface BillingDraftForm {
   dateRequested?: string;
   dueDate?: string;
   assignee?: string;
+  /** The older field; still read, never written. */
   attachments?: string[];
+  attachmentFiles?: TicketAttachment[];
   details: string;
   /** Only for a cancellation. */
   cancelSplit?: CancelSplit;

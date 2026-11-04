@@ -173,6 +173,19 @@ export function liveHeader(options: {
   plannedMinutes: number;
   formatLabel: string;
   nowIso?: string;
+  /**
+   * The three facts READY is there to confirm, each optional and each left out when it is not
+   * known: when the brief was approved, whether the agenda actually went to the client, and when
+   * the call is. They are formatted by the caller, which is the only place the AM's time zone is
+   * known.
+   *
+   * Left out rather than guessed. "Agenda sent" on a touch where the send failed would be the
+   * worst sentence on this screen -- the AM would walk into a call the client never saw an agenda
+   * for, and would not find out until they asked about it.
+   */
+  approvedAtLabel?: string;
+  agendaSent?: boolean;
+  callAtLabel?: string;
 }): LiveHeader {
   const phase = livePhase(options.live);
   const elapsed = callElapsedSeconds(options.live, options.nowIso);
@@ -188,10 +201,21 @@ export function liveHeader(options: {
     };
   }
   if (phase === "ready") {
+    /*
+      READY is a waiting room, and what an AM checks while they wait is whether the three things
+      that should already have happened did: approved, agenda out, and the call at the time they
+      think it is. Each is stated only when it is known, so the line shortens rather than lying.
+    */
+    const facts = [
+      options.approvedAtLabel ? `Approved ${options.approvedAtLabel}` : "",
+      options.agendaSent === true ? "agenda sent" : options.agendaSent === false ? "agenda not sent" : "",
+      options.callAtLabel ? `call ${options.callAtLabel}` : "",
+      `${options.formatLabel} ready`,
+    ].filter(Boolean);
     return {
       ...base,
       clock: "",
-      note: `${options.formatLabel} ready — look it over now, start the clock when the client joins.`,
+      note: `${facts.join(" · ")} — start the clock when the client joins.`,
       canStart: true,
       canEnd: false,
     };

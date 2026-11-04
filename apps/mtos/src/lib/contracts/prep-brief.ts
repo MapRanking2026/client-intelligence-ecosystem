@@ -113,7 +113,7 @@ export const BRIEF_SECTIONS: BriefSectionMeta[] = [
   {
     id: "9",
     n: "9",
-    title: "Issues & what we're doing",
+    title: "Issues and what we're doing",
     purpose: "Every issue arrives with a plan, an owner and a date.",
     declinable: true,
   },

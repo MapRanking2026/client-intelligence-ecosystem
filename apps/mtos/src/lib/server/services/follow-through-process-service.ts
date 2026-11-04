@@ -13,6 +13,7 @@ import {
   approvedItems,
   itemTitle,
   type FollowThroughItem,
+  type TicketAttachment,
 } from "@/src/lib/contracts/follow-through-tickets";
 import {
   HEALTH_TRACKER_FIELDS,
@@ -95,6 +96,54 @@ async function persistProgress(
 // 1. The tickets
 // ---------------------------------------------------------------------------
 
+/**
+ * The files the AM attached, put on the ticket once it exists.
+ *
+ * ClickUp takes an attachment as multipart form data on the task, so this cannot ride along in the
+ * create call and has to follow it. Like the custom fields, a failure here never fails the ticket:
+ * a task missing its screenshot is one somebody can still work, and a task that was never created
+ * is lost. The reasons come back so the step can say what did not make it.
+ *
+ * Only ever reached on the run that created the task -- an item with a recorded id is skipped well
+ * before this -- so pressing Finish again cannot upload the same file twice.
+ */
+async function uploadItemAttachments(
+  taskId: string,
+  files: TicketAttachment[],
+  token: string,
+): Promise<string[]> {
+  const problems: string[] = [];
+  for (const file of files) {
+    try {
+      const comma = file.dataUrl.indexOf(",");
+      if (comma < 0) {
+        problems.push(`${file.name}: the file was not readable`);
+        continue;
+      }
+      const bytes = Buffer.from(file.dataUrl.slice(comma + 1), "base64");
+      const body = new FormData();
+      body.append(
+        "attachment",
+        new Blob([new Uint8Array(bytes)], { type: file.mimeType || "application/octet-stream" }),
+        file.name,
+      );
+      // No content-type header on purpose: fetch sets it with the multipart boundary, and setting
+      // it by hand omits the boundary, which ClickUp rejects.
+      const response = await fetch(`${CLICKUP_API}/task/${taskId}/attachment`, {
+        method: "POST",
+        headers: { authorization: token },
+        body,
+      });
+      if (!response.ok) {
+        problems.push(`${file.name}: ClickUp returned ${response.status}`);
+      }
+    } catch (error) {
+      problems.push(`${file.name}: ${error instanceof Error ? error.message : "unknown error"}`);
+    }
+  }
+  return problems;
+}
+
 async function createTickets(state: StepContext): Promise<StepResult> {
   const approved = approvedItems(state.items);
   if (!approved.length) {
@@ -123,6 +172,7 @@ async function createTickets(state: StepContext): Promise<StepResult> {
   let created = 0;
   let already = 0;
   const failures: string[] = [];
+  const attachmentProblems: string[] = [];
 
   for (const item of approved) {
     // The idempotency check. An id on the item means this exact ticket was filed on an earlier
@@ -195,6 +245,13 @@ async function createTickets(state: StepContext): Promise<StepResult> {
       const writes = builder.build();
       if (writes.length) await applyFieldWritesToTask(payload.id, writes, token);
 
+      // The attached files, for the same reason and with the same rule: after the task, never
+      // blocking it.
+      const files = item.attachmentFiles || [];
+      if (files.length) {
+        attachmentProblems.push(...(await uploadItemAttachments(payload.id, files, token)));
+      }
+
       // Recorded immediately rather than at the end of the loop, so a crash halfway through ten
       // tickets leaves the nine that exist recorded as existing.
       await persistProgress(state.context, state.touch.id, {
@@ -209,6 +266,9 @@ async function createTickets(state: StepContext): Promise<StepResult> {
   const summary = [
     created ? `${created} created` : "",
     already ? `${already} already existed` : "",
+    attachmentProblems.length
+      ? `${attachmentProblems.length === 1 ? "one attachment" : `${attachmentProblems.length} attachments`} did not upload (${attachmentProblems.join("; ")})`
+      : "",
   ]
     .filter(Boolean)
     .join(", ");

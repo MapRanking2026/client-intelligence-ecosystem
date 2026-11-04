@@ -162,6 +162,35 @@ scenario("The header says which state the call is in, and what to do about it");
   check("READY names the format the approval built", ready.note.includes("Client presentation"));
   check("READY shows no clock", ready.clock === "");
 
+  // READY is where the AM waits, so it confirms the three things that should already have
+  // happened -- and says nothing about any of them that is not known.
+  check("a bare READY claims no approval time", !ready.note.includes("Approved"));
+  check("and says nothing either way about the agenda", !ready.note.includes("agenda"));
+  check("and names no call time", !ready.note.includes("call Fri"));
+
+  const readyFull = liveHeader({
+    live: { readyAt: "2026-11-05T17:00:00.000Z" },
+    plannedMinutes: 45,
+    formatLabel: "Client presentation",
+    approvedAtLabel: "Mon, Nov 2, 9:14 AM PST",
+    agendaSent: true,
+    callAtLabel: "Fri, Nov 6, 10:00 AM PST",
+  });
+  check("READY states when it was approved", readyFull.note.includes("Approved Mon, Nov 2, 9:14 AM PST"));
+  check("that the agenda went out", readyFull.note.includes("agenda sent"));
+  check("and when the call is", readyFull.note.includes("call Fri, Nov 6, 10:00 AM PST"));
+  check("still ending with what to do next", readyFull.note.endsWith("start the clock when the client joins."));
+
+  // The one that matters most: an agenda that did not go is never reported as though it did.
+  const unsent = liveHeader({
+    live: { readyAt: "2026-11-05T17:00:00.000Z" },
+    plannedMinutes: 45,
+    formatLabel: "Call guide",
+    agendaSent: false,
+  });
+  check("an unsent agenda is said plainly, not omitted", unsent.note.includes("agenda not sent"));
+  check("and never reads as sent", !unsent.note.includes("agenda sent"));
+
   const live = liveHeader({
     live: { readyAt: "2026-11-05T17:00:00.000Z", callStartedAt: "2026-11-05T18:00:00.000Z" },
     plannedMinutes: 40,

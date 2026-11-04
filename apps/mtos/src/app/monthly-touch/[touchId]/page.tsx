@@ -44,6 +44,7 @@ import {
   type TouchStep,
 } from "@/src/lib/contracts/touch-progress";
 import { EMPTY_PREP_BRIEF, approvalSummary } from "@/src/lib/contracts/prep-brief";
+import { deriveBriefCharts } from "@/src/lib/contracts/brief-charts";
 import { AgendaApprovalPanel } from "@/src/components/mtos/agenda-approval-panel";
 import { readAgendaEmail } from "@/src/lib/server/services/agenda-email-service";
 import { touchPageName } from "@/src/lib/server/services/client-book-pages";
@@ -116,6 +117,28 @@ function lastSavedAt(touch: { progressUpdatedAt?: string; updatedAt?: string; re
   ].filter((value): value is string => Boolean(value) && !Number.isNaN(Date.parse(value as string)));
   if (!stamps.length) return undefined;
   return stamps.reduce((latest, value) => (Date.parse(value) > Date.parse(latest) ? value : latest));
+}
+
+/**
+ * A timestamp as the account manager's own clock shows it, or nothing.
+ *
+ * Returns undefined rather than a dash for an unreadable date, because every caller here is
+ * building a line that leaves the fact out when it is not known. A dash in the middle of
+ * "Approved — · agenda sent" reads as a fault; the fact simply being absent does not.
+ */
+function wallClockLabel(iso: string | undefined, timeZone: string | undefined): string | undefined {
+  if (!iso) return undefined;
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return undefined;
+  return new Intl.DateTimeFormat("en-US", {
+    ...(timeZone ? { timeZone } : {}),
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    timeZoneName: "short",
+  }).format(date);
 }
 
 function Section({
@@ -203,6 +226,24 @@ export default async function MonthlyTouchRunSheetPage({
     getAccountManagerPreferences(context),
   ]);
   const sectionSummary = approvalSummary(touch.review);
+
+  /*
+    The charts the brief can draw from what the preparation already stored. Derived here rather
+    than in the component because it reads the whole prep pack, which the review step does not
+    otherwise need on the client, and because the preference that hides them is a server read.
+  */
+  const charts = preferences.chartsInReviewBrief === false ? [] : deriveBriefCharts(prepPack);
+
+  /*
+    What READY confirms while the AM waits for the client: the brief was approved, the agenda
+    actually went out, and the call is when they think it is. Each is left out when it is not
+    known rather than guessed -- see the note on `liveHeader`.
+  */
+  const approvedAtLabel = wallClockLabel(touch.approval?.finishedAt, profile.timeZone);
+  const callAtLabel = wallClockLabel(
+    touch.scheduledAt || prepPack?.schedule.scheduledAt,
+    profile.timeZone,
+  );
 
   const liveLauncher = (
     <LiveModeLauncher
@@ -308,6 +349,7 @@ export default async function MonthlyTouchRunSheetPage({
                 clientId={client.id}
                 brief={touch.prepBrief || EMPTY_PREP_BRIEF}
                 review={touch.review}
+                charts={charts}
                 header={
                   <BriefHeader
                     client={client}
@@ -431,6 +473,9 @@ export default async function MonthlyTouchRunSheetPage({
             clientName={client.name}
             {...(touch.live ? { live: touch.live } : {})}
             plannedMinutes={callLengthMinutes(preferences.callLengthMinutes)}
+            {...(approvedAtLabel ? { approvedAtLabel } : {})}
+            {...(agendaEmail.state.declined ? {} : { agendaSent: agendaEmail.sent })}
+            {...(callAtLabel ? { callAtLabel } : {})}
             {...(touch.callGuide?.sections ? { sections: touch.callGuide.sections } : {})}
             {...(touch.presentation ? { presentation: touch.presentation } : {})}
             {...(touch.review?.declinedSections ? { declinedSections: touch.review.declinedSections } : {})}

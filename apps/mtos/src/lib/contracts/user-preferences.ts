@@ -11,8 +11,9 @@
  *    this do when unset", so a screen and the service behind it cannot disagree.
  *  - **The UI is described here too.** `PREFERENCE_GROUPS` carries the label, the hint and, where it
  *    matters, the plain statement of what reads the value. A switch whose effect an AM cannot find
- *    is a switch they stop trusting, so the one field nothing reads yet says so in its own hint --
- *    charts in the review brief, which waits on the brief having a chart to draw.
+ *    is a switch they stop trusting, so a field nothing reads yet says so in its own hint and is
+ *    marked `notWiredYet`. Nothing is marked at the moment: the last one was the review brief's
+ *    charts, and the brief now draws them.
  */
 
 import {
@@ -394,8 +395,7 @@ export const PREFERENCE_GROUPS: PreferenceGroup[] = [
         key: "chartsInReviewBrief",
         label: "Charts in the review brief",
         kind: "switch",
-        hint: "Kept for when the brief has charts to show. Nothing in the brief draws one yet, so today this changes nothing.",
-        notWiredYet: true,
+        hint: "Draws the figures above the paragraph that explains them, in the sections that have numbers. Off leaves the brief as prose.",
       },
       {
         key: "prepReviewReminder",

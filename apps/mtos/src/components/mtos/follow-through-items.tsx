@@ -16,6 +16,7 @@ import {
   cancelSplitTotal,
   departmentOwner,
   dueDateAfterPriorityChange,
+  MAX_TICKET_ATTACHMENT_CHARS,
   itemBlockers,
   itemChips,
   itemTitle,
@@ -24,6 +25,7 @@ import {
   type DepartmentOwners,
   type FollowThroughItem,
   type ItemDecision,
+  type TicketAttachment,
   type TicketDraftForm,
   type TicketPriorityName,
 } from "@/src/lib/contracts/follow-through-tickets";
@@ -77,6 +79,101 @@ function Decide({
   );
 }
 
+/**
+ * The Attachment field, shared by both forms.
+ *
+ * The file is read here and carried with the ticket as a data URL; nothing is uploaded until the
+ * ticket is approved and created. That is the point -- a file pushed to ClickUp the moment it was
+ * chosen would outlive a ticket the AM then denied, and there would be no way to tell the two
+ * apart afterwards.
+ *
+ * The cap is stated rather than enforced silently. An AM whose screenshot vanished with no
+ * explanation will attach it again, and again.
+ */
+function AttachmentField({
+  files,
+  onFiles,
+}: {
+  files: TicketAttachment[];
+  onFiles: (next: TicketAttachment[]) => void;
+}) {
+  const [problem, setProblem] = useState<string>();
+
+  const add = useCallback(
+    async (chosen: FileList | null) => {
+      if (!chosen?.length) return;
+      setProblem(undefined);
+      const added: TicketAttachment[] = [];
+      for (const file of Array.from(chosen)) {
+        const dataUrl = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(String(reader.result || ""));
+          reader.onerror = () => reject(new Error("could not be read"));
+          reader.readAsDataURL(file);
+        }).catch(() => "");
+        if (!dataUrl) {
+          setProblem(`${file.name} could not be read.`);
+          continue;
+        }
+        if (dataUrl.length > MAX_TICKET_ATTACHMENT_CHARS) {
+          setProblem(
+            `${file.name} is too big to carry on the ticket. Put it in the Client's Book and link to it in the description.`,
+          );
+          continue;
+        }
+        added.push({
+          id: `${Date.now()}-${added.length}-${file.name}`,
+          name: file.name,
+          ...(file.type ? { mimeType: file.type } : {}),
+          size: file.size,
+          dataUrl,
+        });
+      }
+      if (added.length) onFiles([...files, ...added]);
+    },
+    [files, onFiles],
+  );
+
+  return (
+    <div className="field">
+      <label className="field-label">🔗 Attachment</label>
+      <input className="input" type="file" multiple onChange={(e) => void add(e.target.files)} />
+      <p className="field-hint">Goes up with the ticket when it is created. Nothing is uploaded before that.</p>
+      {problem ? (
+        <p className="field-hint" style={{ color: "var(--risk)" }}>
+          {problem}
+        </p>
+      ) : null}
+      {files.length ? (
+        <ul className="mt-2 grid gap-1.5">
+          {files.map((file) => (
+            <li key={file.id} className="flex items-center justify-between gap-3">
+              <span className="truncate text-[0.82rem]" style={{ color: "var(--text-2)" }}>
+                {file.name}
+                {file.size ? (
+                  <span style={{ color: "var(--slate-400)" }}> · {Math.max(1, Math.round(file.size / 1024))} KB</span>
+                ) : null}
+              </span>
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={() => onFiles(files.filter((entry) => entry.id !== file.id))}
+              >
+                <Trash2 />
+                Remove
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      {/*
+        Tickets drafted before files could be carried here kept paths and urls in the older
+        `attachments` field. Shown, never silently dropped.
+      */}
+    </div>
+  );
+}
+
 function TicketForm({
   form,
   tags,
@@ -115,6 +212,11 @@ function TicketForm({
           onChange={(e) => onChange({ ...form, description: e.target.value })}
         />
       </div>
+
+      <AttachmentField
+        files={form.attachmentFiles || []}
+        onFiles={(attachmentFiles) => onChange({ ...form, attachmentFiles })}
+      />
 
       <div className="grid gap-3 md:grid-cols-2">
         <div className="field">
@@ -347,6 +449,11 @@ function BillingForm({
           )}
         </div>
       </div>
+
+      <AttachmentField
+        files={form.attachmentFiles || []}
+        onFiles={(attachmentFiles) => onChange({ ...form, attachmentFiles })}
+      />
 
       <div className="field">
         <label className="field-label">Change details</label>

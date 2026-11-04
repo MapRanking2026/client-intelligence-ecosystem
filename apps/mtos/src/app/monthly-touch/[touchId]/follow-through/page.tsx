@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 
 import { AppShell } from "@/src/components/mtos/app-shell";
+import { FollowThroughChecklist } from "@/src/components/mtos/follow-through-checklist";
 import { FollowThroughGate } from "@/src/components/mtos/follow-through-gate";
 import { FollowThroughFinish } from "@/src/components/mtos/follow-through-finish";
 import { FollowThroughItems } from "@/src/components/mtos/follow-through-items";
@@ -11,6 +12,7 @@ import { FollowThroughRecap } from "@/src/components/mtos/follow-through-recap";
 import { FollowThroughTrackers } from "@/src/components/mtos/follow-through-trackers";
 import { SectionCard } from "@/src/components/mtos/section-card";
 import { resolveTenantContext } from "@/src/lib/auth/resolve-tenant-context";
+import { followThroughChecklist } from "@/src/lib/contracts/follow-through-checklist";
 import { scoreConfirmed } from "@/src/lib/contracts/follow-through-score";
 import {
   listTicketTags,
@@ -18,6 +20,7 @@ import {
 } from "@/src/lib/server/services/follow-through-items-service";
 import { getMonthlyTouchWorkspaceView } from "@/src/lib/server/services/monthly-touch-service";
 import { listAssignableMembers } from "@/src/lib/server/services/post-meeting-service";
+import { getAccountManagerProfile } from "@/src/lib/server/services/user-service";
 
 /**
  * Rendered per request, never prerendered.
@@ -56,11 +59,18 @@ export default async function FollowThroughPage({
     ? await Promise.all([listTicketTags(context), readDepartmentOwners(context), listAssignableMembers(context)])
     : [{ tags: [] }, {}, { members: [] }];
 
+  // One document, for one thing: the deadline on the checklist has to be on the AM's own clock,
+  // and a time zone cannot be guessed from the server's.
+  const profile = await getAccountManagerProfile(context);
+  const checklist = followThroughChecklist(touch);
+
   return (
     <AppShell
       title={`${client.name} — follow-through`}
       subtitle="Everything the call commits us to, drafted for you to approve. Nothing is created in ClickUp, written to a tracker or sent to the client until you finish this screen."
     >
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_280px]">
+        <div className="min-w-0">
       <SectionCard
         eyebrow="Step 1 of the follow-through"
         title="Score the account"
@@ -142,6 +152,19 @@ export default async function FollowThroughPage({
           />
         </SectionCard>
       ) : null}
+
+        </div>
+
+        {/*
+          Section 8 of the notes: what should have happened, answered from the record. Second in the
+          DOM so a screen reader and a narrow screen both get the work before the summary of it.
+        */}
+        <FollowThroughChecklist
+          rows={checklist}
+          {...(touch.followThrough?.dueAt ? { dueAt: touch.followThrough.dueAt } : {})}
+          {...(profile.timeZone ? { timeZone: profile.timeZone } : {})}
+        />
+      </div>
 
       <div className="mt-4">
         <Link href={`/monthly-touch/${touch.id}`} className="btn btn-ghost btn-sm">

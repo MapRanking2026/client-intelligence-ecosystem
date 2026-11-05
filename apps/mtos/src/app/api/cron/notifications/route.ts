@@ -14,7 +14,18 @@ import { runNotificationsAllTenants } from "@/src/lib/server/services/notificati
  * `RUN_INTERVAL_MS` in the notifications contract is where its consequence is worked out: a
  * reminder can arrive up to one interval early, never late.
  *
- * Everything it writes is idempotent on a dedupe key, which is what makes repeating it safe.
+ * ## The two hours do not come from vercel.json any more
+ *
+ * They came from a two-hourly entry there, and that entry took the project's deploys down:
+ * Vercel Hobby accepts one run per day per cron and rejects the rest at config validation, before
+ * a line is built, so four production deploys failed on a schedule rather than on their code. The
+ * cadence now lives in `.github/workflows/mtos-notifications.yml`, which calls this route every two
+ * hours, and the cron entry stays as a once-a-day floor so the run still happens if that workflow
+ * is ever disabled. Two callers, one route, and no change to what a pass does.
+ *
+ * Everything it writes is idempotent on a dedupe key, which is what makes repeating it safe -- and
+ * it is what makes a best-effort external scheduler acceptable here: a trigger that fires twice
+ * raises nothing twice.
  *
  * It reads each AM's touches and clients and writes only to their own notification feed, plus at
  * most one digest email per AM per day to their own address. Nothing reaches a client.

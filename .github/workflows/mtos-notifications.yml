@@ -40,14 +40,17 @@ jobs:
     steps:
       - name: Call the notification run
         env:
-          # The deployment to call. A repository variable so a custom domain can take over later
-          # without editing this file.
-          BASE_URL: ${{ vars.MTOS_BASE_URL || 'https://mtosv0-franciscos-projects-b11e7654.vercel.app' }}
+          # The deployment to call. This project's Vercel Authentication is set to "all except
+          # custom domains", and mtos.mapranking.com is its one verified custom domain -- so that
+          # host reaches the route while every .vercel.app URL is bounced to a login page. Measured
+          # 2026-11-05: this host answers 401 {"error":"Unauthorized"} from the route's own guard
+          # below, the .vercel.app URL answers 302 to vercel.com/sso-api. A repository variable can
+          # point this elsewhere without editing the file.
+          BASE_URL: ${{ vars.MTOS_BASE_URL || 'https://mtos.mapranking.com' }}
           # The route's own guard: it answers 401 to anything without this.
           CRON_SECRET: ${{ secrets.MTOS_CRON_SECRET }}
-          # Vercel Authentication sits in front of every .vercel.app URL on this project and bounces
-          # an unauthenticated caller to a login page -- a 302 the route never sees. This header is
-          # the documented way past it for automation.
+          # Only needed if BASE_URL is ever pointed at a .vercel.app URL, which Vercel Authentication
+          # protects. Unset while the custom domain above is in use, and the header is then omitted.
           BYPASS: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
         run: |
           set -euo pipefail

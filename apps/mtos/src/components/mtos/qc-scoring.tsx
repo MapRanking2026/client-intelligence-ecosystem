@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { AlertTriangle, ArrowLeft, Check, Loader2, Sparkles, Trash2 } from "lucide-react";
 
 import { readJsonResponse } from "@/src/lib/api/read-json-response";
+import { qcDateLabel as dateLabel } from "@/src/lib/contracts/qc-dates";
 import {
   QC_GROUPS,
   criteriaInGroup,
@@ -73,13 +74,6 @@ const GOALS: { value: QcGoal; hint: string }[] = [
   { value: "No", hint: "No goal was discussed." },
   { value: "N/A", hint: "No goal applied to this call." },
 ];
-
-function dateLabel(iso: string | undefined): string {
-  if (!iso) return "no date";
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return "no date";
-  return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" }).format(date);
-}
 
 function agoLabel(iso: string | undefined): string {
   if (!iso) return "at an unrecorded time";

@@ -25,6 +25,7 @@ import { getFirebaseAdminDb } from "@/src/lib/server/firebase/admin";
 import { monthlyTouchPath, qcItemPath } from "@/src/lib/server/firebase/collections";
 import { raiseNotificationForUser } from "@/src/lib/server/services/notification-service";
 import { getQcIndexRow } from "@/src/lib/server/services/qc-queue-service";
+import { qcDateLabel as dateLabel } from "@/src/lib/contracts/qc-dates";
 
 /**
  * The four things a QC reviewer does to a record: open it, save a draft, submit it, decide an appeal.
@@ -56,13 +57,6 @@ export type QcWriteOutcome =
 
 function fail(reason: string, status = 409): QcWriteOutcome {
   return { ok: false, reason, status };
-}
-
-function dateLabel(iso: string | undefined): string {
-  if (!iso) return "no date";
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return "no date";
-  return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" }).format(date);
 }
 
 function firstName(name: string | undefined): string {

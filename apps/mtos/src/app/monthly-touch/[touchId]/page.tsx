@@ -44,6 +44,8 @@ import {
   type TouchStep,
 } from "@/src/lib/contracts/touch-progress";
 import { EMPTY_PREP_BRIEF, approvalSummary } from "@/src/lib/contracts/prep-brief";
+import { mergeQcIntoBrief } from "@/src/lib/contracts/qc-coaching";
+import { getLatestQcCoaching } from "@/src/lib/server/services/qc-am-service";
 import { deriveBriefCharts } from "@/src/lib/contracts/brief-charts";
 import { AgendaApprovalPanel } from "@/src/components/mtos/agenda-approval-panel";
 import { readAgendaEmail } from "@/src/lib/server/services/agenda-email-service";
@@ -235,6 +237,24 @@ export default async function MonthlyTouchRunSheetPage({
   const charts = preferences.chartsInReviewBrief === false ? [] : deriveBriefCharts(prepPack);
 
   /*
+    The coaching block in section 1, fed from this AM's last submitted QC rather than from whatever
+    the preparation model found in the QC tracker (handoff §6.8). Read only for the Review step --
+    it is one indexed query plus one touch read, and no other step shows it.
+
+    It replaces the model's `focus` only when the reviewer actually wrote a coaching plan; its
+    per-criterion proposals are added ahead of the model's own. `mergeQcIntoBrief` holds that rule
+    and the reasoning for it. When there is no QC history the brief is returned untouched, so an AM
+    whose touches all predate QC sees exactly what they saw before.
+  */
+  const qcCoaching =
+    view === "review"
+      ? await getLatestQcCoaching(context, { clientId: client.id, excludeTouchId: touch.id }).catch(
+          () => undefined,
+        )
+      : undefined;
+  const reviewBrief = mergeQcIntoBrief(touch.prepBrief || EMPTY_PREP_BRIEF, qcCoaching);
+
+  /*
     What READY confirms while the AM waits for the client: the brief was approved, the agenda
     actually went out, and the call is when they think it is. Each is left out when it is not
     known rather than guessed -- see the note on `liveHeader`.
@@ -347,7 +367,7 @@ export default async function MonthlyTouchRunSheetPage({
               <ReviewBrief
                 touchId={touch.id}
                 clientId={client.id}
-                brief={touch.prepBrief || EMPTY_PREP_BRIEF}
+                brief={reviewBrief}
                 review={touch.review}
                 charts={charts}
                 header={

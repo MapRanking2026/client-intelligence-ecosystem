@@ -2,8 +2,9 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { resolveTenantContext } from "@/src/lib/auth/resolve-tenant-context";
-import { canReadQcRecord, canScoreQc } from "@/src/lib/contracts/qc-access";
+import { canActAsTouchOwner, canReadQcRecord, canScoreQc } from "@/src/lib/contracts/qc-access";
 import type { QcCriterionNote, QcDraftValue } from "@/src/lib/contracts/qc-record";
+import { MIN_CONTEXT_LENGTH } from "@/src/lib/contracts/qc-appeal-draft";
 import { QC_CRITERION_COUNT } from "@/src/lib/contracts/qc-rubric";
 import { getQcIndexRow } from "@/src/lib/server/services/qc-queue-service";
 import {
@@ -13,6 +14,11 @@ import {
   submitQcScore,
   type QcWriteOutcome,
 } from "@/src/lib/server/services/qc-review-service";
+import {
+  acknowledgeQcScore,
+  requestQcChat,
+  submitQcAppeal,
+} from "@/src/lib/server/services/qc-am-service";
 
 /**
  * The QC write route: open a review, autosave it, submit it, decide an appeal.
@@ -26,16 +32,26 @@ import {
  * check at the top, where it can be read in one glance, and keeps the QC actions out of a file
  * nobody can hold in their head.
  *
- * ## Every action is a reviewer's
+ * ## Permission is per action, not per route
  *
- * All four require `canScoreQc`, which is `qa_reviewer` alone -- not an admin and not a manager,
- * both of whom may *read* the queue. The reason is in `qc-access.ts`: a score is only comparable
- * across a team if one calibrated person produces all of them, and the AM's own page draws a trend
- * from exactly that comparison.
+ * The four scoring actions require `canScoreQc`, which is `qa_reviewer` alone -- not an admin and
+ * not a manager, both of whom may *read* the queue. The reason is in `qc-access.ts`: a score is
+ * only comparable across a team if one calibrated person produces all of them, and the AM's own
+ * page draws a trend from exactly that comparison.
  *
- * The role is read from the session, never from the request body. `resolveTenantContext` falls back
- * to `account_manager` when there is no session, so an unauthenticated call fails the check rather
- * than passing it -- the failure mode is closed.
+ * The three AM actions -- appeal, mark as read, ask for a coaching chat -- require the opposite:
+ * `canActAsTouchOwner`, which is the AM who ran the touch and nobody else. Not the reviewer, and
+ * not an admin. Each of those three writes something in the first person into someone's own
+ * performance record, and a reviewer marking a score as read on an AM's behalf would be putting
+ * words in their mouth about a score they had not seen.
+ *
+ * So the gate is a switch over the action, not one check at the top. A single check would have to
+ * be the loosest of the two, and the loosest of these two is wrong for all seven actions.
+ *
+ * The role and the user id are read from the session, never from the request body.
+ * `resolveTenantContext` falls back to `account_manager` with no user when there is no session, so
+ * an unauthenticated call fails both checks rather than passing either -- the failure mode is
+ * closed.
  */
 
 /** A criterion as the form can send it: a grade, an explicit N/A, or undecided. */
@@ -92,6 +108,33 @@ const qcRequestSchema = z.discriminatedUnion("action", [
     ),
     reply: z.string().max(8000).optional(),
   }),
+  // The AM's three. `ctx` has a floor here as well as on the screen: an appeal item a reviewer
+  // cannot check is one they can only decline.
+  z.object({
+    action: z.literal("submit_qc_appeal"),
+    items: z
+      .array(
+        z.object({
+          n: z.number().int().min(1).max(QC_CRITERION_COUNT),
+          to: z.number().int().min(2).max(5),
+          ctx: z.string().min(MIN_CONTEXT_LENGTH + 1).max(4000),
+          link: z.string().max(2000).optional(),
+        }),
+      )
+      .min(1)
+      .max(QC_CRITERION_COUNT),
+    note: z.string().max(4000).optional(),
+  }),
+  z.object({ action: z.literal("acknowledge_qc") }),
+  z.object({ action: z.literal("request_qc_chat") }),
+]);
+
+/** Which permission each action needs. The whole access policy of this route, in one place. */
+const REVIEWER_ACTIONS = new Set([
+  "start_qc",
+  "save_qc_draft",
+  "submit_qc",
+  "resolve_qc_appeal",
 ]);
 
 /** JSON gives string keys; the record is keyed by criterion number. Unparseable keys are dropped. */
@@ -144,16 +187,27 @@ export async function POST(request: Request, { params }: { params: Promise<{ tou
   if (!canReadQcRecord(context.role, context.userId, row.amId)) {
     return NextResponse.json({ error: "You do not have access to this QC record." }, { status: 403 });
   }
-  if (!canScoreQc(context.role)) {
-    return NextResponse.json(
-      { error: "Only a QC reviewer can score a touch or decide an appeal." },
-      { status: 403 },
-    );
-  }
-
   try {
     const raw = await request.json().catch(() => ({}));
     const payload = qcRequestSchema.parse(raw);
+
+    // The gate. Reviewer actions need the role; the AM's three need to be the touch's own AM.
+    if (REVIEWER_ACTIONS.has(payload.action)) {
+      if (!canScoreQc(context.role)) {
+        return NextResponse.json(
+          { error: "Only a QC reviewer can score a touch or decide an appeal." },
+          { status: 403 },
+        );
+      }
+    } else if (!canActAsTouchOwner(context.userId, row.amId)) {
+      return NextResponse.json(
+        {
+          error:
+            "Only the account manager who ran this touch can appeal its score, mark it as read or ask for a coaching chat.",
+        },
+        { status: 403 },
+      );
+    }
 
     switch (payload.action) {
       case "start_qc":
@@ -187,6 +241,27 @@ export async function POST(request: Request, { params }: { params: Promise<{ tou
         return respond(
           await resolveQcAppeal(context, touchId, payload.decisions, payload.reply),
         );
+
+      case "submit_qc_appeal":
+        return respond(
+          await submitQcAppeal(
+            context,
+            touchId,
+            payload.items.map((item) => ({
+              n: item.n,
+              to: item.to,
+              ctx: item.ctx,
+              ...(item.link ? { link: item.link } : {}),
+            })),
+            payload.note,
+          ),
+        );
+
+      case "acknowledge_qc":
+        return respond(await acknowledgeQcScore(context, touchId));
+
+      case "request_qc_chat":
+        return respond(await requestQcChat(context, touchId));
     }
   } catch (error) {
     if (error instanceof z.ZodError) {

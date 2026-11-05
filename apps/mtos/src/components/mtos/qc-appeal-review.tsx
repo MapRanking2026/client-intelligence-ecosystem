@@ -7,6 +7,7 @@ import { ArrowLeft, Loader2 } from "lucide-react";
 
 import { readJsonResponse } from "@/src/lib/api/read-json-response";
 import { criterionByNumber } from "@/src/lib/contracts/qc-rubric";
+import { qcDateLabel as dateLabel } from "@/src/lib/contracts/qc-dates";
 import type { QcAppealDecision, TouchQc } from "@/src/lib/contracts/qc-record";
 import {
   appealDecisionsComplete,
@@ -30,13 +31,6 @@ import {
  * took the trouble to explain what QC could not see is owed an answer on each point, and silence on
  * one of them would read as the appeal having been skimmed.
  */
-
-function dateLabel(iso: string | undefined): string {
-  if (!iso) return "no date";
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return "no date";
-  return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" }).format(date);
-}
 
 export function QcAppealReview({
   touchId,

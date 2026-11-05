@@ -20,6 +20,7 @@ import {
 import { qcTone, type QcIndexRow } from "@/src/lib/contracts/qc-record";
 import { goalsLabel, lowestLabel, type QcTeamCard } from "@/src/lib/contracts/qc-team";
 import { QC_KPI_TARGET } from "@/src/lib/contracts/qc-record";
+import { qcDateLabel as dateLabel } from "@/src/lib/contracts/qc-dates";
 
 /**
  * The QC Specialist's queue: four tabs over one index collection.
@@ -35,13 +36,6 @@ import { QC_KPI_TARGET } from "@/src/lib/contracts/qc-record";
  * promise made to the AM when they pressed Finish, and it is the one thing on this screen a
  * reviewer should act on before anything else.
  */
-
-function dateLabel(iso: string | undefined): string {
-  if (!iso) return "no date";
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return "no date";
-  return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" }).format(date);
-}
 
 function Avatar({ name }: { name: string | undefined }) {
   return (
@@ -246,6 +240,7 @@ export function QcQueue({
   scored,
   team,
   flash,
+  ownScores = 0,
 }: {
   /** "QC queue · {name}, QC Specialist" is built on the server, where the session is. */
   reviewerTitle: string;
@@ -256,6 +251,14 @@ export function QcQueue({
   scored: QcIndexRow[];
   team: QcTeamCard[];
   flash?: string;
+  /**
+   * How many scored touches belong to the person looking at this queue.
+   *
+   * A manager here also runs client touches. Without this link their own score would be visible to
+   * them only as one number on the Team tab, and the notification that it existed would open this
+   * page rather than their own breakdown of it.
+   */
+  ownScores?: number;
 }) {
   const [tab, setTab] = useState<QcQueueTab>(queue.length || !appeals.length ? "queue" : "appeals");
 
@@ -282,6 +285,11 @@ export function QcQueue({
             transcript, and an AI pre-read that suggests a score per criterion with the moment it
             came from. You set the final score.
           </p>
+          {ownScores ? (
+            <Link href="/qa?mine=1" className="ilink mt-2 inline-block text-[0.8rem]">
+              Your own QC {ownScores === 1 ? "score" : "scores"} ({ownScores}) →
+            </Link>
+          ) : null}
         </div>
         <div className="flex flex-wrap gap-1.5" role="tablist" aria-label="QC views">
           {QC_QUEUE_TABS.map((name) => (

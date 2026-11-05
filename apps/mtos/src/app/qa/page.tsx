@@ -5,6 +5,7 @@ import { AppShell } from "@/src/components/mtos/app-shell";
 import { DataError } from "@/src/components/mtos/data-error";
 import { Linkified } from "@/src/components/mtos/annotate";
 import { ClientHint } from "@/src/components/mtos/client-hint";
+import { QcAmCoaching } from "@/src/components/mtos/qc-am-coaching";
 import { QcAppealReview } from "@/src/components/mtos/qc-appeal-review";
 import { QcQueue } from "@/src/components/mtos/qc-queue";
 import { QcScoring } from "@/src/components/mtos/qc-scoring";
@@ -15,7 +16,25 @@ import {
   canReadQcRecord,
   canScoreQc,
 } from "@/src/lib/contracts/qc-access";
+import {
+  amDateLabel,
+  amHeadline,
+  amKpis,
+  amSubtitle,
+  appealBanner,
+  breakdownRows,
+  focusRows,
+  historyRows,
+  improvedRows,
+  latestCard,
+  pendingChipLabel,
+  rowScore,
+  trendPoints,
+} from "@/src/lib/contracts/qc-am";
+import { appealCandidates, canAppeal } from "@/src/lib/contracts/qc-appeal-draft";
+import { callLengthLabel } from "@/src/lib/contracts/qc-queue";
 import { getQaClientIndexView } from "@/src/lib/server/services/qa-service";
+import { getQcAmView } from "@/src/lib/server/services/qc-am-service";
 import { getQcIndexRow, getQcQueueView } from "@/src/lib/server/services/qc-queue-service";
 import { getQcScoringView } from "@/src/lib/server/services/qc-review-service";
 import { getAccountManagerIdentity } from "@/src/lib/server/services/user-service";
@@ -94,12 +113,30 @@ async function flashFor(
 export default async function QaPage({
   searchParams,
 }: {
-  searchParams: Promise<{ qc?: string; appeal?: string; scored?: string; decided?: string }>;
+  searchParams: Promise<{
+    qc?: string;
+    appeal?: string;
+    scored?: string;
+    decided?: string;
+    touch?: string;
+    mine?: string;
+  }>;
 }) {
   const context = await resolveTenantContext();
   const params = await searchParams;
 
-  if (canOpenQcQueue(context.role)) {
+  /*
+    Who gets the queue, and the two ways somebody who normally gets it lands on their own page
+    instead.
+
+    `?mine=1` is the link in the queue header. `?touch=` is the href on a "your QC score is ready"
+    notification. Both matter because a manager at this company also runs client touches: without
+    them, Ian or Yosef could see the whole team's averages on the Team tab and never reach the
+    breakdown of their own score, and the notification telling them it existed would open a queue.
+  */
+  const wantsOwnScores = Boolean(params.mine || params.touch);
+
+  if (canOpenQcQueue(context.role) && !wantsOwnScores) {
     const touchId = params.qc || params.appeal;
 
     if (touchId) {
@@ -173,6 +210,9 @@ export default async function QaPage({
       ? `QC queue · ${me.name}, ${QC_SPECIALIST_TITLE}`
       : `QC queue · ${QC_SPECIALIST_TITLE}`;
     const flash = await flashFor(context, params.scored, params.decided);
+    // Counted off the rows already in hand rather than with another query: a reviewer who has
+    // never run a touch sees no link, and one who has gets a way to their own breakdown.
+    const ownScores = view.scored.filter((row) => row.amId === context.userId).length;
 
     return (
       <AppShell>
@@ -184,6 +224,7 @@ export default async function QaPage({
           scored={view.scored}
           team={view.team}
           {...(view.reviewerName ? { reviewerName: view.reviewerName } : {})}
+          ownScores={ownScores}
           {...(flash ? { flash } : {})}
         />
       </AppShell>
@@ -191,7 +232,101 @@ export default async function QaPage({
   }
 
   // ---------------------------------------------------------------------------
-  // The AM's view, unchanged. Replaced by the QA & Coaching page in the next phase.
+  // The AM's own QA & Coaching page (handoff §6.7)
+  // ---------------------------------------------------------------------------
+
+  const am = await getQcAmView(context, params.touch).catch(() => undefined);
+  // The way back, for a reviewer or manager who arrived here from the queue or a notification.
+  const backToQueue = canOpenQcQueue(context.role);
+  const me = await getAccountManagerIdentity(context).catch(() => ({ name: "" }));
+  const reviewerName = am?.reviewerName || "QC";
+
+  if (am?.done.length || am?.pending.length) {
+    const { done, pending, selected } = am;
+    const selectedId = selected?.row.touchId;
+    const coachingSource = selected?.qc.coaching?.some((item) => item.idea.trim())
+      ? selected
+      : undefined;
+    const latest = latestCard(done, am.reviewerName);
+    // The coaching plan shown is the selected touch's own when it has one. A touch scored before
+    // the reviewer wrote any coaching shows none rather than borrowing another client's plan --
+    // advice about a different account, presented under this one's heading, is worse than silence.
+    const coaching = coachingSource?.qc.coaching?.filter((item) => item.idea.trim()) || [];
+
+    return (
+      <AppShell>
+        {backToQueue ? (
+          <Link href="/qa" className="ilink mb-4 inline-block text-[0.8rem]">
+            ← QC queue
+          </Link>
+        ) : null}
+        <QcAmCoaching
+          amName={me.name}
+          reviewerName={reviewerName}
+          headline={amHeadline(done)}
+          subtitle={amSubtitle(done)}
+          pendingChips={pending.map(pendingChipLabel)}
+          {...(latest ? { latest } : {})}
+          kpis={amKpis(done)}
+          trend={trendPoints(done, selectedId)}
+          improved={improvedRows(done)}
+          focus={focusRows(done, am.notesByTouch)}
+          coaching={coaching}
+          coachingFrom={
+            coachingSource
+              ? `${coachingSource.clientName} · ${amDateLabel(coachingSource.row.date)}`
+              : ""
+          }
+          history={historyRows(done, selectedId, am.reviewerName)}
+          {...(selected
+            ? {
+                detail: {
+                  touchId: selected.row.touchId,
+                  client: selected.clientName,
+                  dateLabel: amDateLabel(selected.row.date),
+                  score: rowScore(selected.row),
+                  rating: selected.qc.rating || null,
+                  meta: [
+                    callLengthLabel(selected.qc.callLengthMin),
+                    `scored by ${reviewerName} ${amDateLabel(selected.qc.scoredAt)}`,
+                    `client goal ${selected.qc.goal || "—"}`,
+                  ].join(" · "),
+                  strengths: selected.qc.strengths || "—",
+                  focus: selected.qc.focus || "—",
+                  breakdown: breakdownRows({
+                    crit: selected.qc.crit,
+                    previousCrit: selected.previousCrit,
+                    notes: selected.qc.notes,
+                    appeal: selected.qc.appeal,
+                  }),
+                  ...(appealBanner(selected.qc.appeal)
+                    ? { appealBanner: appealBanner(selected.qc.appeal)! }
+                    : {}),
+                  ...(selected.qc.appeal?.reply ? { appealReply: selected.qc.appeal.reply } : {}),
+                  appealCandidates: appealCandidates(selected.qc.crit, selected.qc.notes),
+                  canAppeal: canAppeal({
+                    hasAppeal: Boolean(selected.qc.appeal),
+                    hasScore: rowScore(selected.row) !== null,
+                    isOwner: selected.row.amId === context.userId,
+                  }),
+                  canAcknowledge:
+                    selected.qc.status === "scored" || selected.qc.status === "appeal_resolved",
+                  chatRequested: Boolean(selected.qc.chatRequestedAt),
+                },
+              }
+            : {})}
+        />
+      </AppShell>
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // No QC record for this AM yet.
+  //
+  // The new page's empty state, and below it the client index that was here before. The index is
+  // kept rather than removed because it is the only place the legacy A-F reviews can still be read,
+  // and those are folded into the history above in a later phase (handoff §6.10). Removing it now
+  // would take something away from an AM whose touches all predate QC.
   // ---------------------------------------------------------------------------
 
   let cards: Awaited<ReturnType<typeof getQaClientIndexView>>["cards"];
@@ -209,11 +344,15 @@ export default async function QaPage({
     <AppShell>
       <div className="section-head" style={{ marginTop: 0 }}>
         <div>
-          <div className="eyebrow muted">
+          <div className="eyebrow">
             <ClipboardCheck />
-            <span>Quality &amp; coaching · consistency across every AM</span>
+            <span>QA &amp; Coaching{me.name ? ` · ${me.name}` : ""}</span>
           </div>
-          <h2 className="h2 mt-2">QA &amp; Coaching</h2>
+          <h2 className="h2 mt-2">No QC scores yet.</h2>
+          <p className="muted mt-2 max-w-[62ch] text-[0.86rem] leading-6">
+            Your first score appears here after {reviewerName} grades a finished monthly touch. The
+            reviews below are the earlier A&ndash;F ones, which stay readable.
+          </p>
         </div>
       </div>
 

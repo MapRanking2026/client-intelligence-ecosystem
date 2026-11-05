@@ -54,7 +54,8 @@
     "check:qc-appeal-draft": "tsx scripts/check-qc-appeal-draft.ts",
     "check:qc-coaching": "tsx scripts/check-qc-coaching.ts",
     "check:qc-cards": "tsx scripts/check-qc-cards.ts",
-    "check:notification-toasts": "tsx scripts/check-notification-toasts.ts"
+    "check:notification-toasts": "tsx scripts/check-notification-toasts.ts",
+    "check:qc-legacy": "tsx scripts/check-qc-legacy.ts"
   },
   "dependencies": {
     "@cie/engine": "*",

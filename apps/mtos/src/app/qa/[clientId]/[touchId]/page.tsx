@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { LEGACY_QA_TAG } from "@/src/lib/contracts/qc-legacy";
 
 import { AppShell } from "@/src/components/mtos/app-shell";
 import { ScorePill } from "@/src/components/mtos/score-pill";
@@ -56,7 +57,8 @@ export default async function QaMeetingDetailPage({
         aside={
           <div className="flex flex-wrap gap-2">
             <ScorePill label="Overall score" value={payload.overallScore ?? "--"} tone={toneForScore(payload.overallScore)} />
-            <ScorePill label="Grade" value={qaReview?.overallGrade || "--"} tone="neutral" />
+            {/* Labelled, so an A–F grade is never read as a 17-point QC score. */}
+            <ScorePill label={`${LEGACY_QA_TAG} grade`} value={qaReview?.overallGrade || "--"} tone="neutral" />
             <ScorePill label="Sentiment" value={payload.sentimentScore} tone={toneForScore(payload.sentimentScore)} />
           </div>
         }

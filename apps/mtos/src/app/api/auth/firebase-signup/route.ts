@@ -6,22 +6,34 @@ import { createSessionToken } from "@/src/lib/auth/session-cookie";
 import { getFirebaseAdminAuth, getFirebaseAdminDb } from "@/src/lib/server/firebase/admin";
 import { tenantPath, tenantUserPath } from "@/src/lib/server/firebase/collections";
 import { getServerEnv } from "@/src/lib/server/env";
+import { SIGNUP_ROLE_VALUES, signupCodeEnvVar } from "@/src/lib/contracts/signup-roles";
 
+/**
+ * The roles this route accepts, taken from the one list the form also reads.
+ *
+ * `manager` is no longer offered (owner's decision, 5 November 2026) and is therefore no longer
+ * accepted here either: a role the form cannot show is not a role this route should take from a
+ * hand-written request. Existing manager accounts are untouched -- this is the account-creation
+ * path, not an authorisation check, and nothing here reads or rewrites an account that exists.
+ */
 const requestSchema = z.object({
   idToken: z.string().min(1),
   tenantId: z.string().min(1),
-  role: z.enum(["manager", "tenant_admin"]),
+  role: z.enum(SIGNUP_ROLE_VALUES),
   code: z.string().optional(),
 });
 
+/**
+ * The invite code this role needs, or "" when none is configured.
+ *
+ * "" means ungated, which is the behaviour this route already had: a role whose environment
+ * variable is blank can be chosen by anybody who knows the tenant id. That is unchanged here on
+ * purpose -- tightening it would stop account creation working on a deployment that has never set
+ * these variables, which is a decision for whoever runs the deployment rather than for this patch.
+ */
 function requireCodeForRole(env: ReturnType<typeof getServerEnv>, role: Role) {
-  if (role === "tenant_admin") {
-    return env.adminSignupCode;
-  }
-  if (role === "manager") {
-    return env.managerSignupCode;
-  }
-  return "";
+  const variable = signupCodeEnvVar(role);
+  return variable ? env[variable] : "";
 }
 
 export async function POST(request: Request) {

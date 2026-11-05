@@ -8,6 +8,7 @@ import { getFirebaseAdminDb } from "@/src/lib/server/firebase/admin";
 import { getServerEnv } from "@/src/lib/server/env";
 import { callClaudeForJson, getNowIso, hasAnyLlmProvider, stripUndefinedDeep } from "@/src/lib/server/services/mtos-ai";
 import { getPromptText } from "@/src/lib/server/prompt-store";
+import { legacyQaBlockedReason } from "@/src/lib/contracts/qc-legacy";
 
 export const QA_SCORECARD_CATEGORIES = [
   "Preparation and evidence use",
@@ -75,6 +76,13 @@ export async function generateQaReview(context: TenantContext, touchId: string) 
     throw new Error("Monthly touch not found");
   }
 
+  // A touch cannot carry two grades from two instruments. The screen hides the button; this is
+  // the guarantee, because a hand-written request would otherwise reach straight past the screen.
+  const blocked = legacyQaBlockedReason(touch);
+  if (blocked) {
+    throw new Error(blocked);
+  }
+
   if (!touch.postMeeting?.transcript) {
     throw new Error("Run the post-meeting transcript analysis before generating a QA review");
   }
@@ -120,6 +128,11 @@ export async function recordVictorDecision(
   const touch = await dataSource.getMonthlyTouchById(touchId);
   if (!touch) {
     throw new Error("Monthly touch not found");
+  }
+
+  const decisionBlocked = legacyQaBlockedReason(touch);
+  if (decisionBlocked) {
+    throw new Error(decisionBlocked);
   }
 
   if (!touch.qaReview || touch.qaReview.status !== "pending_victor_approval") {

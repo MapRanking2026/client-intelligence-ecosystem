@@ -38,6 +38,8 @@ import {
   reviewBlockers,
   riskRegisterRequired,
 } from "@/src/lib/contracts/post-meeting-review";
+import Link from "next/link";
+import { LEGACY_QA_TAG, legacyGradeLabel, legacyStatusLabel } from "@/src/lib/contracts/qc-legacy";
 
 const DEPARTMENTS: TicketDepartment[] = ["SEO", "Web Design", "Ads", "Account Manager", "Other"];
 
@@ -260,6 +262,14 @@ interface PostMeetingWorkflowProps {
   touchId: string;
   postMeeting?: PostMeetingReview;
   qaReview?: QaReview;
+  /**
+   * True once this touch has gone to QC.
+   *
+   * It replaces the A–F step below rather than sitting beside it: two grades on one call, from two
+   * instruments, with two different people entitled to argue about them, is worse than either on
+   * its own. The old review stays readable on a touch that already had one.
+   */
+  hasQc?: boolean;
 }
 
 interface TouchActionResponse {
@@ -334,7 +344,7 @@ const ACTION_TYPICAL: Record<string, string> = {
   generate_qa_review: "Usually 1-2 minutes",
 };
 
-export function PostMeetingWorkflow({ touchId, postMeeting, qaReview }: PostMeetingWorkflowProps) {
+export function PostMeetingWorkflow({ touchId, postMeeting, qaReview, hasQc }: PostMeetingWorkflowProps) {
   const [transcript, setTranscript] = useState(postMeeting?.transcript || "");
   const [error, setError] = useState<string | null>(null);
   /** What is still left to decide before the review can be submitted, in the AM's own words. */
@@ -1634,8 +1644,33 @@ export function PostMeetingWorkflow({ touchId, postMeeting, qaReview }: PostMeet
         </>
       ) : null}
 
-      {/* Step 3: QA / Victor gate */}
-      {decisionsApplied ? (
+      {/* Step 4: QA. The old A–F gate, or a pointer to QC on a touch that went there instead. */}
+      {decisionsApplied && hasQc ? (
+        <div className="rounded-[24px] border border-white/8 bg-black/20 p-5">
+          <div className="flex items-center gap-2">
+            <ShieldCheck className="h-4 w-4 text-[#d7f5ec]" />
+            <p className="card-title">Step 4 -- QC</p>
+          </div>
+          <p className="mt-3 text-sm leading-6 text-slate-300">
+            This touch is scored by QC against the 17-point rubric. There is no A&ndash;F grade to
+            generate and no approval to give here &mdash; the score, what went well and the
+            coaching plan arrive on the account manager&apos;s QA &amp; Coaching page.
+          </p>
+          <Link
+            href="/qa"
+            className="mt-3 inline-flex items-center gap-2 text-sm font-medium text-[#d7f5ec] hover:underline"
+          >
+            Open QA &amp; Coaching
+          </Link>
+          {qaReview ? (
+            <p className="mt-3 text-xs leading-5 text-slate-400">
+              {LEGACY_QA_TAG}: this touch also has an older A&ndash;F review
+              ({legacyGradeLabel(qaReview)}, {legacyStatusLabel(qaReview).toLowerCase()}). It is kept
+              as it was and is not part of the QC score.
+            </p>
+          ) : null}
+        </div>
+      ) : decisionsApplied ? (
         <div className="rounded-[24px] border border-white/8 bg-black/20 p-5">
           <div className="flex items-center gap-2">
             <ShieldCheck className="h-4 w-4 text-[#d7f5ec]" />
@@ -1643,6 +1678,7 @@ export function PostMeetingWorkflow({ touchId, postMeeting, qaReview }: PostMeet
               Step 4 -- QA review and Victor approval
             </p>
           </div>
+          <p className="mt-1 text-xs uppercase tracking-[0.2em] text-slate-500">{LEGACY_QA_TAG}</p>
 
           {!qaReview || qaReview.status === "not_started" ? (
             <button

@@ -45,6 +45,7 @@ import {
 } from "@/src/lib/contracts/touch-progress";
 import { EMPTY_PREP_BRIEF, approvalSummary } from "@/src/lib/contracts/prep-brief";
 import { mergeQcIntoBrief } from "@/src/lib/contracts/qc-coaching";
+import { LEGACY_QA_EXPLAINER, LEGACY_QA_TAG, legacyGradeLabel } from "@/src/lib/contracts/qc-legacy";
 import { getLatestQcCoaching } from "@/src/lib/server/services/qc-am-service";
 import { deriveBriefCharts } from "@/src/lib/contracts/brief-charts";
 import { AgendaApprovalPanel } from "@/src/components/mtos/agenda-approval-panel";
@@ -610,14 +611,23 @@ export default async function MonthlyTouchRunSheetPage({
         <div className="card mt-4">
           <div className="card-head">
             <div className="card-title">QA and coaching</div>
-            <span className={`chip ${touch.qaReview ? "info" : "muted"}`}>
-              {touch.qaReview ? "Review available" : "No review yet"}
-            </span>
+            {/* Which instrument graded this touch, said on the chip rather than left to be guessed. */}
+            {touch.qc ? (
+              <span className="chip qc">QC · 17-point</span>
+            ) : (
+              <span className={`chip ${touch.qaReview ? "info" : "muted"}`}>
+                {touch.qaReview ? `${LEGACY_QA_TAG} · ${legacyGradeLabel(touch.qaReview)}` : "No review yet"}
+              </span>
+            )}
           </div>
           <p className="text-[0.88rem] leading-7" style={{ color: "var(--text-2)" }}>
-            The QA review reads the preparation and the post-meeting notes and scores the touch, and the approval is
-            recorded against this touch.
+            {touch.qc
+              ? "This touch is scored by QC against the 17-point rubric. The score, what went well and the coaching plan are on the account manager's QA & Coaching page."
+              : "The QA review reads the preparation and the post-meeting notes and scores the touch, and the approval is recorded against this touch."}
           </p>
+          {touch.qc && touch.qaReview ? (
+            <p className="muted mt-2 text-[0.8rem] leading-6">{LEGACY_QA_EXPLAINER}</p>
+          ) : null}
           <div className="mt-4 flex flex-wrap gap-2.5">
             <Link href={`/qa/${client.id}/${touch.id}`} className="btn btn-primary">
               <ClipboardCheck />

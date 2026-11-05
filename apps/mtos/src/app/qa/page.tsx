@@ -33,6 +33,7 @@ import {
 } from "@/src/lib/contracts/qc-am";
 import { appealCandidates, canAppeal } from "@/src/lib/contracts/qc-appeal-draft";
 import { callLengthLabel } from "@/src/lib/contracts/qc-queue";
+import { LEGACY_QA_EXPLAINER, LEGACY_QA_TAG } from "@/src/lib/contracts/qc-legacy";
 import { getQaClientIndexView } from "@/src/lib/server/services/qa-service";
 import { getQcAmView } from "@/src/lib/server/services/qc-am-service";
 import { getQcIndexRow, getQcQueueView } from "@/src/lib/server/services/qc-queue-service";
@@ -120,6 +121,7 @@ export default async function QaPage({
     decided?: string;
     touch?: string;
     mine?: string;
+    legacy?: string;
   }>;
 }) {
   const context = await resolveTenantContext();
@@ -241,7 +243,15 @@ export default async function QaPage({
   const me = await getAccountManagerIdentity(context).catch(() => ({ name: "" }));
   const reviewerName = am?.reviewerName || "QC";
 
-  if (am?.done.length || am?.pending.length) {
+  /*
+    `?legacy=1` keeps the earlier A–F reviews reachable (handoff §6.10).
+
+    Without it they were not: once an account manager had a single QC record this page stopped
+    rendering the client index below, which is the only screen those reviews can be read from. The
+    link to here sits on the QC page itself, so the old reviews are one click away rather than
+    gone.
+  */
+  if ((am?.done.length || am?.pending.length) && !params.legacy) {
     const { done, pending, selected } = am;
     const selectedId = selected?.row.touchId;
     const coachingSource = selected?.qc.coaching?.some((item) => item.idea.trim())
@@ -255,11 +265,16 @@ export default async function QaPage({
 
     return (
       <AppShell>
-        {backToQueue ? (
-          <Link href="/qa" className="ilink mb-4 inline-block text-[0.8rem]">
-            ← QC queue
+        <div className="mb-4 flex flex-wrap items-center gap-4">
+          {backToQueue ? (
+            <Link href="/qa" className="ilink text-[0.8rem]">
+              ← QC queue
+            </Link>
+          ) : null}
+          <Link href="/qa?legacy=1" className="ilink text-[0.8rem]">
+            Earlier A–F reviews →
           </Link>
-        ) : null}
+        </div>
         <QcAmCoaching
           amName={me.name}
           reviewerName={reviewerName}
@@ -348,11 +363,20 @@ export default async function QaPage({
             <ClipboardCheck />
             <span>QA &amp; Coaching{me.name ? ` · ${me.name}` : ""}</span>
           </div>
-          <h2 className="h2 mt-2">No QC scores yet.</h2>
+          <h2 className="h2 mt-2">
+            {params.legacy ? "Earlier A–F reviews" : "No QC scores yet."}
+          </h2>
           <p className="muted mt-2 max-w-[62ch] text-[0.86rem] leading-6">
-            Your first score appears here after {reviewerName} grades a finished monthly touch. The
-            reviews below are the earlier A&ndash;F ones, which stay readable.
+            {params.legacy ? LEGACY_QA_EXPLAINER : null}{" "}
+            {params.legacy
+              ? null
+              : `Your first score appears here after ${reviewerName} grades a finished monthly touch. The reviews below are the earlier A–F ones, which stay readable.`}
           </p>
+          {params.legacy ? (
+            <Link href="/qa" className="ilink mt-3 inline-block text-[0.8rem]">
+              ← Back to QA &amp; Coaching
+            </Link>
+          ) : null}
         </div>
       </div>
 
@@ -386,7 +410,7 @@ export default async function QaPage({
                   <Mini label="Avg QA" value={item.averageQaScore ?? "—"} tone={scoreTone(item.averageQaScore)} />
                   <Mini label="Sentiment" value={item.averageSentimentScore ?? "—"} tone={scoreTone(item.averageSentimentScore)} />
                   <Mini label="Meetings" value={item.meetingsRecorded} />
-                  <Mini label="Grade" value={item.latestGrade} />
+                  <Mini label={`${LEGACY_QA_TAG} grade`} value={item.latestGrade} />
                 </div>
 
                 <p className="mt-4 text-[0.86rem] leading-6" style={{ color: "var(--text-2)" }}>

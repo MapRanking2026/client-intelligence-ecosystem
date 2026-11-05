@@ -44,7 +44,12 @@ export default async function MonthlyTouchSummaryPage({
         title="Transcript to execution"
         subtitle="Every draft below is generated only from what's actually in the transcript. Nothing is created in ClickUp or sent to the client until you approve it here."
       >
-        <PostMeetingWorkflow touchId={touch.id} postMeeting={touch.postMeeting} qaReview={touch.qaReview} />
+        <PostMeetingWorkflow
+          touchId={touch.id}
+          postMeeting={touch.postMeeting}
+          qaReview={touch.qaReview}
+          hasQc={Boolean(touch.qc)}
+        />
       </SectionCard>
 
       <SectionCard eyebrow="Next step" title="Continue the workflow" subtitle="Move to the next piece of the client relationship once follow-through is filed.">

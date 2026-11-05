@@ -7,6 +7,8 @@ import { Suspense, useState, useTransition } from "react";
 
 import { getFirebaseClientAuth } from "@/src/lib/firebase/client";
 import { BrandWordmark } from "@/src/components/mtos/brand-wordmark";
+import type { Role } from "@/src/lib/contracts/mtos";
+import { SIGNUP_ROLES } from "@/src/lib/contracts/signup-roles";
 
 function getSafeNextPath(nextPath: string | null) {
   if (!nextPath || !nextPath.startsWith("/") || nextPath.startsWith("//")) {
@@ -16,7 +18,15 @@ function getSafeNextPath(nextPath: string | null) {
   return nextPath;
 }
 
-type SignupRole = "manager" | "tenant_admin";
+/**
+ * The role options come from `signup-roles.ts`, which the sign-up route reads too.
+ *
+ * Before, the form listed two options and the route's schema listed the same two separately, so the
+ * two descriptions of one privilege boundary could drift. The default is the first option --
+ * Account Manager -- because that is what almost everybody signing up is, and a form that opens on
+ * the most powerful role invites a careless click.
+ */
+const DEFAULT_ROLE: Role = SIGNUP_ROLES[0].role;
 
 function SignUpContent() {
   const router = useRouter();
@@ -26,7 +36,7 @@ function SignUpContent() {
 
   const [isPending, startTransition] = useTransition();
   const [tenantId, setTenantId] = useState("");
-  const [role, setRole] = useState<SignupRole>("manager");
+  const [role, setRole] = useState<Role>(DEFAULT_ROLE);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [code, setCode] = useState("");
@@ -43,7 +53,8 @@ function SignUpContent() {
             </p>
             <h2 className="text-[35px] font-bold tracking-tight text-white">Create Account</h2>
             <p className="text-sm text-slate-400">
-              Create a Manager or Admin account for your organization.
+              Create an account for your organization. Pick the role you actually do — it decides
+              which screens you get.
             </p>
           </div>
 
@@ -111,12 +122,19 @@ function SignUpContent() {
               <label className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Role</label>
               <select
                 value={role}
-                onChange={(event) => setRole(event.target.value as SignupRole)}
+                onChange={(event) => setRole(event.target.value as Role)}
                 className="w-full rounded-2xl border border-white/10 bg-black/25 px-4 py-3 text-sm text-white outline-none focus:border-white/20"
               >
-                <option value="manager">Manager</option>
-                <option value="tenant_admin">Admin</option>
+                {SIGNUP_ROLES.map((option) => (
+                  <option key={option.role} value={option.role}>
+                    {option.label}
+                  </option>
+                ))}
               </select>
+              {/* What the chosen role actually gets, so nobody picks one by guessing at its name. */}
+              <p className="text-xs leading-5 text-slate-400">
+                {SIGNUP_ROLES.find((option) => option.role === role)?.hint}
+              </p>
             </div>
 
             <div className="space-y-2">

@@ -42,6 +42,7 @@
     "report:integrations": "tsx scripts/integration-readiness.ts",
     "verify:v5": "tsx scripts/verify-v5-routes.ts",
     "verify:qc": "tsx scripts/verify-qc-queue.ts",
+    "qc:reviewer": "tsx scripts/set-qc-reviewer.ts",
     "check:qc-rubric": "tsx scripts/check-qc-rubric.ts",
     "check:qc-record": "tsx scripts/check-qc-record.ts",
     "check:qc-access": "tsx scripts/check-qc-access.ts",

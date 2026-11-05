@@ -41,9 +41,13 @@
     "run:notifications": "tsx scripts/run-notifications.ts",
     "report:integrations": "tsx scripts/integration-readiness.ts",
     "verify:v5": "tsx scripts/verify-v5-routes.ts",
+    "verify:qc": "tsx scripts/verify-qc-queue.ts",
     "check:qc-rubric": "tsx scripts/check-qc-rubric.ts",
     "check:qc-record": "tsx scripts/check-qc-record.ts",
-    "check:qc-access": "tsx scripts/check-qc-access.ts"
+    "check:qc-access": "tsx scripts/check-qc-access.ts",
+    "check:qc-queue": "tsx scripts/check-qc-queue.ts",
+    "check:qc-team": "tsx scripts/check-qc-team.ts",
+    "check:qc-submit": "tsx scripts/check-qc-submit.ts"
   },
   "dependencies": {
     "@cie/engine": "*",

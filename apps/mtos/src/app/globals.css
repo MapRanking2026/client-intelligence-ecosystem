@@ -37,7 +37,7 @@
   --watch: #b7791f; --watch-bg: #fbf1de;
   --risk: #d64545;  --risk-bg: #fbe9e9;
   --info: #2f6feb;  --info-bg: #e7effd;
-  --violet: #6d5ae0;
+  --violet: #6d5ae0; --violet-bg: #efecfb;
 
   --teal-200: #7fd6c6; --teal-400: #0d9488; --teal-500: #0f766e;
   --ink-900: #0b1220;
@@ -75,6 +75,7 @@
   --watch: #f0b429; --watch-bg: #2b2410;
   --risk: #f87171; --risk-bg: #2c1616;
   --info: #6aa1ff; --info-bg: #131f34;
+  --violet: #8b7bf0; --violet-bg: #1e1b33;
   --teal-200: #7fe6d3; --teal-400: #16c19a; --teal-500: #12a082;
   --ink-900: #05221c;
   --sh-sm: 0 1px 2px rgba(0,0,0,0.4);
@@ -223,6 +224,7 @@ a { color: inherit; text-decoration: none; }
 .chip.watch { color: var(--watch); background: var(--watch-bg); border-color: transparent; }
 .chip.risk { color: var(--risk); background: var(--risk-bg); border-color: transparent; }
 .chip.info { color: var(--info); background: var(--info-bg); border-color: transparent; }
+.chip.qc { color: var(--violet); background: var(--violet-bg); border-color: transparent; }
 .sig-dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
 .sig-dot.good { background: var(--good); } .sig-dot.watch { background: var(--watch); } .sig-dot.risk { background: var(--risk); }
 /* "muted" marks a client whose health has never been assessed -- a neutral absence, not a verdict. */

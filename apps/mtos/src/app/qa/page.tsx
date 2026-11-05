@@ -5,8 +5,20 @@ import { AppShell } from "@/src/components/mtos/app-shell";
 import { DataError } from "@/src/components/mtos/data-error";
 import { Linkified } from "@/src/components/mtos/annotate";
 import { ClientHint } from "@/src/components/mtos/client-hint";
+import { QcAppealReview } from "@/src/components/mtos/qc-appeal-review";
+import { QcQueue } from "@/src/components/mtos/qc-queue";
+import { QcScoring } from "@/src/components/mtos/qc-scoring";
 import { resolveTenantContext } from "@/src/lib/auth/resolve-tenant-context";
+import {
+  QC_SPECIALIST_TITLE,
+  canOpenQcQueue,
+  canReadQcRecord,
+  canScoreQc,
+} from "@/src/lib/contracts/qc-access";
 import { getQaClientIndexView } from "@/src/lib/server/services/qa-service";
+import { getQcIndexRow, getQcQueueView } from "@/src/lib/server/services/qc-queue-service";
+import { getQcScoringView } from "@/src/lib/server/services/qc-review-service";
+import { getAccountManagerIdentity } from "@/src/lib/server/services/user-service";
 
 /**
  * Rendered per request, never prerendered.
@@ -19,6 +31,16 @@ import { getQaClientIndexView } from "@/src/lib/server/services/qa-service";
  * that secret nothing marks the route dynamic and it is prerendered.
  */
 export const dynamic = "force-dynamic";
+
+/**
+ * `/qa` is two different screens behind one path, chosen by role.
+ *
+ * A QC reviewer, an admin or a manager gets the QC queue; everyone else gets the client index that
+ * was here before. One path rather than two because the sidebar has one "QA & Coaching" link and
+ * the role already decides what that means -- and because the notifications raised in the previous
+ * phase link to `/qa?qc={touchId}`, which has to open the scoring screen for the person who was
+ * notified. The AM's own QA & Coaching page replaces the index below in the next phase.
+ */
 
 function riskTone(risk: "Low" | "Moderate" | "High"): "good" | "watch" | "risk" {
   if (risk === "Low") return "good";
@@ -46,10 +68,135 @@ function Mini({ label, value, tone }: { label: string; value: string | number; t
   );
 }
 
-export default async function QaPage() {
+/** The green banner after a submit or a decision, built from the stored record rather than a URL. */
+async function flashFor(
+  context: Awaited<ReturnType<typeof resolveTenantContext>>,
+  scored: string | undefined,
+  decided: string | undefined,
+): Promise<string | undefined> {
+  const touchId = scored || decided;
+  if (!touchId) return undefined;
+  const row = await getQcIndexRow(context, touchId).catch(() => undefined);
+  if (!row) return undefined;
+  const who = row.am || "the account manager";
+  if (scored) {
+    const score =
+      typeof row.score === "number"
+        ? `${row.score}${row.rating ? ` (${row.rating})` : ""}`
+        : "no criterion applied";
+    return `Score sent to ${who} — ${row.client} · ${score}. They've been notified.`;
+  }
+  return `Decision sent to ${who} — ${row.client} · ${
+    typeof row.score === "number" ? `score ${row.score}` : "score unchanged"
+  }. They've been notified.`;
+}
+
+export default async function QaPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ qc?: string; appeal?: string; scored?: string; decided?: string }>;
+}) {
+  const context = await resolveTenantContext();
+  const params = await searchParams;
+
+  if (canOpenQcQueue(context.role)) {
+    const touchId = params.qc || params.appeal;
+
+    if (touchId) {
+      // The index row first: it is small, and it is what says whose touch this is. Permission is
+      // decided on it before the touch document is opened at all.
+      const row = await getQcIndexRow(context, touchId).catch(() => undefined);
+      if (!row || !canReadQcRecord(context.role, context.userId, row.amId)) {
+        return (
+          <AppShell>
+            <Link href="/qa" className="ilink text-[0.8rem]">
+              QC queue
+            </Link>
+            <div className="card mt-4">
+              <p className="muted text-[0.86rem]">
+                That touch is not in the QC queue, or you do not have access to it.
+              </p>
+            </div>
+          </AppShell>
+        );
+      }
+
+      const view = await getQcScoringView(context, touchId, row).catch(() => undefined);
+      if (!view) {
+        return (
+          <AppShell>
+            <DataError title="Couldn't load that QC record" />
+          </AppShell>
+        );
+      }
+
+      const shared = {
+        touchId,
+        qc: view.qc,
+        client: view.client?.name || row.client,
+        amName: row.am || "",
+        amFirstName: view.amFirstName,
+        canScore: canScoreQc(context.role),
+        ...(view.touch.scheduledAt ? { scheduledAt: view.touch.scheduledAt } : {}),
+      };
+
+      return (
+        <AppShell>
+          {params.appeal ? (
+            <QcAppealReview {...shared} />
+          ) : (
+            <QcScoring
+              {...shared}
+              sources={view.sources}
+              {...(typeof view.qc.callLengthMin === "number"
+                ? { callLengthMin: view.qc.callLengthMin }
+                : {})}
+            />
+          )}
+        </AppShell>
+      );
+    }
+
+    let view: Awaited<ReturnType<typeof getQcQueueView>>;
+    try {
+      view = await getQcQueueView(context);
+    } catch {
+      return (
+        <AppShell>
+          <DataError title="Couldn't load the QC queue" />
+        </AppShell>
+      );
+    }
+
+    const me = await getAccountManagerIdentity(context).catch(() => ({ name: "" }));
+    const title = me.name
+      ? `QC queue · ${me.name}, ${QC_SPECIALIST_TITLE}`
+      : `QC queue · ${QC_SPECIALIST_TITLE}`;
+    const flash = await flashFor(context, params.scored, params.decided);
+
+    return (
+      <AppShell>
+        <QcQueue
+          reviewerTitle={title}
+          counts={view.counts}
+          queue={view.queue}
+          appeals={view.appeals}
+          scored={view.scored}
+          team={view.team}
+          {...(view.reviewerName ? { reviewerName: view.reviewerName } : {})}
+          {...(flash ? { flash } : {})}
+        />
+      </AppShell>
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // The AM's view, unchanged. Replaced by the QA & Coaching page in the next phase.
+  // ---------------------------------------------------------------------------
+
   let cards: Awaited<ReturnType<typeof getQaClientIndexView>>["cards"];
   try {
-    ({ cards } = await getQaClientIndexView(await resolveTenantContext()));
+    ({ cards } = await getQaClientIndexView(context));
   } catch {
     return (
       <AppShell>
@@ -64,7 +211,7 @@ export default async function QaPage() {
         <div>
           <div className="eyebrow muted">
             <ClipboardCheck />
-            <span>Quality & coaching · consistency across every AM</span>
+            <span>Quality &amp; coaching · consistency across every AM</span>
           </div>
           <h2 className="h2 mt-2">QA &amp; Coaching</h2>
         </div>

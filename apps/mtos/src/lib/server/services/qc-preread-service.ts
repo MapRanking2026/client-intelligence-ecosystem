@@ -14,7 +14,7 @@ import type { MonthlyTouchRecord } from "@/src/lib/mtos-data";
 import { getMtosDataSource } from "@/src/lib/server/data/seed-mtos-data-source";
 import { getServerEnv } from "@/src/lib/server/env";
 import { getFirebaseAdminDb } from "@/src/lib/server/firebase/admin";
-import { monthlyTouchPath } from "@/src/lib/server/firebase/collections";
+import { monthlyTouchPath, qcItemPath } from "@/src/lib/server/firebase/collections";
 import { callLlmForJson, getNowIso, hasAnyLlmProvider } from "@/src/lib/server/services/mtos-ai";
 import { readTouchTranscriptPayload } from "@/src/lib/server/services/transcript-watch-service";
 
@@ -253,6 +253,10 @@ export async function generateQcPreread(
     const current = snapshot.data() as Partial<MonthlyTouchRecord> | undefined;
     if (!current?.qc || current.qc.ai || current.qc.score !== undefined) return;
     tx.set(ref, { qc: { ...current.qc, ai } }, { mergeFields: ["qc"] });
+    // The queue row says "AI pre-read ready" or "Manual" from the index, never by opening the
+    // touch. Written in the same transaction as the pre-read so the chip cannot claim a pre-read
+    // that is not there. `merge` rather than `set`: the row already exists, written at handoff.
+    tx.set(db.doc(qcItemPath(context.tenantId, touchId)), { ai: true }, { merge: true });
   });
 
   return { status: "written", ai };

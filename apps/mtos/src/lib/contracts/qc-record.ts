@@ -200,6 +200,52 @@ export interface QcIndexRow {
   date?: string;
   score?: number;
   readyAt: string;
+
+  /**
+   * The AM's display name, denormalised for the same reason `client` is.
+   *
+   * Optional because rows written before this field existed do not have it, and a queue that
+   * crashed on one of those would hide every row behind it. A row without it falls back to a
+   * deduplicated user lookup, which costs one read per distinct AM rather than one per row.
+   */
+  am?: string;
+
+  /**
+   * What a submitted score copied here, so the Scored tab and the Team cards never open a touch.
+   *
+   * `crit` is the whole 17 -- a hundred bytes or so against a touch document's hundreds of
+   * kilobytes. Without it the Team tab's per-criterion averages and its "Lowest" line would mean
+   * reading every scored touch in the tenant every time an admin opened the page, which is the
+   * exact shape of read that failed the deploys of 2026-11-02. These are copies; the touch stays
+   * the source of truth, and they are written in the same transaction as it.
+   */
+  rating?: QcRating;
+  scoredAt?: string;
+  crit?: QcScoreValue[];
+  goal?: QcGoal;
+
+  /**
+   * The chips on a queue row, copied here for the same reason as everything else above.
+   *
+   * A queue row shows the ticket count, "{ok} of {total} follow-through checks", the call length
+   * and whether a pre-read is ready. All four live on the touch, and reading twenty touches to
+   * draw twenty rows is the read pattern this collection exists to avoid. `evidenceTotal` is
+   * stored rather than assumed to be eight: the checklist's length is the checklist's business.
+   */
+  tickets?: number;
+  evidenceOk?: number;
+  evidenceTotal?: number;
+  callLengthMin?: number;
+  /** Whether the AI pre-read landed. Written by the pre-read itself, which finishes later. */
+  ai?: boolean;
+  /**
+   * How many criteria an appeal covers, for the Appeals row's "{n} criteria".
+   *
+   * Written when the AM submits the appeal, which is the AM's own screen -- so until that ships
+   * this is absent and the row simply does not claim a count. An appeal row that said "0 criteria"
+   * would be describing an appeal that could not exist.
+   */
+  appealCount?: number;
 }
 
 // ---------------------------------------------------------------------------

@@ -96,14 +96,28 @@ export async function handTouchToQc(
     callLengthMin: callLengthMinutes(touch.live?.callStartedAt, touch.live?.callEndedAt),
   });
 
+  // Read before the transaction, not after, so the index row carries the AM's name from the moment
+  // it exists. One extra document read on a press of Finish -- which already does dozens of writes
+  // -- against one read per *queue row* forever afterwards if the queue had to resolve names itself.
+  const amName =
+    (await getAccountManagerIdentity(context).catch(() => ({ name: "" }))).name ||
+    "An account manager";
+
   const indexRow: QcIndexRow = {
     touchId: touch.id,
     status: "ready",
     amId: context.userId,
     clientId: client.id,
     client: client.name,
+    // Denormalised for the same reason `client` is: see the field's note on `QcIndexRow`.
+    am: amName,
     ...(touch.scheduledAt ? { date: touch.scheduledAt } : {}),
     readyAt: at,
+    // The queue row's chips, taken from the record just built so the two cannot disagree.
+    tickets: record.tickets,
+    evidenceOk: record.evidence.filter((row) => row.ok).length,
+    evidenceTotal: record.evidence.length,
+    ...(typeof record.callLengthMin === "number" ? { callLengthMin: record.callLengthMin } : {}),
   };
 
   const touchRef = db.doc(monthlyTouchPath(context.tenantId, touch.id));
@@ -152,7 +166,6 @@ export async function handTouchToQc(
     };
   }
 
-  const amName = (await getAccountManagerIdentity(context).catch(() => ({ name: "" }))).name || "An account manager";
   const notified: string[] = [];
   for (const userId of reviewers.userIds) {
     const result = await raiseNotificationForUser(

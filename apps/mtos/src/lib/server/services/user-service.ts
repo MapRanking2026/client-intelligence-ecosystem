@@ -76,6 +76,58 @@ export async function getAccountManagerIdentity(
 }
 
 /**
+ * Display names for other people in the tenant, keyed by user id.
+ *
+ * The QC queue needs them: an index row carries `amId`, and "{AM} · Monthly Touch · {date}" needs
+ * the name behind it. Ids are deduplicated before any read, so a queue of twenty touches across
+ * four AMs costs four reads rather than twenty -- the whole reason the QC index exists is to keep
+ * a list page's read count proportional to the people in it, not the rows.
+ *
+ * Never throws, and never partially fails loudly: a name that cannot be read is simply absent from
+ * the map, and the caller shows the row without it. A queue that 500s because one user document is
+ * missing would hide every touch waiting to be scored.
+ */
+export async function getUserDisplayNames(
+  tenantId: string,
+  userIds: readonly string[],
+): Promise<Record<string, string>> {
+  const db = getFirebaseAdminDb();
+  const unique = [...new Set(userIds.filter(Boolean))];
+  if (!db || !unique.length) {
+    return {};
+  }
+
+  const entries = await Promise.all(
+    unique.map(async (userId) => {
+      try {
+        const snapshot = await db.doc(tenantUserPath(tenantId, userId)).get();
+        if (!snapshot.exists) return [userId, ""] as const;
+        const data = snapshot.data() as
+          | { email?: string; displayName?: string; name?: string }
+          | undefined;
+        const preferences = normalizePreferences(
+          (data as Record<string, unknown> | undefined)?.[PREFERENCES_FIELD],
+        );
+        const name =
+          preferences.displayName?.trim() ||
+          data?.displayName?.trim() ||
+          data?.name?.trim() ||
+          toFirstName(data?.email);
+        return [userId, name] as const;
+      } catch {
+        return [userId, ""] as const;
+      }
+    }),
+  );
+
+  const out: Record<string, string> = {};
+  for (const [userId, name] of entries) {
+    if (name) out[userId] = name;
+  }
+  return out;
+}
+
+/**
  * The AM's own time zone, used for every deadline and wall-clock label shown to them.
  *
  * Pacific is the fallback rather than the server's zone: the team works Pacific hours, and a

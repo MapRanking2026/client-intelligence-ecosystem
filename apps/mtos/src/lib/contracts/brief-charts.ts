@@ -350,21 +350,61 @@ function winCharts(seo: SeoPerformancePack | undefined): BriefChart[] {
  *
  * Calls answered against calls missed is the one an owner can act on the same afternoon, and it is
  * the number most likely to contradict a complaint that the leads are bad.
+ *
+ * ## Every step has to cover the same period
+ *
+ * The scorecard's metrics each carry their own reporting window, and they are not all the same one:
+ * leads are usually "Last 30 days" while the CRM reports opportunities and won jobs "All time".
+ * Put those in one funnel and it draws a month of leads narrowing into years of pipeline -- a real
+ * client's brief showed 81 leads above 2,534 "qualified", which is not a funnel, it is a mistake
+ * an owner would spot from across the room. So the steps are filtered to the first one's period
+ * and anything on a different clock is left out, even though its figure is perfectly good in the
+ * card set above, where it is labelled with its own window.
+ *
+ * ## And a funnel cannot widen
+ *
+ * After the period filter, the three narrowing stages are checked: each must be no larger than the
+ * one before it. If they are not, the data is telling us something we do not understand, and the
+ * whole chart is dropped rather than drawn wrong. `Calls missed` is exempt because it is not a
+ * stage of the funnel -- it is the risk figure sitting beside it, and it can legitimately exceed
+ * the jobs booked.
  */
 function issueCharts(scorecard: BusinessScorecard | undefined): BriefChart[] {
   if (!scorecard) return [];
-  const rows = nonEmpty<ChartFunnelRow>([
-    readable(scorecard.totalLeads) ? { label: "Leads", value: scorecard.totalLeads.value, tone: "info" } : undefined,
-    readable(scorecard.qualifiedLeads)
-      ? { label: "Qualified", value: scorecard.qualifiedLeads.value, tone: "info" }
+
+  /** A step, with the window its figure covers, so mismatched windows can be dropped. */
+  interface FunnelCandidate extends ChartFunnelRow {
+    period: string;
+    /** True for the narrowing stages. `Calls missed` is not one. */
+    stage: boolean;
+  }
+
+  const candidates = nonEmpty<FunnelCandidate>([
+    readable(scorecard.totalLeads)
+      ? { label: "Leads", value: scorecard.totalLeads.value, tone: "info", period: scorecard.totalLeads.period || "", stage: true }
       : undefined,
-    readable(scorecard.bookedJobs) ? { label: "Booked", value: scorecard.bookedJobs.value, tone: "teal" } : undefined,
+    readable(scorecard.qualifiedLeads)
+      ? { label: "Qualified", value: scorecard.qualifiedLeads.value, tone: "info", period: scorecard.qualifiedLeads.period || "", stage: true }
+      : undefined,
+    readable(scorecard.bookedJobs)
+      ? { label: "Booked", value: scorecard.bookedJobs.value, tone: "teal", period: scorecard.bookedJobs.period || "", stage: true }
+      : undefined,
     readable(scorecard.callsMissed)
-      ? { label: "Calls missed", value: scorecard.callsMissed.value, tone: "risk" }
+      ? { label: "Calls missed", value: scorecard.callsMissed.value, tone: "risk", period: scorecard.callsMissed.period || "", stage: false }
       : undefined,
   ]);
+  if (!candidates.length) return [];
+
+  // The first readable step sets the clock; everything else has to be on it.
+  const period = candidates[0].period;
+  const sameWindow = candidates.filter((candidate) => candidate.period === period);
+
   // Two steps is not a funnel, it is a comparison, and drawing it as one overstates the finding.
-  if (rows.length < 3) return [];
+  if (sameWindow.length < 3) return [];
+
+  const stages = sameWindow.filter((candidate) => candidate.stage).map((candidate) => candidate.value);
+  if (stages.some((value, index) => index > 0 && value > stages[index - 1])) return [];
+
   return [
     {
       id: "chart-funnel",
@@ -372,9 +412,9 @@ function issueCharts(scorecard: BusinessScorecard | undefined): BriefChart[] {
       at: 0,
       kind: "funnel",
       title: "Where the month's demand went",
-      period: scorecard.totalLeads.period || "",
+      period,
       chips: [unlinkedChip("ghl", "Lead records"), unlinkedChip("mtos", "Business scorecard")],
-      funnel: rows,
+      funnel: sameWindow.map(({ label, value, tone }) => ({ label, value, tone })),
     },
   ];
 }

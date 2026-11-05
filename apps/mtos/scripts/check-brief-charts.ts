@@ -58,13 +58,16 @@ function metric(
 
 function scorecard(overrides: Partial<BusinessScorecard> = {}): BusinessScorecard {
   return {
+    // Every funnel metric carries the same window. The fixture used to give the period to
+    // `totalLeads` alone, which is why the mixed-window funnel below reached a real client's brief
+    // before anybody noticed: the test could not tell the difference.
     totalLeads: metric("Total leads", 40, 30, { period: "Last 30 days" }),
-    qualifiedLeads: metric("Qualified leads", 24, 20),
-    costPerLead: metric("Cost per lead", 69, 74, { unit: "currency" }),
-    callsAnswered: metric("Calls answered", 52, 50),
-    callsMissed: metric("Calls missed", 6, 11),
-    formSubmissions: metric("Form submissions", 7, 19),
-    bookedJobs: metric("Booked jobs", 17, 15),
+    qualifiedLeads: metric("Qualified leads", 24, 20, { period: "Last 30 days" }),
+    costPerLead: metric("Cost per lead", 69, 74, { unit: "currency", period: "Last 30 days" }),
+    callsAnswered: metric("Calls answered", 52, 50, { period: "Last 30 days" }),
+    callsMissed: metric("Calls missed", 6, 11, { period: "Last 30 days" }),
+    formSubmissions: metric("Form submissions", 7, 19, { period: "Last 30 days" }),
+    bookedJobs: metric("Booked jobs", 17, 15, { period: "Last 30 days" }),
     shareOfLocalVoice: metric("Share of local voice", 31, 28, { unit: "percent" }),
     top3Coverage: metric("Top 3 coverage", 44, 40, { unit: "percent" }),
     mapCheckIns: metric("Map check-ins", 18, 12),
@@ -198,6 +201,69 @@ check("two readable steps is not drawn as a funnel", find(twoSteps, "chart-funne
 const funnel = find(deriveBriefCharts(pack()), "chart-funnel");
 check("four readable steps is", (funnel?.funnel?.length || 0) === 4);
 check("missed calls carry the risk tone inside the funnel", funnel?.funnel?.at(-1)?.tone === "risk");
+check("the funnel states the window all its steps share", funnel?.period === "Last 30 days");
+
+// A funnel whose steps are on different clocks. Found on a real client's brief: 81 leads in the
+// last 30 days sitting above 2,534 "qualified" opportunities counted since the account opened.
+// That is not a narrowing funnel, it is two unrelated figures stacked, and an owner spots it
+// instantly. The mismatched steps are dropped; the figures are still correct in the card set
+// above, where each is labelled with its own window.
+const mixedWindows = deriveBriefCharts(
+  pack({
+    businessScorecard: scorecard({
+      totalLeads: metric("Total leads", 81, null, { period: "Last 30 days" }),
+      qualifiedLeads: metric("Qualified leads", 2534, null, { period: "All time" }),
+      bookedJobs: metric("Booked jobs", 8, null, { period: "All time" }),
+      callsMissed: metric("Calls missed", null),
+    }),
+  }),
+);
+check("steps from different periods are not drawn as one funnel", find(mixedWindows, "chart-funnel") === undefined);
+
+// Three steps that do share a window, but widen. Something is wrong with the data and we do not
+// know what, so the chart goes rather than being drawn backwards.
+const widening = deriveBriefCharts(
+  pack({
+    businessScorecard: scorecard({
+      totalLeads: metric("Total leads", 20, null, { period: "Last 30 days" }),
+      qualifiedLeads: metric("Qualified leads", 900, null, { period: "Last 30 days" }),
+      bookedJobs: metric("Booked jobs", 4, null, { period: "Last 30 days" }),
+    }),
+  }),
+);
+check("a funnel that widens is not drawn at all", find(widening, "chart-funnel") === undefined);
+
+// Equal stages are legitimate -- every lead qualified, every one booked -- and must still draw.
+const flatFunnel = deriveBriefCharts(
+  pack({
+    businessScorecard: scorecard({
+      totalLeads: metric("Total leads", 10, null, { period: "Last 30 days" }),
+      qualifiedLeads: metric("Qualified leads", 10, null, { period: "Last 30 days" }),
+      bookedJobs: metric("Booked jobs", 10, null, { period: "Last 30 days" }),
+    }),
+  }),
+);
+check("a funnel where nothing drops off still draws", find(flatFunnel, "chart-funnel") !== undefined);
+
+// Missed calls is not a stage, so it may exceed the jobs booked without killing the chart.
+const manyMissed = deriveBriefCharts(
+  pack({
+    businessScorecard: scorecard({
+      totalLeads: metric("Total leads", 40, null, { period: "Last 30 days" }),
+      qualifiedLeads: metric("Qualified leads", 20, null, { period: "Last 30 days" }),
+      bookedJobs: metric("Booked jobs", 3, null, { period: "Last 30 days" }),
+      callsMissed: metric("Calls missed", 31, null, { period: "Last 30 days" }),
+    }),
+  }),
+);
+check("missed calls above the jobs booked is still a funnel", find(manyMissed, "chart-funnel") !== undefined);
+check(
+  "and every step it draws narrows or holds, missed calls aside",
+  (() => {
+    const rows = (find(manyMissed, "chart-funnel")?.funnel || []).filter((row) => row.label !== "Calls missed");
+    return rows.every((row, index) => index === 0 || row.value <= rows[index - 1].value);
+  })(),
+);
 
 // ---------------------------------------------------------------------------
 // Rank movement needs two real scans

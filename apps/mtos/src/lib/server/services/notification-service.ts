@@ -14,6 +14,7 @@ import {
   getAccountManagerProfile,
 } from "@/src/lib/server/services/user-service";
 import { resolvePreferences } from "@/src/lib/contracts/user-preferences";
+import { TOAST_LIMIT } from "@/src/lib/contracts/notification-toasts";
 import {
   NOTIFICATION_CHANNEL,
   NOTIFICATION_TONE,
@@ -82,6 +83,7 @@ function toRecord(id: string, data: Record<string, unknown>): NotificationRecord
     createdAt: String(data.createdAt || ""),
     ...(typeof data.href === "string" ? { href: data.href } : {}),
     ...(typeof data.readAt === "string" ? { readAt: data.readAt } : {}),
+    ...(typeof data.toastedAt === "string" ? { toastedAt: data.toastedAt } : {}),
     ...(typeof data.emailedAt === "string" ? { emailedAt: data.emailedAt } : {}),
     ...(typeof data.emailSkippedReason === "string" ? { emailSkippedReason: data.emailSkippedReason } : {}),
     ...(typeof data.subjectId === "string" ? { subjectId: data.subjectId } : {}),
@@ -196,6 +198,38 @@ export async function markNotificationsRead(
       marked += 1;
     } catch {
       // One row that will not take a read mark is not a reason to fail the rest.
+    }
+  }
+  return marked;
+}
+
+/**
+ * Record that a toast has been shown, so it is never shown again.
+ *
+ * Separate from `markNotificationsRead` on purpose: seeing a toast is not reading the thing. A
+ * toast that marked its notification read would clear the bell for news nobody opened, and the
+ * Command Center card beside it would be the only trace left.
+ *
+ * `mergeFields` so this can never rewrite the title, the detail or the link the run wrote. A
+ * single row that will not take the stamp is not a reason to fail the rest -- the cost of that is
+ * one toast shown twice, which is the lesser of the two failures available here.
+ */
+export async function markNotificationsToasted(
+  context: TenantContext,
+  ids: string[],
+): Promise<number> {
+  const db = getFirebaseAdminDb();
+  if (!db || !ids.length) return 0;
+  const at = new Date().toISOString();
+  let marked = 0;
+  for (const id of ids.slice(0, TOAST_LIMIT * 4)) {
+    try {
+      await db
+        .doc(tenantUserNotificationPath(context.tenantId, context.userId, id))
+        .set({ toastedAt: at }, { mergeFields: ["toastedAt"] });
+      marked += 1;
+    } catch {
+      // See the note above.
     }
   }
   return marked;

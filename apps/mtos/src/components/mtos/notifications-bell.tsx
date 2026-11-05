@@ -2,10 +2,11 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { Bell, Mail, MailX } from "lucide-react";
+import { Bell, Mail, MailX, X } from "lucide-react";
 
 import type { NotificationRecord } from "@/src/lib/contracts/notifications";
 import { unreadCount } from "@/src/lib/contracts/notifications";
+import { toastQueue, type ToastView } from "@/src/lib/contracts/notification-toasts";
 
 /**
  * The bell, now reading the AM's real feed.
@@ -17,6 +18,17 @@ import { unreadCount } from "@/src/lib/contracts/notifications";
  * Opening the panel marks what is in it as read, which is the behaviour people expect from a bell
  * and is also what stops the same overdue follow-through counting as unread every day. A row that
  * could not be emailed says so on its own line rather than looking like one that was.
+ *
+ * ## The pop-up toasts live here too
+ *
+ * They render as a fixed overlay in the corner of the window, so they are not visually part of the
+ * bell at all -- but they are built from the same `items` this component already fetched. A
+ * separate component would mean a second request for the same feed on every page load, which on
+ * the most-loaded screen in the app is the kind of cost that has already failed deploys here.
+ *
+ * A toast is shown once per notification, ever: the server stamps `toastedAt` as soon as the cards
+ * are on screen. Dismissing one does not mark it read -- it stays unread in the bell, because
+ * closing a pop-up is not reading what it was about.
  */
 
 export interface AppNotification {
@@ -39,6 +51,8 @@ export function NotificationsBell() {
   const [ring, setRing] = useState(false);
   const [items, setItems] = useState<NotificationRecord[]>([]);
   const [loaded, setLoaded] = useState(false);
+  const [toasts, setToasts] = useState<ToastView[]>([]);
+  const toastedRef = useRef(false);
   const ref = useRef<HTMLDivElement>(null);
   const unread = unreadCount(items);
 
@@ -48,8 +62,13 @@ export function NotificationsBell() {
       .then((response) => (response.ok ? response.json() : null))
       .then((payload) => {
         if (!active) return;
-        setItems((payload?.data?.items || []) as NotificationRecord[]);
+        const rows = (payload?.data?.items || []) as NotificationRecord[];
+        setItems(rows);
         setLoaded(true);
+        // The server computes the same list; this falls back to the shared function so an older
+        // deployment of the route still shows toasts rather than none.
+        const queue = (payload?.data?.toast as ToastView[] | undefined) || toastQueue(rows);
+        setToasts(queue);
       })
       .catch(() => {
         if (active) setLoaded(true);
@@ -101,6 +120,42 @@ export function NotificationsBell() {
     }
   }, []);
 
+  /*
+    Stamp the toasts as shown, once, as soon as they are on screen.
+
+    `toastedRef` guards against a re-render sending the same ids again. The stamp is sent even if
+    the person never looks at the cards, which is the point: the promise is one toast per
+    notification, and the bell still holds it unread. A failed stamp means one toast shown twice on
+    the next load, which is the lesser failure -- the alternative is marking them shown before
+    knowing they rendered.
+  */
+  useEffect(() => {
+    if (!toasts.length || toastedRef.current) return;
+    toastedRef.current = true;
+    const ids = toasts.map((toast) => toast.id);
+    fetch("/api/notifications", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ toasted: ids }),
+    }).catch(() => {
+      // Nothing to tell anyone: the worst case is seeing one of these again.
+    });
+  }, [toasts]);
+
+  /** Closing a toast is not reading it. It leaves the bell row unread, deliberately. */
+  const dismissToast = useCallback((id: string) => {
+    setToasts((current) => current.filter((toast) => toast.id !== id));
+  }, []);
+
+  /** Following a toast is reading it, so this marks it read on the way out. */
+  const openToast = useCallback(
+    (toast: ToastView) => {
+      setToasts((current) => current.filter((entry) => entry.id !== toast.id));
+      void markRead([toast.id]);
+    },
+    [markRead],
+  );
+
   function toggle() {
     const next = !open;
     setOpen(next);
@@ -108,7 +163,35 @@ export function NotificationsBell() {
   }
 
   return (
-    <div className="bell-wrap" ref={ref}>
+    <>
+      {toasts.length ? (
+        <div className="toast-stack" role="status" aria-live="polite">
+          {toasts.map((toast) => (
+            <div key={toast.id} className={`toast toast-${toast.accent}`}>
+              <div className="toast-head">
+                <span className="toast-eyebrow">{toast.eyebrow}</span>
+                <button
+                  type="button"
+                  className="toast-x"
+                  onClick={() => dismissToast(toast.id)}
+                  aria-label="Dismiss"
+                >
+                  <X />
+                </button>
+              </div>
+              <div className="toast-title">{toast.title}</div>
+              <div className="toast-detail">{toast.detail}</div>
+              {toast.href ? (
+                <Link href={toast.href} className="toast-cta" onClick={() => openToast(toast)}>
+                  {toast.cta} →
+                </Link>
+              ) : null}
+            </div>
+          ))}
+        </div>
+      ) : null}
+
+      <div className="bell-wrap" ref={ref}>
       <button
         className="icon-btn"
         onClick={toggle}
@@ -179,6 +262,7 @@ export function NotificationsBell() {
           </Link>
         </div>
       ) : null}
-    </div>
+      </div>
+    </>
   );
 }

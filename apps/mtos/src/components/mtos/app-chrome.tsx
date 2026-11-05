@@ -46,6 +46,8 @@ interface AppChromeProps {
 interface CurrentUser {
   name: string;
   roleLabel: string;
+  /** The violet count on QA & Coaching: work waiting for a reviewer, unread scores for an AM. */
+  qcBadge?: { count: number; kind: "queue" | "scores"; label: string };
 }
 
 /** Initials for the avatar: first letter of the first two words, else first two letters. */
@@ -69,7 +71,11 @@ export function AppChrome({ title, subtitle, children }: AppChromeProps) {
       .then((response) => (response.ok ? response.json() : null))
       .then((payload) => {
         if (active && payload?.data) {
-          setCurrentUser({ name: payload.data.name, roleLabel: payload.data.roleLabel });
+          setCurrentUser({
+            name: payload.data.name,
+            roleLabel: payload.data.roleLabel,
+            ...(payload.data.qcBadge ? { qcBadge: payload.data.qcBadge } : {}),
+          });
         }
       })
       .catch(() => undefined);
@@ -121,15 +127,19 @@ export function AppChrome({ title, subtitle, children }: AppChromeProps) {
         <nav className="flex flex-col gap-[3px]">
           {NAV.map(({ href, label, icon: Icon }) => {
             const active = pathname === href || pathname.startsWith(`${href}/`);
+            // Only QA & Coaching carries a count today, and only when there is something to count.
+            const badge = href === "/qa" ? currentUser?.qcBadge : undefined;
             return (
               <Link
                 key={href}
                 href={href}
                 className={cn("nav-item", active && "active")}
                 onClick={() => setOpen(false)}
+                {...(badge?.count ? { title: badge.label } : {})}
               >
                 <Icon />
                 <span>{label}</span>
+                {badge?.count ? <span className="count qc">{badge.count}</span> : null}
               </Link>
             );
           })}

@@ -16,6 +16,10 @@
  *    their last submitted QC produces a focus list and proposals for the next call's Review.
  *  - **The dates are the right day.** It prints each touch's date label beside the raw value, so
  *    the calendar-day shift that `qc-dates.ts` exists to prevent would be visible here.
+ *  - **The sidebar badge and the Command Center cards resolve** (handoff §6.9). These matter more
+ *    than they look: the badge runs an aggregate `count()` and the AM's side filters on two fields
+ *    at once. Both are believed to need no composite index, and this is where being wrong about
+ *    that shows up as FAILED_PRECONDITION rather than on everybody's sidebar at once.
  *
  * Read-only. It writes nothing anywhere, and it raises no notification.
  *
@@ -44,6 +48,11 @@ import {
   listTenantUserContexts,
 } from "@/src/lib/server/services/daily-sync-service";
 import { getQcAmView, getLatestQcCoaching } from "@/src/lib/server/services/qc-am-service";
+import { getQcBadge } from "@/src/lib/server/services/qc-badge-service";
+import { getQcCommandCards } from "@/src/lib/server/services/qc-cards-service";
+import { qcCardsHeading } from "@/src/lib/contracts/qc-cards";
+import { toastQueue } from "@/src/lib/contracts/notification-toasts";
+import { listNotifications } from "@/src/lib/server/services/notification-service";
 import { getAccountManagerProfile } from "@/src/lib/server/services/user-service";
 import { getMtosDataSource } from "@/src/lib/server/data/seed-mtos-data-source";
 
@@ -86,10 +95,49 @@ async function main() {
         continue;
       }
 
+      // The badge and the cards, which every page load runs. A failure here is a failure on
+      // every screen in the app, so they are checked for every user rather than for one.
+      let badge: Awaited<ReturnType<typeof getQcBadge>> | undefined;
+      try {
+        badge = await getQcBadge(context);
+      } catch (error) {
+        console.log(
+          `  ${who} · BADGE FAILED: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+      let cards: Awaited<ReturnType<typeof getQcCommandCards>> | undefined;
+      try {
+        cards = await getQcCommandCards(context);
+      } catch (error) {
+        console.log(
+          `  ${who} · COMMAND CENTER CARDS FAILED: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+
       const lands = canOpenQcQueue(context.role)
         ? "sees the QC queue at /qa, not this page"
         : "sees this page at /qa";
       console.log(`  ${who} · ${lands}`);
+      // The bell's own feed, and which of it would pop up on the next page load. Read-only: it
+      // does not stamp `toastedAt`, so running this does not consume anybody's toast.
+      const feed = await listNotifications(context).catch(() => []);
+      const due = toastQueue(feed);
+      console.log(
+        `    bell: ${feed.length} row(s) · ${feed.filter((item) => !item.readAt).length} unread · ${due.length} would pop up next load${due.length ? ` (${due.map((toast) => `${toast.eyebrow}: ${toast.cta}`).join(", ")})` : ""}`,
+      );
+      if (badge) {
+        console.log(`    badge: ${badge.count} (${badge.kind}) — "${badge.label}"`);
+      }
+      if (cards) {
+        console.log(
+          `    command center: ${cards.cards.length} ${cards.forReviewer ? "work" : "news"} card(s) — ${qcCardsHeading(cards.cards, cards.forReviewer)}`,
+        );
+        for (const card of cards.cards) {
+          console.log(
+            `      card: ${card.label} · ${card.client} · ${card.detail}${card.wait ? ` · ${card.wait.text}${card.wait.late ? " (LATE)" : ""}` : ""} → ${card.href}`,
+          );
+        }
+      }
       console.log(
         `    rows: ${view.done.length} scored · ${view.pending.length} with QC · ${unreadScoreCount(view.done)} unread · reviewer ${view.reviewerName || "none configured"}`,
       );

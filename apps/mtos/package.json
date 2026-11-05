@@ -52,7 +52,9 @@
     "check:qc-submit": "tsx scripts/check-qc-submit.ts",
     "check:qc-am": "tsx scripts/check-qc-am.ts",
     "check:qc-appeal-draft": "tsx scripts/check-qc-appeal-draft.ts",
-    "check:qc-coaching": "tsx scripts/check-qc-coaching.ts"
+    "check:qc-coaching": "tsx scripts/check-qc-coaching.ts",
+    "check:qc-cards": "tsx scripts/check-qc-cards.ts",
+    "check:notification-toasts": "tsx scripts/check-notification-toasts.ts"
   },
   "dependencies": {
     "@cie/engine": "*",

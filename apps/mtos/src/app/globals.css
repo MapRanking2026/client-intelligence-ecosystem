@@ -134,6 +134,9 @@ a { color: inherit; text-decoration: none; }
 .nav-item.active::before { content: ""; position: absolute; left: -14px; top: 50%; transform: translateY(-50%); width: 3px; height: 20px; border-radius: 3px; background: var(--accent); }
 .nav-item .count { margin-left: auto; font-size: 0.7rem; font-weight: 700; padding: 1px 7px; border-radius: var(--r-full); background: var(--surface-3); color: var(--slate-300); }
 .nav-item .count.hot { background: var(--risk-bg); color: var(--risk); }
+/* QC work waiting, on the QA & Coaching item. Violet because that is QC's colour everywhere
+   else in the app; it is a count of work, not a warning, so it is not the red `.hot`. */
+.nav-item .count.qc { background: var(--violet-bg); color: var(--violet); }
 .sidebar-foot { margin-top: auto; display: flex; flex-direction: column; gap: 8px; }
 .user-chip { display: flex; align-items: center; gap: 10px; padding: 9px; border-radius: var(--r-md); border: 1px solid var(--hair); background: var(--surface-2); }
 .avatar { width: 32px; height: 32px; border-radius: 50%; flex-shrink: 0; display: grid; place-items: center; font-weight: 700; font-size: 0.74rem; color: var(--on-accent); background: var(--accent); }
@@ -227,6 +230,7 @@ a { color: inherit; text-decoration: none; }
 .chip.qc { color: var(--violet); background: var(--violet-bg); border-color: transparent; }
 .sig-dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
 .sig-dot.good { background: var(--good); } .sig-dot.watch { background: var(--watch); } .sig-dot.risk { background: var(--risk); }
+.sig-dot.qc { background: var(--violet); }
 /* "muted" marks a client whose health has never been assessed -- a neutral absence, not a verdict. */
 .sig-dot.muted { background: var(--slate-400); opacity: 0.55; }
 .chip.muted { color: var(--slate-400); background: var(--surface-2); border-color: var(--hair); }
@@ -614,3 +618,33 @@ a { color: inherit; text-decoration: none; }
    stacking two and three shades of grey to separate one block of text from the next. */
 .panel { border: 1px solid var(--hair); background: var(--surface-2); border-radius: var(--r-md); padding: 14px 16px; }
 .panel-tight { border: 1px solid var(--hair); background: var(--surface-2); border-radius: var(--r-sm); padding: 9px 12px; }
+
+/* ---------------------------------------------------------------------------
+   Pop-up toasts (handoff §6.9)
+
+   Fixed in the top-right corner, 360px, above everything. The coloured eyebrow is the whole
+   signal: violet when QC has work for you, teal when something of yours has been looked at. At
+   most three are ever rendered -- the limit is enforced in `notification-toasts.ts`, not here.
+
+   On a narrow screen they span the width with a gutter instead of sitting at 360px, because a
+   fixed 360px card on a 375px phone leaves no room for the page behind it.
+   --------------------------------------------------------------------------- */
+.toast-stack { position: fixed; top: 72px; right: 18px; z-index: 70; display: flex; flex-direction: column; gap: 10px; width: 360px; max-width: calc(100vw - 36px); pointer-events: none; }
+.toast { pointer-events: auto; background: var(--surface); border: 1px solid var(--hair); border-radius: 14px; box-shadow: 0 10px 30px rgba(16, 24, 40, 0.14); padding: 14px 16px; border-top: 3px solid var(--slate-300); animation: toast-in 220ms var(--ease) both; }
+.toast-qc { border-top-color: var(--violet); }
+.toast-am { border-top-color: var(--accent); }
+.toast-neutral { border-top-color: var(--slate-300); }
+.toast-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.toast-eyebrow { font-size: 0.66rem; letter-spacing: 0.1em; text-transform: uppercase; font-weight: 700; color: var(--slate-400); }
+.toast-qc .toast-eyebrow { color: var(--violet); }
+.toast-am .toast-eyebrow { color: var(--accent); }
+.toast-x { border: 0; background: none; padding: 2px; cursor: pointer; color: var(--slate-400); display: inline-flex; border-radius: 6px; }
+.toast-x:hover { color: var(--text); background: var(--surface-2); }
+.toast-x svg { width: 14px; height: 14px; }
+.toast-title { margin-top: 4px; font-size: 0.88rem; font-weight: 650; color: var(--text); }
+.toast-detail { margin-top: 2px; font-size: 0.78rem; color: var(--text-2); }
+.toast-cta { margin-top: 10px; display: inline-block; font-size: 0.8rem; font-weight: 600; color: var(--accent); }
+.toast-qc .toast-cta { color: var(--violet); }
+.toast-cta:hover { text-decoration: underline; }
+@keyframes toast-in { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .toast { animation: none; } }

@@ -23,6 +23,8 @@ import {
   type TouchWithClient,
 } from "@/src/lib/server/services/command-center-v2-service";
 import { deriveRunSheetStage, RUN_SHEET_PRIMARY_ACTION } from "@/src/lib/server/services/prep-readiness-service";
+import { qcCardsHeading, type QcCommandCard } from "@/src/lib/contracts/qc-cards";
+import { getQcCommandCards } from "@/src/lib/server/services/qc-cards-service";
 
 /**
  * Rendered per request, never prerendered.
@@ -106,10 +108,55 @@ function TouchRow({ entry, detail }: { entry: TouchWithClient; detail: string })
   );
 }
 
+/**
+ * One QC card row (handoff §6.9).
+ *
+ * The wait is the only thing here that can turn red, and only past twenty-four hours -- that is
+ * the promise made to the AM when they pressed Finish, and it is what a reviewer should act on
+ * before anything else on this screen.
+ */
+function QcCardRow({ card }: { card: QcCommandCard }) {
+  return (
+    <Link href={card.href} className="list-row" style={{ padding: 12 }}>
+      <span className={`sig-dot ${card.tone}`} aria-hidden />
+      <span className="min-w-0 flex-1">
+        <span className="block text-[0.88rem] font-semibold" style={{ color: "var(--text)" }}>
+          {card.client}
+        </span>
+        <span className="muted block text-[0.78rem]">
+          {card.label} · {card.detail}
+        </span>
+      </span>
+      {card.wait ? (
+        <span
+          className="text-[0.76rem] font-semibold"
+          style={{ color: card.wait.late ? "var(--risk)" : "var(--text-2)", whiteSpace: "nowrap" }}
+        >
+          {card.wait.text}
+        </span>
+      ) : null}
+      <span className={`chip ${card.tone === "risk" ? "risk" : card.tone === "good" ? "good" : "qc"}`}>
+        {card.cta}
+      </span>
+      <ArrowRight style={{ width: 15, height: 15, color: "var(--slate-400)" }} />
+    </Link>
+  );
+}
+
 export default async function CommandCenterPage() {
+  const context = await resolveTenantContext();
+  /*
+    QC first, because it never fails the page.
+
+    The cards are read before the main view and with their own error handling: a reviewer whose
+    queue could not be read still gets their Command Center, and the card simply does not appear.
+    See `qc-cards-service.ts` for why this is its own narrow query rather than the whole QC page.
+  */
+  const qc = await getQcCommandCards(context).catch(() => ({ cards: [], forReviewer: false }));
+
   let view: Awaited<ReturnType<typeof getCommandCenterV2View>>;
   try {
-    view = await getCommandCenterV2View(await resolveTenantContext());
+    view = await getCommandCenterV2View(context);
   } catch {
     return (
       <AppShell>
@@ -274,11 +321,40 @@ export default async function CommandCenterPage() {
             ))}
           </Queue>
 
+          {/*
+            The QC card, above the legacy QA one.
+
+            Two readers, one card: for a reviewer, admin or manager it is work waiting, oldest
+            first with the hours it has been waiting; for an account manager it is their own
+            unread results. The title says which, so nobody has to work out whose list it is.
+
+            It is rendered only when there is something in it. An empty card here would be the
+            fourth "nothing to do" panel on a screen that already has three.
+          */}
+          {qc.cards.length ? (
+            <Queue
+              icon={<ClipboardCheck />}
+              title={qc.forReviewer ? "Waiting for QC" : "Your QC results"}
+              count={qc.cards.length}
+              subtitle={qcCardsHeading(qc.cards, qc.forReviewer)}
+              empty=""
+            >
+              {qc.cards.slice(0, 6).map((card) => (
+                <QcCardRow key={`${card.kind}-${card.id}`} card={card} />
+              ))}
+              {qc.cards.length > 6 ? (
+                <Link href="/qa" className="ilink mt-2.5 inline-block text-[0.8rem]">
+                  {qc.cards.length - 6} more in QA &amp; Coaching
+                </Link>
+              ) : null}
+            </Queue>
+          ) : null}
+
           <Queue
             icon={<ClipboardCheck />}
             title="QA waiting on a decision"
             count={qaWaiting.length}
-            subtitle="Reviewed and waiting for approval."
+            subtitle="Reviewed and waiting for approval. These are the earlier A–F reviews; the new 17-point QC is the card above."
             empty="No QA review is waiting on a decision."
           >
             {qaWaiting.map((entry) => (

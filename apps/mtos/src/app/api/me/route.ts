@@ -4,6 +4,7 @@ import type { Role } from "@/src/lib/contracts/mtos";
 import { resolveTenantContext } from "@/src/lib/auth/resolve-tenant-context";
 import { getFirebaseAdminAuth, getFirebaseAdminDb } from "@/src/lib/server/firebase/admin";
 import { tenantUserPath } from "@/src/lib/server/firebase/collections";
+import { getQcBadge } from "@/src/lib/server/services/qc-badge-service";
 
 const roleLabels: Record<Role, string> = {
   account_manager: "Account Manager",
@@ -59,6 +60,19 @@ export async function GET(request: Request) {
 
   const displayName = name || (email ? nameFromEmail(email) : "") || roleLabel;
 
+  /*
+    The QA & Coaching badge rides along with this request rather than having its own endpoint.
+
+    The sidebar already calls /api/me once per page load to get the name and the role, so putting
+    the count here costs no extra round trip -- and the count itself is two Firestore aggregate
+    reads at most, which is what makes it affordable on every page. See `qc-badge-service.ts`.
+  */
+  const qcBadge = await getQcBadge(context).catch(() => ({
+    count: 0,
+    kind: "scores" as const,
+    label: "No new QC scores",
+  }));
+
   return NextResponse.json({
     data: {
       userId: context.userId,
@@ -66,6 +80,7 @@ export async function GET(request: Request) {
       roleLabel,
       name: displayName,
       email,
+      qcBadge,
     },
   });
 }

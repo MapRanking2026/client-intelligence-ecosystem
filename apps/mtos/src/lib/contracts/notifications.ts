@@ -94,6 +94,14 @@ export interface NotificationRecord {
   tone: NotificationTone;
   createdAt: string;
   readAt?: string;
+  /**
+   * When the pop-up toast for this was shown, if it ever was.
+   *
+   * Stored on the record rather than in the browser so the toast is shown once per notification and
+   * not once per device. Without it, opening MTOS on a laptop after reading something on a phone
+   * would pop up news the person has already acted on. See `notification-toasts.ts`.
+   */
+  toastedAt?: string;
   /** When it was emailed. Absent on an in-app-only kind, and on a digest MTOS could not send. */
   emailedAt?: string;
   /** Why no email went out, in the AM's words. Written instead of failing quietly. */

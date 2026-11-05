@@ -19,9 +19,12 @@ import { QC_SPECIALIST_TITLE } from "@/src/lib/contracts/qc-access";
  *
  * Choosing a role on a form is a request, not an entitlement. The route checks an invite code per
  * role before it writes anything, and `signupCodeEnvVar` below names the variable each role's code
- * comes from so the two cannot drift apart. A role whose variable is unset is **ungated** -- that
- * is the behaviour this repository already had, and it is why the list is short: every entry here
- * is a role a stranger who knows the tenant id could create if its code is not configured.
+ * comes from so the two cannot drift apart.
+ *
+ * A role whose variable is unset **cannot be signed up for at all** (owner's decision,
+ * 5 November 2026). It used to mean the opposite -- unset was ungated, so anybody who knew the
+ * tenant id could self-grant any role, Admin included, and neither variable was set on this
+ * deployment. Failing closed is why the list can stay short and still be safe.
  */
 
 export interface SignupRoleOption {

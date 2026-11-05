@@ -24,12 +24,12 @@ const requestSchema = z.object({
 });
 
 /**
- * The invite code this role needs, or "" when none is configured.
+ * The invite code this role needs, or "" when the deployment has not configured one.
  *
- * "" means ungated, which is the behaviour this route already had: a role whose environment
- * variable is blank can be chosen by anybody who knows the tenant id. That is unchanged here on
- * purpose -- tightening it would stop account creation working on a deployment that has never set
- * these variables, which is a decision for whoever runs the deployment rather than for this patch.
+ * An empty string used to mean "no code required", which meant a role whose variable was unset
+ * could be claimed by anybody who knew the tenant id -- including Admin. `requireCodeForRole` now
+ * only reports what is configured; the decision about an unset one is made at the call site
+ * below, where it fails closed.
  */
 function requireCodeForRole(env: ReturnType<typeof getServerEnv>, role: Role) {
   const variable = signupCodeEnvVar(role);
@@ -52,12 +52,36 @@ export async function POST(request: Request) {
   const decoded = await auth.verifyIdToken(body.idToken);
   const uid = decoded.uid;
 
+  /*
+    The invite code, and what happens when there isn't one.
+
+    Fails closed (owner's decision, 5 November 2026). A role whose code is not configured cannot
+    be signed up for at all, rather than being open to anybody who knows the tenant id. Measured
+    on this deployment before the change: neither MTOS_MANAGER_SIGNUP_CODE nor
+    MTOS_ADMIN_SIGNUP_CODE was set, so every role -- Admin included -- could be self-granted.
+
+    The message names the variable, because the only person who can clear this is whoever runs the
+    deployment, and "sign-up is unavailable" with no reason sends them hunting.
+
+    `GET /api/auth/firebase-signup/roles` reports the same state so the form can close the option
+    before the browser creates a Firebase Auth account. This check is the guarantee; that one is
+    what stops a refusal here stranding an auth account with no tenant behind it.
+  */
   const requiredCode = requireCodeForRole(env, body.role as Role);
-  if (requiredCode) {
-    const provided = body.code || "";
-    if (provided !== requiredCode) {
-      return NextResponse.json({ error: "Invalid invite code" }, { status: 401 });
-    }
+  if (!requiredCode) {
+    const variable =
+      signupCodeEnvVar(body.role as Role) === "adminSignupCode"
+        ? "MTOS_ADMIN_SIGNUP_CODE"
+        : "MTOS_MANAGER_SIGNUP_CODE";
+    return NextResponse.json(
+      {
+        error: `Sign-up for this role is closed: no invite code is configured for it. Set ${variable} on the deployment to open it.`,
+      },
+      { status: 403 },
+    );
+  }
+  if ((body.code || "") !== requiredCode) {
+    return NextResponse.json({ error: "Invalid invite code" }, { status: 401 });
   }
 
   const tenantId = body.tenantId.trim();

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { createUserWithEmailAndPassword } from "firebase/auth";
-import { Suspense, useState, useTransition } from "react";
+import { Suspense, useEffect, useState, useTransition } from "react";
 
 import { getFirebaseClientAuth } from "@/src/lib/firebase/client";
 import { BrandWordmark } from "@/src/components/mtos/brand-wordmark";
@@ -28,6 +28,13 @@ function getSafeNextPath(nextPath: string | null) {
  */
 const DEFAULT_ROLE: Role = SIGNUP_ROLES[0].role;
 
+/** What the server says about each role right now: whether it can be signed up for at all. */
+interface RoleAvailability {
+  role: Role;
+  requiresCode: boolean;
+  available: boolean;
+}
+
 function SignUpContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -41,6 +48,33 @@ function SignUpContent() {
   const [password, setPassword] = useState("");
   const [code, setCode] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [availability, setAvailability] = useState<RoleAvailability[] | null>(null);
+
+  /*
+    Which roles are open, asked before anything is created.
+
+    The browser creates the Firebase Auth account first and only then asks the server for a tenant
+    and a role, so a refusal at that point strands an account that can neither sign in nor sign up
+    again -- the email is taken. Asking first is what keeps a closed role from costing somebody
+    their address. Until the answer arrives the form stays usable; the submit below re-checks.
+  */
+  useEffect(() => {
+    let active = true;
+    fetch("/api/auth/firebase-signup/roles", { headers: { accept: "application/json" } })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((payload) => {
+        if (active && payload?.data?.roles) setAvailability(payload.data.roles as RoleAvailability[]);
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const statusFor = (value: Role) => availability?.find((entry) => entry.role === value);
+  const current = statusFor(role);
+  const closed = Boolean(availability && current && !current.available);
+  const allClosed = Boolean(availability?.length && availability.every((entry) => !entry.available));
 
   return (
     <main className="min-h-screen bg-[#223453] bg-[radial-gradient(circle_at_top,rgba(215,245,236,0.10),rgba(3,10,18,1)_55%)] px-6 py-16 text-white">
@@ -73,6 +107,15 @@ function SignUpContent() {
 
                   if (!tenantId.trim()) {
                     throw new Error("Tenant ID is required.");
+                  }
+
+                  // Re-checked here, before the account is created, for the reason in the effect
+                  // above. The server refuses this role too; this is what stops the refusal
+                  // arriving after an email address has already been spent.
+                  if (closed) {
+                    throw new Error(
+                      "Sign-up for this role is closed: no invite code is configured for it. Ask an admin to set it on the deployment.",
+                    );
                   }
 
                   const credential = await createUserWithEmailAndPassword(
@@ -125,16 +168,27 @@ function SignUpContent() {
                 onChange={(event) => setRole(event.target.value as Role)}
                 className="w-full rounded-2xl border border-white/10 bg-black/25 px-4 py-3 text-sm text-white outline-none focus:border-white/20"
               >
-                {SIGNUP_ROLES.map((option) => (
-                  <option key={option.role} value={option.role}>
-                    {option.label}
-                  </option>
-                ))}
+                {SIGNUP_ROLES.map((option) => {
+                  const status = statusFor(option.role);
+                  const shut = Boolean(availability && status && !status.available);
+                  return (
+                    <option key={option.role} value={option.role}>
+                      {option.label}
+                      {shut ? " — closed" : ""}
+                    </option>
+                  );
+                })}
               </select>
               {/* What the chosen role actually gets, so nobody picks one by guessing at its name. */}
               <p className="text-xs leading-5 text-slate-400">
                 {SIGNUP_ROLES.find((option) => option.role === role)?.hint}
               </p>
+              {closed ? (
+                <p className="text-xs leading-5 text-amber-200">
+                  This role is closed right now — no invite code is configured for it. An admin can
+                  open it by setting the code on the deployment.
+                </p>
+              ) : null}
             </div>
 
             <div className="space-y-2">
@@ -164,7 +218,7 @@ function SignUpContent() {
 
             <div className="space-y-2">
               <label className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">
-                Invite code (optional)
+                Invite code{current?.requiresCode ? "" : " (optional)"}
               </label>
               <input
                 value={code}
@@ -180,9 +234,16 @@ function SignUpContent() {
               </div>
             ) : null}
 
+            {allClosed ? (
+              <div className="rounded-2xl border border-amber-400/25 bg-amber-500/12 px-4 py-3 text-sm text-amber-100">
+                Sign-up is closed for every role: this deployment has no invite codes configured.
+                Set MTOS_MANAGER_SIGNUP_CODE and MTOS_ADMIN_SIGNUP_CODE to open it.
+              </div>
+            ) : null}
+
             <button
               type="submit"
-              disabled={isPending}
+              disabled={isPending || closed}
               style={{ color: "#0d1625" }}
               className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-[#d7f5ec] px-4 py-3 text-sm font-semibold text-[#0d1625] transition hover:opacity-90 disabled:opacity-60"
             >

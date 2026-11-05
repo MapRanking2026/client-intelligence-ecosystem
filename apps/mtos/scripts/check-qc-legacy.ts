@@ -150,8 +150,8 @@ check(
 
 console.log(`\n${passed} passed, ${failed} failed`);
 console.log("Not covered by these checks:");
-console.log("  - whether an invite code is actually SET in any environment; an unset code means");
-console.log("    that role is ungated, which is this deployment's existing behaviour");
+console.log("  - whether an invite code is actually SET in any environment. The route fails closed");
+console.log("    on an unset one, which is checked in the browser rather than here");
 console.log("  - the server refusal in `generateQaReview`, which needs a database");
 console.log("  - how the tag looks on each of the four screens that show it");
 if (failed) process.exit(1);

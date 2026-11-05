@@ -35,6 +35,15 @@ export const NOTIFICATION_KINDS = [
   "client_reply",
   "daily_digest",
   "weekly_digest",
+  // QC. These five are not gated by the same "is it due yet" logic as the five above: each one is
+  // raised by an event somebody caused -- a Finish pressed, a score submitted, an appeal sent --
+  // rather than discovered by the periodic run. They are listed here because the bell, the dedupe
+  // key and the preference switches are shared.
+  "qc_ready",
+  "qc_scored",
+  "qc_appeal_submitted",
+  "qc_appeal_decided",
+  "qc_chat_requested",
 ] as const;
 
 export type NotificationKind = (typeof NOTIFICATION_KINDS)[number];
@@ -49,6 +58,13 @@ export const NOTIFICATION_CHANNEL: Record<NotificationKind, "in_app" | "in_app_a
   client_reply: "in_app",
   daily_digest: "in_app_and_email",
   weekly_digest: "in_app_and_email",
+  // In-app only, all five. A QC score is a coaching conversation, and emailing one unprompted
+  // turns it into a letter from management.
+  qc_ready: "in_app",
+  qc_scored: "in_app",
+  qc_appeal_submitted: "in_app",
+  qc_appeal_decided: "in_app",
+  qc_chat_requested: "in_app",
 };
 
 export const NOTIFICATION_TONE: Record<NotificationKind, NotificationTone> = {
@@ -58,6 +74,14 @@ export const NOTIFICATION_TONE: Record<NotificationKind, NotificationTone> = {
   client_reply: "important",
   daily_digest: "info",
   weekly_digest: "info",
+  qc_ready: "important",
+  // The one positive QC kind. The AM's score being ready is good news even when the number is
+  // low: it comes with what went well and a coaching plan, and a critical tone on the bell would
+  // make every month's review feel like a summons.
+  qc_scored: "positive",
+  qc_appeal_submitted: "important",
+  qc_appeal_decided: "important",
+  qc_chat_requested: "important",
 };
 
 export interface NotificationRecord {
@@ -98,7 +122,14 @@ export function isNotificationEnabled(kind: NotificationKind, preferences: UserP
   if (kind === "prep_finished") return resolved.notifications.prepFinished;
   if (kind === "client_reply") return resolved.notifications.clientRepliesInIntercom;
   if (kind === "daily_digest") return resolved.notifications.dailyDigest;
-  return resolved.notifications.weeklyDigest;
+  if (kind === "weekly_digest") return resolved.notifications.weeklyDigest;
+  if (kind === "qc_scored") return resolved.notifications.qcScoreReady;
+  if (kind === "qc_ready") return resolved.notifications.qcQueueReady;
+  // The other three QC kinds have no switch, on purpose. An appeal decision, an appeal arriving
+  // and a request for a coaching chat are each one half of a conversation the other person has
+  // already started; a preference that silently swallowed one would leave them waiting on a reply
+  // that was never going to come.
+  return true;
 }
 
 /** How far ahead of the call the prep reminder is due. `off` has no lead time. */

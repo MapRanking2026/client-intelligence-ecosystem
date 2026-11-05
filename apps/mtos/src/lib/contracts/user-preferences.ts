@@ -66,6 +66,10 @@ export interface NotificationPreferences {
   overdueFollowThrough: boolean;
   clientRepliesInIntercom: boolean;
   prepFinished: boolean;
+  /** The AM's own QC score landing. The one QC notification an AM can turn off. */
+  qcScoreReady: boolean;
+  /** A new touch arriving in the QC queue. Only ever raised for a QC reviewer. */
+  qcQueueReady: boolean;
 }
 
 export interface UserPreferences {
@@ -124,6 +128,10 @@ export const DEFAULT_PREFERENCES: Required<Omit<UserPreferences, "notifications"
     overdueFollowThrough: true,
     clientRepliesInIntercom: true,
     prepFinished: true,
+    // Both on. These are the two halves of the QC loop, and a reviewer who has silently opted out
+    // of the queue is a queue nobody is working.
+    qcScoreReady: true,
+    qcQueueReady: true,
   },
 };
 
@@ -415,7 +423,7 @@ export const PREFERENCE_GROUPS: PreferenceGroup[] = [
     id: "notifications",
     title: "Notifications",
     subtitle:
-      "What you want to hear about. The three events below appear in your notifications in the header; the two digests are also emailed to you through your own Gmail, and say so in the feed when they could not be.",
+      "What you want to hear about. Everything except the two digests appears in your notifications in the header; the digests are also emailed to you through your own Gmail, and say so in the feed when they could not be.",
     fields: [
       {
         key: "notifications.dailyDigest",
@@ -446,6 +454,20 @@ export const PREFERENCE_GROUPS: PreferenceGroup[] = [
         label: "Prep finished",
         kind: "switch",
         hint: "When a brief has finished drafting and is waiting on your approval.",
+      },
+      {
+        key: "notifications.qcScoreReady",
+        label: "QC score ready",
+        kind: "switch",
+        hint: "When QC has scored one of your monthly touches. The notification carries the score, what went well and the coaching plan.",
+      },
+      {
+        key: "notifications.qcQueueReady",
+        label: "New touch in QC queue",
+        kind: "switch",
+        // Shown to everyone rather than hidden behind the role: a switch that appears and
+        // disappears depending on who you are is one people report as a bug.
+        hint: "For QC reviewers: when an account manager finishes a follow-through and the touch is ready to score. Nothing is raised if you do not review QC.",
       },
     ],
   },

@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
 import { z } from "zod";
 
 import { resolveTenantContext } from "@/src/lib/auth/resolve-tenant-context";
@@ -41,6 +41,7 @@ import {
   FollowThroughNotReadyError,
   processFollowThrough,
 } from "@/src/lib/server/services/follow-through-process-service";
+import { generateQcPreread } from "@/src/lib/server/services/qc-preread-service";
 import {
   buildFollowThroughRecap,
   saveFollowThroughRecap,
@@ -600,9 +601,26 @@ export async function POST(
       case "save_notes":
         result = { notes: await saveFollowThroughNotes(context, touchId, payload.notes) };
         break;
-      case "process_follow_through":
-        result = await processFollowThrough(context, touchId);
+      case "process_follow_through": {
+        const processed = await processFollowThrough(context, touchId);
+        result = processed;
+        // The pre-read reads the whole transcript through a model, which takes long enough that
+        // waiting for it would hold the Finish button spinning after every outward write has
+        // already succeeded. `after` runs it once the response has gone, and a failure in there
+        // cannot affect this request: the reviewer's screen simply shows no pre-read.
+        if (processed.qc?.created) {
+          after(async () => {
+            const outcome = await generateQcPreread(context, touchId).catch((error) => ({
+              status: "skipped" as const,
+              reason: error instanceof Error ? error.message : "unknown error",
+            }));
+            if (outcome.status === "skipped") {
+              console.warn(`No QC pre-read for touch ${touchId}: ${outcome.reason}`);
+            }
+          });
+        }
         break;
+      }
       case "build_recap":
         result = await buildFollowThroughRecap(context, touchId);
         break;

@@ -40,7 +40,10 @@
     "check:notifications": "tsx scripts/check-notifications.ts",
     "run:notifications": "tsx scripts/run-notifications.ts",
     "report:integrations": "tsx scripts/integration-readiness.ts",
-    "verify:v5": "tsx scripts/verify-v5-routes.ts"
+    "verify:v5": "tsx scripts/verify-v5-routes.ts",
+    "check:qc-rubric": "tsx scripts/check-qc-rubric.ts",
+    "check:qc-record": "tsx scripts/check-qc-record.ts",
+    "check:qc-access": "tsx scripts/check-qc-access.ts"
   },
   "dependencies": {
     "@cie/engine": "*",

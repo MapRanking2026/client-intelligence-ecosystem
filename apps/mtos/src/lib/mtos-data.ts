@@ -6,6 +6,7 @@ import type { TrackerCard } from "@/src/lib/contracts/follow-through-trackers";
 import type { ScoreGateState } from "@/src/lib/contracts/follow-through-score";
 import type { GoogleMeetingState } from "@/src/lib/contracts/google-meet";
 import type { PrepWorkflowState } from "@/src/lib/contracts/prep-workflow";
+import type { TouchQc } from "@/src/lib/contracts/qc-record";
 import type { TouchStep } from "@/src/lib/contracts/touch-progress";
 import type { BriefSectionId, PrepBrief } from "@/src/lib/contracts/prep-brief";
 import type { SourceChip } from "@/src/lib/contracts/brief-sources";
@@ -1402,6 +1403,15 @@ export interface MonthlyTouchRecord {
   callGuideScreens?: Record<string, string>;
   postMeeting?: PostMeetingReview;
   qaReview?: QaReview;
+  /**
+   * The 17-point QC review, written when the AM finishes the follow-through.
+   *
+   * Beside `qaReview` rather than instead of it. The old 7-category A-F grade is on touches that
+   * were already scored under it, and those scores belong to the people who earned them: they stay
+   * readable, tagged as legacy, and nothing here overwrites them. A touch has one or the other,
+   * never both -- which is also how the screens decide which review to show.
+   */
+  qc?: TouchQc;
   /** Latest lead & call verification captured during prep (optional, additive). */
   leadVerification?: LeadVerificationReview;
   /**

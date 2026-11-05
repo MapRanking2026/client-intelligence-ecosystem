@@ -52,7 +52,21 @@ check("QA chips in presenter view start on", DEFAULT_PREFERENCES.qaChipsInPresen
 // The digests send real email to the AM's own address, so nobody starts receiving mail because of
 // a default somebody else chose.
 check("neither digest ships on", !DEFAULT_PREFERENCES.notifications.dailyDigest && !DEFAULT_PREFERENCES.notifications.weeklyDigest);
-check("every notification flag has a default", Object.keys(DEFAULT_PREFERENCES.notifications).length === 5);
+check("every notification flag has a default", Object.keys(DEFAULT_PREFERENCES.notifications).length === 7);
+// The real invariant behind that count: a switch on the screen with no default reads as off, so a
+// field added to the group but not to the defaults would silently ship opted out.
+check(
+  "every notification switch on the screen has a default",
+  PREFERENCE_GROUPS.flatMap((group) => group.fields)
+    .filter((field) => field.key.startsWith("notifications."))
+    .every((field) => field.key.slice("notifications.".length) in DEFAULT_PREFERENCES.notifications),
+);
+// Both halves of the QC loop ship on: a reviewer silently opted out of the queue is a queue
+// nobody is working, and an AM who never hears their score is the point of the whole feature.
+check(
+  "both QC switches ship on",
+  DEFAULT_PREFERENCES.notifications.qcScoreReady && DEFAULT_PREFERENCES.notifications.qcQueueReady,
+);
 
 // ---------------------------------------------------------------------------
 // What is kept

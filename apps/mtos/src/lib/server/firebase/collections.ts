@@ -64,6 +64,28 @@ export function monthlyTouchArtifactPath(tenantId: string, touchId: string, arti
   return `${monthlyTouchArtifactsCollectionPath(tenantId, touchId)}/${artifactId}`;
 }
 
+/**
+ * One small document per touch that has reached QC, holding only what a list needs.
+ *
+ * A tenant-level collection rather than a field on each touch, and the reason is quota. The QC
+ * queue, the Scored tab, the Team cards and each AM's own history are all list pages, and a touch
+ * document carries its entire preparation pack -- hundreds of kilobytes. Answering "which touches
+ * are waiting to be scored" by reading touches would cost thousands of reads and megabytes a day,
+ * and this app has already had deploys fail on the Firestore daily read limit. Here the same
+ * question is an indexed query over documents a few hundred bytes each.
+ *
+ * The touch document stays the source of truth. Anything in here is a copy, written in the same
+ * operation as the touch, and a page that needs a detail not in the index reads the one touch.
+ */
+export function qcItemsCollectionPath(tenantId: string) {
+  return `${tenantPath(tenantId)}/qcItems`;
+}
+
+/** Keyed by the touch id: one QC item per touch, so re-running Finish cannot create a second. */
+export function qcItemPath(tenantId: string, touchId: string) {
+  return `${qcItemsCollectionPath(tenantId)}/${touchId}`;
+}
+
 export function commitmentsCollectionPath(tenantId: string) {
   return `${tenantPath(tenantId)}/commitments`;
 }

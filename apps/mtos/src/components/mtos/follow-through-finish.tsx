@@ -138,6 +138,24 @@ export function FollowThroughFinish({
         </div>
       ) : null}
 
+      {/* The handoff to QC, said separately from the seven steps. It is not something the AM
+          approved or can retry item by item, so it does not belong in that list -- but they do
+          need to know the touch has left their desk and who was told. */}
+      {result?.qc ? (
+        <div
+          className="callout"
+          style={{ borderLeftColor: result.qc.created ? "var(--violet, #6d5ae0)" : undefined }}
+        >
+          <span className="callout-ic">
+            {result.qc.created && result.qc.notified ? <Check /> : <AlertTriangle />}
+          </span>
+          <div>
+            <div className="callout-title">{result.qc.created ? "With QC" : "Already with QC"}</div>
+            <div className="callout-body">{result.qc.message}</div>
+          </div>
+        </div>
+      ) : null}
+
       <ul className="grid gap-2">
         {PROCESSING_STEPS.map((definition, index) => {
           const outcomeStep: StepResult | undefined = result?.steps.find((entry) => entry.id === definition.id);

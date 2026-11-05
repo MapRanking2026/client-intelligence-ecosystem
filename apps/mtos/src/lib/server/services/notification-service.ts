@@ -129,6 +129,56 @@ async function raise(context: TenantContext, candidate: Candidate, at: string): 
   return "created";
 }
 
+/**
+ * Raise one notification in somebody else's feed, once.
+ *
+ * Everything above this point writes into the feed of the user whose request it is. QC is the
+ * first thing in MTOS where one person's action produces a notification for another: an AM
+ * pressing Finish puts a touch in the reviewer's queue, a reviewer submitting a score tells the
+ * AM. So the recipient is a parameter rather than taken from the context.
+ *
+ * The caller's `context` is still what supplies the tenant, which is the part that matters for
+ * safety: this can only ever write inside the tenant the caller is already in.
+ *
+ * Preferences are honoured here rather than at the call site, so a kind somebody switched off
+ * cannot reach them through a path that forgot to ask. The return value distinguishes the three
+ * outcomes, because "nobody was told" and "they were already told" are different things to report
+ * on the screen that follows.
+ */
+export async function raiseNotificationForUser(
+  context: TenantContext,
+  userId: string,
+  candidate: {
+    kind: NotificationKind;
+    subjectId: string;
+    title: string;
+    detail: string;
+    href?: string;
+  },
+  at: string = new Date().toISOString(),
+): Promise<"created" | "existing" | "muted" | "unavailable"> {
+  const db = getFirebaseAdminDb();
+  if (!db) return "unavailable";
+
+  const preferences = await getAccountManagerPreferences({ ...context, userId }).catch(() => ({}));
+  if (!isNotificationEnabled(candidate.kind, preferences)) return "muted";
+
+  const id = notificationKey(candidate.kind, candidate.subjectId);
+  const ref = db.doc(tenantUserNotificationPath(context.tenantId, userId, id));
+  const existing = await ref.get();
+  if (existing.exists) return "existing";
+  await ref.set({
+    kind: candidate.kind,
+    title: candidate.title,
+    detail: candidate.detail,
+    tone: NOTIFICATION_TONE[candidate.kind],
+    createdAt: at,
+    ...(candidate.href ? { href: candidate.href } : {}),
+    subjectId: candidate.subjectId,
+  });
+  return "created";
+}
+
 export async function markNotificationsRead(
   context: TenantContext,
   ids: string[],

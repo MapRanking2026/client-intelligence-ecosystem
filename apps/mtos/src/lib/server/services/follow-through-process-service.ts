@@ -39,6 +39,7 @@ import { sendAgendaEmailViaIntercom } from "@/src/lib/server/services/intercom-s
 import { getNowIso } from "@/src/lib/server/services/mtos-ai";
 import { clientEmailSenderAddress } from "@/src/lib/server/services/user-service";
 import { hasPermission } from "@/src/lib/server/services/integration-permissions-service";
+import { handTouchToQc } from "@/src/lib/server/services/qc-handoff-service";
 
 /**
  * "Finish follow-through & process approved" -- the one place in the whole touch that writes out.
@@ -733,6 +734,47 @@ export async function processFollowThrough(
     ticketIds: state.ticketIds,
     ticketUrls: state.ticketUrls,
   });
+
+  // The touch as it now stands, which is what QC takes its evidence from. Built here rather than
+  // re-read: the four fields just persisted are the four the evidence depends on, and reading the
+  // document back to learn what we had only now written would be a Firestore read for nothing.
+  const finished: MonthlyTouchRecord = {
+    ...touch,
+    followThrough: {
+      ...touch.followThrough,
+      processing: result,
+      finishedAt: result.processedAt,
+      ticketIds: state.ticketIds,
+      ticketUrls: state.ticketUrls,
+    },
+  };
+
+  // Last, and never allowed to undo the run. Everything above this point has already been written
+  // out to ClickUp, Intercom and the trackers; a handoff that threw and turned the whole call into
+  // an error would invite the AM to press Finish again, having been told nothing happened when in
+  // fact all of it did.
+  try {
+    const handoff = await handTouchToQc(context, finished, client);
+    result.qc = {
+      created: handoff.created,
+      notified: handoff.notified.length,
+      message: handoff.message,
+    };
+  } catch (error) {
+    result.qc = {
+      created: false,
+      notified: 0,
+      message: `The follow-through is filed, but the touch could not be sent to QC: ${
+        error instanceof Error ? error.message : "unknown error"
+      }. Nothing was lost -- press Finish again to retry the handoff.`,
+    };
+  }
+
+  // A second write, on purpose. The run itself is persisted above, before the handoff, because
+  // that record is what makes every step skip itself on a retry -- losing it would mean a second
+  // Finish creating a second set of tickets. So the handoff's outcome follows in its own write
+  // rather than being held back to join the first one.
+  await persistProgress(context, touchId, { processing: result });
 
   return result;
 }

@@ -60,7 +60,25 @@ function record(id: string, over: Partial<NotificationRecord> = {}): Notificatio
 // The kinds
 // ---------------------------------------------------------------------------
 
-check("there are six kinds", NOTIFICATION_KINDS.length === 6);
+check("there are eleven kinds", NOTIFICATION_KINDS.length === 11);
+// A duplicate kind would make one of the two records silently win, and which one depends on
+// declaration order rather than on anything anybody decided.
+check("no kind is listed twice", new Set(NOTIFICATION_KINDS).size === NOTIFICATION_KINDS.length);
+check(
+  "the five QC kinds are all there",
+  (["qc_ready", "qc_scored", "qc_appeal_submitted", "qc_appeal_decided", "qc_chat_requested"] as const).every(
+    (kind) => NOTIFICATION_KINDS.includes(kind),
+  ),
+);
+// A QC score is a coaching conversation. Emailing one unprompted turns it into a letter from
+// management, so none of the five is on the email channel.
+check(
+  "no QC kind is emailed",
+  NOTIFICATION_KINDS.filter((kind) => kind.startsWith("qc_")).every(
+    (kind) => NOTIFICATION_CHANNEL[kind] === "in_app",
+  ),
+);
+check("the AM's own score is the one positive QC kind", NOTIFICATION_TONE.qc_scored === "positive");
 check("each has a channel", NOTIFICATION_KINDS.every((kind) => Boolean(NOTIFICATION_CHANNEL[kind])));
 check("each has a tone", NOTIFICATION_KINDS.every((kind) => Boolean(NOTIFICATION_TONE[kind])));
 // Emailing every event as it happens is five emails on a busy afternoon, which is how a
@@ -258,5 +276,10 @@ const _exhaustive: Record<NotificationKind, true> = {
   client_reply: true,
   daily_digest: true,
   weekly_digest: true,
+  qc_ready: true,
+  qc_scored: true,
+  qc_appeal_submitted: true,
+  qc_appeal_decided: true,
+  qc_chat_requested: true,
 };
 void _exhaustive;

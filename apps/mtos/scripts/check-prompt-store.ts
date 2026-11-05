@@ -5,6 +5,21 @@
  * without touching a real database.
  */
 import { __internal } from "../src/lib/server/prompt-store";
+import bundledLibrary from "../src/prompts/mtos-prompts.json";
+
+/**
+ * What the bundled library actually holds. Every count below is measured, never asserted.
+ *
+ * Narrowed to the two fields this file reads. TypeScript infers a different object type per phase
+ * from the JSON -- some prompts carry a `runtimeContract`, some do not -- and the union of those is
+ * unusable for a flatMap. Only `key` is on every entry, so only `key` is claimed here.
+ */
+const BUNDLED_PROMPTS: { key: string; runtimeContract?: string }[] = bundledLibrary.flatMap(
+  (phase) => phase.prompts as { key: string; runtimeContract?: string }[],
+);
+const BUNDLED_PROMPT_COUNT = BUNDLED_PROMPTS.length;
+const BUNDLED_KEYS = BUNDLED_PROMPTS.map((prompt) => prompt.key);
+const BUNDLED_CONTRACT_COUNT = BUNDLED_PROMPTS.filter((prompt) => "runtimeContract" in prompt).length;
 
 type Doc = Record<string, unknown>;
 
@@ -93,7 +108,15 @@ async function main() {
   const promptDocs = [...(db as FakeDb).store.keys()].filter((k) =>
     k.startsWith("promptEngine/library/prompts/"),
   );
-  check("seeds every prompt as its own document", promptDocs.length === 40, `${promptDocs.length} docs`);
+  // Counted against the bundled library rather than a literal. The three checks below used to
+  // assert 40 prompts across 9 phases, which the library outgrew long ago -- so they had been red
+  // for months and were guarding nothing. What they were written to catch is seeding losing a
+  // prompt, and that is a comparison with the source, which cannot drift.
+  check(
+    "seeds every prompt as its own document",
+    promptDocs.length === BUNDLED_PROMPT_COUNT,
+    `${promptDocs.length} docs of ${BUNDLED_PROMPT_COUNT}`,
+  );
   check("writes the order document", (db as FakeDb).store.has("promptEngine/library"));
 
   // 2. Seeding is idempotent across warm invocations.
@@ -105,8 +128,20 @@ async function main() {
   // 3. Reads reassemble phases in the original order.
   const config = await __internal.readFirestoreConfig(db);
   const totalPrompts = config.flatMap((p) => p.prompts).length;
-  check("phase count preserved", config.length === 9, `${config.length} phases`);
-  check("prompt count preserved", totalPrompts === 40, `${totalPrompts} prompts`);
+  check(
+    "phase count preserved",
+    config.length === bundledLibrary.length,
+    `${config.length} of ${bundledLibrary.length} phases`,
+  );
+  check(
+    "prompt count preserved",
+    totalPrompts === BUNDLED_PROMPT_COUNT,
+    `${totalPrompts} of ${BUNDLED_PROMPT_COUNT} prompts`,
+  );
+  check(
+    "every bundled key survived the round trip",
+    BUNDLED_KEYS.every((key) => config.flatMap((p) => p.prompts).some((p) => p.key === key)),
+  );
   check("preamble leads the library", config[0].phase === "Global Standard", config[0].phase);
   check(
     "first module intact",
@@ -116,7 +151,8 @@ async function main() {
   check("no Unassigned bucket when order is complete", !config.some((p) => p.phase === "Unassigned"));
   check(
     "runtime contracts survived the round trip",
-    config.flatMap((p) => p.prompts).filter((p) => p.runtimeContract).length === 6,
+    config.flatMap((p) => p.prompts).filter((p) => p.runtimeContract).length === BUNDLED_CONTRACT_COUNT,
+    `${config.flatMap((p) => p.prompts).filter((p) => p.runtimeContract).length} of ${BUNDLED_CONTRACT_COUNT}`,
   );
 
   // 4. The runtime path reads exactly one document.

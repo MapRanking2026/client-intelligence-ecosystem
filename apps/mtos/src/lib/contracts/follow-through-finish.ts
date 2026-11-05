@@ -160,6 +160,23 @@ export interface ProcessingResult {
   ticketUrls?: Record<string, string>;
   notesPageUrl?: string;
   processedAt?: string;
+  /**
+   * What happened when the touch was handed to QC.
+   *
+   * Carried on the result rather than added as an eighth step, because it is not one of the
+   * outward writes the AM approved item by item: they did not choose to send this to QC, finishing
+   * the follow-through is what sends it. Reporting it as a step would put it in the same list as
+   * the ticket that failed to create, and invite the AM to retry something that needs no retry.
+   */
+  qc?: QcHandoffSummary;
+}
+
+/** The handoff's outcome in the AM's own words. `created` is false on a re-run. */
+export interface QcHandoffSummary {
+  created: boolean;
+  /** How many reviewers were notified. Zero is a real answer and is said plainly. */
+  notified: number;
+  message: string;
 }
 
 /** Whether the run as a whole left anything the AM still has to do. */

@@ -26,6 +26,7 @@ import {
   getIntegrationDefinition,
   refreshIntegration,
 } from "@/src/lib/server/integrations";
+import { describeSnapshotRegression } from "@/src/lib/contracts/snapshot-regression";
 import { prepareMonthlyTouch } from "@/src/lib/server/services/monthly-touch-prep-service";
 import {
   clientPath,
@@ -461,8 +462,35 @@ async function saveIntegrationSnapshot(
     );
   }
 
+  // Compare this run against what is already stored before replacing it. A run that came back
+  // with nothing is refused outright; a run where some part of the payload collapsed to empty is
+  // written but says so, loudly, in the sync summary. See `describeSnapshotRegression`.
+  const existing = await db
+    .doc(integrationSnapshotPath(context.tenantId, providerId))
+    .get()
+    .catch(() => null);
+  const storedPayload = existing?.exists
+    ? (existing.data() as IntegrationSnapshotRecord).payload
+    : undefined;
+  const regression = describeSnapshotRegression(
+    getIntegrationDefinition(providerId).name,
+    result.snapshotPayload,
+    storedPayload,
+  );
+
+  if (regression?.refuse) {
+    console.warn(regression.note);
+    result.summary = `${result.summary} — ${regression.note}`;
+    return;
+  }
+  if (regression) {
+    console.warn(regression.note);
+    result.summary = `${result.summary} — ${regression.note}`;
+  }
+
   await db.doc(integrationSnapshotPath(context.tenantId, providerId)).set(document);
 }
+
 
 async function getConnectedRecord(context: TenantContext, providerId: IntegrationProviderId) {
   const record = await getIntegrationConnection(context, providerId);
@@ -3464,7 +3492,11 @@ export async function syncIntegrationProvider(
 
   try {
     const result = await runProviderSync(context, providerId, origin);
-    await Promise.all([finishSyncJob(context, job.id, providerId, result), saveIntegrationSnapshot(context, providerId, result)]);
+    // Sequential, not parallel: saving the snapshot may append a regression note to
+    // `result.summary` (see describeSnapshotRegression), and the job record has to carry it.
+    // Run in parallel these two raced and the warning landed nowhere anybody would read it.
+    await saveIntegrationSnapshot(context, providerId, result);
+    await finishSyncJob(context, job.id, providerId, result);
     if (result.touchedTouchIds?.length) {
       const touchIds = result.touchedTouchIds.slice(0, 25);
       for (const touchId of touchIds) {

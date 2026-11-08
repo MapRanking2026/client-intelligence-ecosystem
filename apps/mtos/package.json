@@ -56,7 +56,8 @@
     "check:qc-cards": "tsx scripts/check-qc-cards.ts",
     "check:notification-toasts": "tsx scripts/check-notification-toasts.ts",
     "check:qc-legacy": "tsx scripts/check-qc-legacy.ts",
-    "verify:gbp": "tsx scripts/verify-gbp-connection.ts"
+    "verify:gbp": "tsx scripts/verify-gbp-connection.ts",
+    "check:snapshot-regression": "tsx scripts/check-snapshot-regression.ts"
   },
   "dependencies": {
     "@cie/engine": "*",

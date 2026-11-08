@@ -60,15 +60,75 @@ const OAUTH_STATE_AUDIENCE = "mtos-integrations-oauth";
  * Map Ranking's own data feeds (ranking + check-ins), not personal accounts. Everything else is
  * stored per-user, so each account manager connects their own ClickUp, Google, GoHighLevel, etc.
  * and never sees a teammate's tokens. Changing this set changes where a provider's connection lives.
+ *
+ * ## Why Google Business Profile is shared (owner's decision, 8 November 2026)
+ *
+ * The listings belong to the agency, not to an account manager, and a per-user GBP connection was
+ * actively destroying the tenant's data every night. The snapshot a sync writes is **tenant-level**
+ * -- one document per provider, written with `.set()` and no merge (`saveIntegrationSnapshot`) --
+ * but the nightly job syncs per-user providers once per user, each under their own Google token.
+ * Three people had GBP connected, so three Google accounts took turns overwriting the whole
+ * tenant's GBP snapshot and the last one to run won. One of them could see a GBP account holding
+ * no locations, which is what a personal Google account that is not a member of the agency's
+ * location group returns -- so every night it replaced the real listings with nothing, and the
+ * briefs, the scorecard and every GBP panel downstream read blank.
+ *
+ * Measured on the live tenant, 8 November 2026: `accounts: 1, locations: 0, locationsByClient: 0,
+ * performance: 0, profileInsights: 0`, with three users holding valid `business.manage` tokens.
+ * Authentication was never the problem.
+ *
+ * Shared fixes the cause rather than the symptom: one connection means the shared loop syncs GBP
+ * exactly once per tenant, so there is no last-writer race left to lose.
+ *
+ * Two consequences worth stating, because neither is obvious from this line:
+ *
+ *  - A tenant-level GBP connection from before per-user scoping existed is still in Firestore
+ *    (last refreshed 31 August 2026) and was being hidden as an orphan. Adding GBP here surfaces
+ *    it, so the sync will try to refresh that credential rather than a fresh one. If its refresh
+ *    token has lapsed the sync fails loudly and an admin reconnects once -- which is the intended
+ *    operating model anyway. Nothing here rotates, moves or deletes any credential.
+ *  - Every user in the tenant now reads GBP through whoever authorised it. That is the point, and
+ *    it is also why `assertMayManageSharedConnection` restricts connecting and disconnecting a
+ *    shared provider to a tenant admin. The per-user GBP documents are left exactly where they
+ *    are, simply unused.
  */
 const sharedIntegrationProviders = new Set<IntegrationProviderId>([
   "rank-tracker",
   "geogrid",
   "map-checkins",
+  "google-business-profile",
 ]);
 
 export function isSharedIntegrationProvider(providerId: IntegrationProviderId) {
   return sharedIntegrationProviders.has(providerId);
+}
+
+/**
+ * Refuse to let a non-admin connect or disconnect a connection the whole tenant shares.
+ *
+ * A shared connection is one person's credential that everybody then reads through, so connecting
+ * it is not a personal act and disconnecting it takes the data away from every user at once. The
+ * owner's instruction for Google Business Profile was explicit: an admin signs in once and it is on
+ * for everyone. This is the half of that sentence the shared set alone does not express.
+ *
+ * It matters more than a tidy permission boundary. Sign-up is currently ungated, so anybody who
+ * knows the tenant id can create an account; without this, such an account could replace the
+ * agency's GBP credential with its own, or simply disconnect it. A per-user provider is unaffected
+ * -- each person still connects their own ClickUp, Gmail and GoHighLevel as before.
+ *
+ * Throws rather than returning a boolean because both call sites are actions, not renders: there is
+ * no sensible way to half-connect, and the message is what the settings page shows.
+ */
+function assertMayManageSharedConnection(context: TenantContext, providerId: IntegrationProviderId) {
+  if (!isSharedIntegrationProvider(providerId)) {
+    return;
+  }
+  if (context.role === "tenant_admin") {
+    return;
+  }
+  throw new Error(
+    `${getProviderDefinition(providerId).name} is connected once for the whole team, so only an admin can connect or disconnect it. Ask an admin to do it and it will be on for everybody, including you.`,
+  );
 }
 
 /**
@@ -1420,6 +1480,7 @@ export async function connectIntegration(
   origin?: string,
 ) {
   const provider = getProviderDefinition(providerId);
+  assertMayManageSharedConnection(context, providerId);
 
   if (provider.authMode === "oauth") {
     return {
@@ -1467,6 +1528,7 @@ export async function connectIntegration(
 
 export async function disconnectIntegration(context: TenantContext, providerId: IntegrationProviderId) {
   getProviderDefinition(providerId);
+  assertMayManageSharedConnection(context, providerId);
   await deleteStoredConnection(context, providerId);
 }
 

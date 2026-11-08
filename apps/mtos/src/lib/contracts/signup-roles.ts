@@ -21,10 +21,11 @@ import { QC_SPECIALIST_TITLE } from "@/src/lib/contracts/qc-access";
  * role before it writes anything, and `signupCodeEnvVar` below names the variable each role's code
  * comes from so the two cannot drift apart.
  *
- * A role whose variable is unset **cannot be signed up for at all** (owner's decision,
- * 5 November 2026). It used to mean the opposite -- unset was ungated, so anybody who knew the
- * tenant id could self-grant any role, Admin included, and neither variable was set on this
- * deployment. Failing closed is why the list can stay short and still be safe.
+ * A role whose variable is unset needs **no code**, so anybody who knows the tenant id can create
+ * an account in it -- Admin included -- and neither variable is set on this deployment. That is
+ * the owner's call (7 November 2026): while nobody is using the app, a sign-up form that cannot
+ * create an account is the bigger problem. Setting either variable gates its roles immediately,
+ * with no code change, which is why this list stays short.
  */
 
 export interface SignupRoleOption {

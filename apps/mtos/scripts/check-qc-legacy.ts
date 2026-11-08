@@ -150,8 +150,8 @@ check(
 
 console.log(`\n${passed} passed, ${failed} failed`);
 console.log("Not covered by these checks:");
-console.log("  - whether an invite code is actually SET in any environment. The route fails closed");
-console.log("    on an unset one, which is checked in the browser rather than here");
+console.log("  - whether an invite code is actually SET in any environment. An unset one means the");
+console.log("    role needs no code, so it is open to anyone who knows the tenant id");
 console.log("  - the server refusal in `generateQaReview`, which needs a database");
 console.log("  - how the tag looks on each of the four screens that show it");
 if (failed) process.exit(1);

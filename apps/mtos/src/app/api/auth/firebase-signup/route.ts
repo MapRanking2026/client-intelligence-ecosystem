@@ -26,10 +26,9 @@ const requestSchema = z.object({
 /**
  * The invite code this role needs, or "" when the deployment has not configured one.
  *
- * An empty string used to mean "no code required", which meant a role whose variable was unset
- * could be claimed by anybody who knew the tenant id -- including Admin. `requireCodeForRole` now
- * only reports what is configured; the decision about an unset one is made at the call site
- * below, where it fails closed.
+ * "" means no code is required, which is the long-standing behaviour of this route and the
+ * behaviour the owner asked for (7 November 2026). A role whose variable is unset is open to
+ * anyone who knows the tenant id; setting the variable is what gates it.
  */
 function requireCodeForRole(env: ReturnType<typeof getServerEnv>, role: Role) {
   const variable = signupCodeEnvVar(role);
@@ -53,34 +52,19 @@ export async function POST(request: Request) {
   const uid = decoded.uid;
 
   /*
-    The invite code, and what happens when there isn't one.
+    The invite code, when one is configured.
 
-    Fails closed (owner's decision, 5 November 2026). A role whose code is not configured cannot
-    be signed up for at all, rather than being open to anybody who knows the tenant id. Measured
-    on this deployment before the change: neither MTOS_MANAGER_SIGNUP_CODE nor
-    MTOS_ADMIN_SIGNUP_CODE was set, so every role -- Admin included -- could be self-granted.
+    An unset code means the role needs none, which is how this route has always worked. It was
+    briefly changed to refuse such a role outright and changed back at the owner's request
+    (7 November 2026): while nobody is using the app, a sign-up form that cannot create an account
+    is the bigger problem.
 
-    The message names the variable, because the only person who can clear this is whoever runs the
-    deployment, and "sign-up is unavailable" with no reason sends them hunting.
-
-    `GET /api/auth/firebase-signup/roles` reports the same state so the form can close the option
-    before the browser creates a Firebase Auth account. This check is the guarantee; that one is
-    what stops a refusal here stranding an auth account with no tenant behind it.
+    Worth knowing rather than hidden: with neither MTOS_MANAGER_SIGNUP_CODE nor
+    MTOS_ADMIN_SIGNUP_CODE set, anybody who knows the tenant id can create an account in any role,
+    Admin included. Setting either variable gates its roles immediately, with no code change.
   */
   const requiredCode = requireCodeForRole(env, body.role as Role);
-  if (!requiredCode) {
-    const variable =
-      signupCodeEnvVar(body.role as Role) === "adminSignupCode"
-        ? "MTOS_ADMIN_SIGNUP_CODE"
-        : "MTOS_MANAGER_SIGNUP_CODE";
-    return NextResponse.json(
-      {
-        error: `Sign-up for this role is closed: no invite code is configured for it. Set ${variable} on the deployment to open it.`,
-      },
-      { status: 403 },
-    );
-  }
-  if ((body.code || "") !== requiredCode) {
+  if (requiredCode && (body.code || "") !== requiredCode) {
     return NextResponse.json({ error: "Invalid invite code" }, { status: 401 });
   }
 

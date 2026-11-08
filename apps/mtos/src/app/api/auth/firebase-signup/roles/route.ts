@@ -9,12 +9,14 @@ import { getServerEnv } from "@/src/lib/server/env";
  * ## Why this exists at all
  *
  * The browser creates the Firebase Auth account **first**, and only then calls the sign-up route
- * to attach a tenant and a role. So a sign-up the server refuses leaves an auth account with no
- * tenant user document behind it: that person can no longer sign in ("User is not assigned to
- * this tenant") and can no longer sign up either, because their email is taken. Refusing late is
- * therefore not a safe way to say no -- the form has to know before it creates anything.
+ * to attach a tenant and a role. So anything the server would refuse has to be known to the form
+ * before it creates an account: a late refusal strands an auth account with no tenant behind it,
+ * and that person can no longer sign in ("User is not assigned to this tenant") or sign up again,
+ * because their email is taken.
  *
- * This answers that question, and the form greys out what it cannot offer.
+ * Today nothing is refused -- a role with no configured code needs none -- so every role comes
+ * back available, and `requiresCode` is the only field that varies. It still earns its place: it
+ * is what lets the form label the invite code as required rather than optional.
  *
  * ## What it does and does not reveal
  *
@@ -41,17 +43,18 @@ export async function GET() {
       /** True when a code is set for this role, so the form can mark the field required. */
       requiresCode: configured,
       /**
-       * Whether it can be chosen. A role with no configured code is closed rather than open: the
-       * server refuses it, and the form must not let somebody burn an email address finding out.
+       * Whether it can be chosen. Always true: an unconfigured code means the role needs none,
+       * which is exactly what the sign-up route does. Kept as a field rather than dropped so the
+       * form has somewhere to read a refusal from if that ever changes again.
        */
-      available: configured,
+      available: true,
     };
   });
 
   return NextResponse.json({
     data: {
       roles,
-      /** True when nothing can be signed up for, so the form can say so once instead of per row. */
+      /** True when nothing can be signed up for. False today; see `available` above. */
       allClosed: roles.every((role) => !role.available),
     },
   });

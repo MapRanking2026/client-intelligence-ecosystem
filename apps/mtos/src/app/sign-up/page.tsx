@@ -51,12 +51,12 @@ function SignUpContent() {
   const [availability, setAvailability] = useState<RoleAvailability[] | null>(null);
 
   /*
-    Which roles are open, asked before anything is created.
+    What each role needs, asked before anything is created.
 
-    The browser creates the Firebase Auth account first and only then asks the server for a tenant
-    and a role, so a refusal at that point strands an account that can neither sign in nor sign up
-    again -- the email is taken. Asking first is what keeps a closed role from costing somebody
-    their address. Until the answer arrives the form stays usable; the submit below re-checks.
+    Nothing is refused today: a role with no configured invite code needs none. This is read so
+    the invite-code field can say whether it is required, and so the form would know in advance if
+    a role were ever gated -- the browser creates the Firebase Auth account before the server sees
+    the request, so a late refusal would strand an account whose email is then taken.
   */
   useEffect(() => {
     let active = true;
@@ -71,10 +71,7 @@ function SignUpContent() {
     };
   }, []);
 
-  const statusFor = (value: Role) => availability?.find((entry) => entry.role === value);
-  const current = statusFor(role);
-  const closed = Boolean(availability && current && !current.available);
-  const allClosed = Boolean(availability?.length && availability.every((entry) => !entry.available));
+  const current = availability?.find((entry) => entry.role === role);
 
   return (
     <main className="min-h-screen bg-[#223453] bg-[radial-gradient(circle_at_top,rgba(215,245,236,0.10),rgba(3,10,18,1)_55%)] px-6 py-16 text-white">
@@ -109,14 +106,6 @@ function SignUpContent() {
                     throw new Error("Tenant ID is required.");
                   }
 
-                  // Re-checked here, before the account is created, for the reason in the effect
-                  // above. The server refuses this role too; this is what stops the refusal
-                  // arriving after an email address has already been spent.
-                  if (closed) {
-                    throw new Error(
-                      "Sign-up for this role is closed: no invite code is configured for it. Ask an admin to set it on the deployment.",
-                    );
-                  }
 
                   const credential = await createUserWithEmailAndPassword(
                     auth,
@@ -168,27 +157,16 @@ function SignUpContent() {
                 onChange={(event) => setRole(event.target.value as Role)}
                 className="w-full rounded-2xl border border-white/10 bg-black/25 px-4 py-3 text-sm text-white outline-none focus:border-white/20"
               >
-                {SIGNUP_ROLES.map((option) => {
-                  const status = statusFor(option.role);
-                  const shut = Boolean(availability && status && !status.available);
-                  return (
-                    <option key={option.role} value={option.role}>
-                      {option.label}
-                      {shut ? " — closed" : ""}
-                    </option>
-                  );
-                })}
+                {SIGNUP_ROLES.map((option) => (
+                  <option key={option.role} value={option.role}>
+                    {option.label}
+                  </option>
+                ))}
               </select>
               {/* What the chosen role actually gets, so nobody picks one by guessing at its name. */}
               <p className="text-xs leading-5 text-slate-400">
                 {SIGNUP_ROLES.find((option) => option.role === role)?.hint}
               </p>
-              {closed ? (
-                <p className="text-xs leading-5 text-amber-200">
-                  This role is closed right now — no invite code is configured for it. An admin can
-                  open it by setting the code on the deployment.
-                </p>
-              ) : null}
             </div>
 
             <div className="space-y-2">
@@ -234,16 +212,9 @@ function SignUpContent() {
               </div>
             ) : null}
 
-            {allClosed ? (
-              <div className="rounded-2xl border border-amber-400/25 bg-amber-500/12 px-4 py-3 text-sm text-amber-100">
-                Sign-up is closed for every role: this deployment has no invite codes configured.
-                Set MTOS_MANAGER_SIGNUP_CODE and MTOS_ADMIN_SIGNUP_CODE to open it.
-              </div>
-            ) : null}
-
             <button
               type="submit"
-              disabled={isPending || closed}
+              disabled={isPending}
               style={{ color: "#0d1625" }}
               className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-[#d7f5ec] px-4 py-3 text-sm font-semibold text-[#0d1625] transition hover:opacity-90 disabled:opacity-60"
             >

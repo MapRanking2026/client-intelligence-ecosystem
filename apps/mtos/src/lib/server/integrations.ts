@@ -230,6 +230,21 @@ function resolveGoHighLevelScopes() {
     "conversations.readonly",
     "conversations/message.readonly",
     "conversations/reports.readonly",
+    // The sub-account's tracking numbers and their friendly names, for the per-number call
+    // breakdown (owner's request, 8 November 2026). Every client runs several tracking numbers and
+    // the question being asked is "how many calls did THIS line take, and were they new callers" --
+    // which is unanswerable without knowing the numbers and what each one is called.
+    //
+    // The slug is `phonenumbers.read`, NOT `.readonly`. Every other scope in this list ends in
+    // `.readonly` and this one does not; HighLevel's own documentation for
+    // GET /phone-system/numbers/location/{locationId} states `phonenumbers.read`, and a scope GHL
+    // does not recognise fails the whole consent screen rather than being ignored. Verified
+    // against the marketplace docs on 8 November 2026; if GHL ever objects, GOHIGHLEVEL_SCOPES
+    // overrides this list without a deploy.
+    //
+    // It is a Sub-Account token scope, so a minted location token carries it -- which is how every
+    // per-client read in this file is already made.
+    "phonenumbers.read",
   ];
 }
 

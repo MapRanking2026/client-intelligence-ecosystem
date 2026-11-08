@@ -1,0 +1,76 @@
+# The MTOS notification run, every two hours.
+#
+# Why this exists at all: the schedule belongs in apps/mtos/vercel.json beside the other three
+# crons, and it was there -- "0 */2 * * *" -- until it took the whole project's deploys down.
+# Vercel Hobby accounts accept only one run per day per cron, and the rejection happens at config
+# validation, before anything is built, so every push after it failed with the same error whatever
+# the commit contained. Four production deploys were lost that way.
+#
+# Two hours is not a round number somebody liked. A prep reminder set to "2 hours before" cannot be
+# delivered by a job that runs once at nine in the morning, and RUN_INTERVAL_MS in
+# src/lib/contracts/notifications.ts works out the consequence: a reminder may arrive up to one
+# interval early, never late. Dropping to daily would not have slowed the feature down, it would
+# have made one of its settings undeliverable. So the cadence moved here and the Vercel cron stayed
+# as a once-a-day floor: if this workflow is disabled, throttled or forgotten, the run still happens
+# every day.
+#
+# The run is idempotent on a dedupe key, so an extra pass writes nothing new. That is what makes a
+# best-effort scheduler safe here. It is also the honest limit of this approach: GitHub delays
+# scheduled workflows under load, and it disables schedules on a repository with no activity for 60
+# days. A late trigger means a late reminder, which the contract above does not promise.
+
+name: MTOS notifications
+
+on:
+  schedule:
+    # Minute 5 rather than 0: GitHub queues every workflow in the world that asks for the top of
+    # the hour, and the wait is shorter a few minutes later.
+    - cron: "5 */2 * * *"
+  workflow_dispatch:
+
+# One at a time. A delayed run and the next scheduled one must not overlap.
+concurrency:
+  group: mtos-notifications
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Call the notification run
+        env:
+          # The deployment to call. This project's Vercel Authentication is set to "all except
+          # custom domains", and mtos.mapranking.com is its one verified custom domain -- so that
+          # host reaches the route while every .vercel.app URL is bounced to a login page. Measured
+          # 2026-11-05: this host answers 401 {"error":"Unauthorized"} from the route's own guard
+          # below, the .vercel.app URL answers 302 to vercel.com/sso-api. A repository variable can
+          # point this elsewhere without editing the file.
+          BASE_URL: ${{ vars.MTOS_BASE_URL || 'https://mtos.mapranking.com' }}
+          # The route's own guard: it answers 401 to anything without this.
+          CRON_SECRET: ${{ secrets.MTOS_CRON_SECRET }}
+          # Only needed if BASE_URL is ever pointed at a .vercel.app URL, which Vercel Authentication
+          # protects. Unset while the custom domain above is in use, and the header is then omitted.
+          BYPASS: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${CRON_SECRET}" ]; then
+            echo "MTOS_CRON_SECRET is not set on this repository. Add it under Settings -> Secrets and variables -> Actions."
+            exit 1
+          fi
+
+          # --fail-with-body so a 4xx or 5xx fails the step and still prints what the server said.
+          # Secrets travel as headers, which curl does not echo, and GitHub masks them in the log.
+          status=$(curl --silent --show-error --fail-with-body \
+            --max-time 300 \
+            --write-out '%{http_code}' \
+            --output response.json \
+            --header "Authorization: Bearer ${CRON_SECRET}" \
+            ${BYPASS:+--header "x-vercel-protection-bypass: ${BYPASS}"} \
+            "${BASE_URL}/api/cron/notifications")
+
+          echo "HTTP ${status}"
+          # The report says how many notifications were raised per tenant and which were skipped.
+          head -c 4000 response.json
+          echo

@@ -603,15 +603,12 @@ console.log("\nturning stored leads into countable calls");
     ]).calls[0].label === "missed",
   );
 
-  // Pinned because it is surprising and because it moves the Missed figure: where a lead was
-  // already vetted "valid / valid new lead", that stored verdict currently outranks a recorded
-  // no-answer, so the call reads GOOD rather than MISSED. That is `resolveCallLabel`'s layer order
-  // (contracts/call-labels.ts), shipped in Phase A and deliberately not changed here. Whether a
-  // recorded no-answer -- a fact about the call -- should beat a judgement about the lead is the
-  // owner's call, not this file's. Pinning it means the day that order changes, this says so.
+  // The owner decided (8 November 2026) that a recorded no-answer outranks the old nine-category
+  // verdict: a voicemail must not be reported as a Good call because the lead behind it was vetted
+  // a valid new lead. The two were never in conflict -- a voicemail from a real prospect is both.
   check(
-    "a stored valid verdict currently outranks a recorded no-answer",
-    toCallRecords([{ ...companionRecord, callStatus: "no-answer" }]).calls[0].label === "good",
+    "a recorded no-answer outranks a stored valid verdict",
+    toCallRecords([{ ...companionRecord, callStatus: "no-answer" }]).calls[0].label === "missed",
   );
 }
 

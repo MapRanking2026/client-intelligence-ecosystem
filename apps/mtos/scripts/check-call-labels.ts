@@ -17,6 +17,7 @@ import {
   automaticCallLabel,
   callLabelFromVerdict,
   hasRecordedDirection,
+  hasRecordedNoAnswer,
   isInboundCall,
   moreIsBetter,
   resolveCallLabel,
@@ -224,6 +225,68 @@ console.log("\nwhich layer wins");
   });
   check("a stored spam verdict beats a long duration", verdictWins.label === "spam");
   check("and says where it came from", verdictWins.reason.includes("earlier verification"));
+
+  // The owner's decision, 8 November 2026: a recorded no-answer is a fact and beats the verdict.
+  const recordedFact = resolveCallLabel({
+    status: "valid",
+    category: "valid_new_lead",
+    callStatus: "voicemail",
+  });
+  check("a recorded voicemail beats a stored 'valid new lead' verdict", recordedFact.label === "missed");
+  check("and the reason quotes what GoHighLevel recorded", recordedFact.reason.includes("voicemail"));
+  check(
+    "and says the lead verdict is a separate question, rather than contradicting it",
+    recordedFact.reason.includes("separate question"),
+  );
+  for (const [status, category] of [
+    ["valid", "existing_customer"],
+    ["valid", "out_of_area"],
+    ["flagged", "duplicate"],
+    ["needs_review", "valid_new_lead"],
+  ] as const) {
+    check(
+      `a no-answer outranks "${status} / ${category}"`,
+      resolveCallLabel({ status, category, callStatus: "no-answer" }).label === "missed",
+    );
+  }
+  check(
+    "but a HAND-SET label still wins over the recorded fact",
+    resolveCallLabel({
+      status: "valid",
+      category: "valid_new_lead",
+      callStatus: "voicemail",
+      callLabel: "spam",
+      labelSource: "manual",
+    }).label === "spam",
+  );
+  check(
+    "and so does AI review, which read the call on purpose",
+    resolveCallLabel({
+      status: "valid",
+      category: "valid_new_lead",
+      callStatus: "voicemail",
+      callLabel: "spam",
+      labelSource: "ai",
+    }).label === "spam",
+  );
+  check(
+    "an ANSWERED call's verdict is untouched by this -- only no-answer is a fact",
+    resolveCallLabel({
+      status: "flagged",
+      category: "spam",
+      callStatus: "completed",
+      callDurationSec: 300,
+    }).label === "spam",
+  );
+  check(
+    "and the ABSENCE of a status is not a recorded fact, so it overrules nothing",
+    resolveCallLabel({ status: "valid", category: "valid_new_lead" }).label === "good",
+  );
+  check("no status is not a recorded no-answer", !hasRecordedNoAnswer(undefined));
+  check("an empty status is not either", !hasRecordedNoAnswer("   "));
+  check("'completed' is not a no-answer", !hasRecordedNoAnswer("completed"));
+  check("'voicemail' is", hasRecordedNoAnswer("voicemail"));
+  check("'No-Answer' is, whatever the case", hasRecordedNoAnswer("No-Answer"));
 
   const textBeatsVerdict = resolveCallLabel({
     status: "needs_review",

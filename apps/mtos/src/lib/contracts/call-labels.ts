@@ -26,11 +26,19 @@ export type { CallLabel, CallLabelSource };
  * out as the automatic layer's best reading, flagged as automatic, and a person can overrule it.
  * Re-deriving is free and nothing is lost if these rules change next month.
  *
- * ## The three layers, in the order they win
+ * ## The layers, in the order they win
+ *
+ * Three of them are decisions somebody made; two are readings of the data.
  *
  * 1. **Manual.** A label a person set by hand. It wins over everything and survives a re-pull.
  * 2. **AI review.** The vetting pass, where it ran and had something to read.
- * 3. **Automatic rules.** Always on, and the fallback. Never absent, so no call is unlabelled.
+ * 3. **A recorded fact.** Where GoHighLevel recorded that nobody answered, the call is missed --
+ *    see `hasRecordedNoAnswer`. This outranks the old nine-category verdict below it, because
+ *    whether the phone was picked up is a record of the call, while the verdict is a judgement
+ *    about the lead. A voicemail from a real prospect is honestly both.
+ * 4. **The stored verdict.** The old nine categories, read where they are specific enough to mean
+ *    something. This is what lets pulls made before 8 November 2026 appear here at all.
+ * 5. **Automatic rules.** Always on, and the fallback. Never absent, so no call is unlabelled.
  *
  * Every row can say which layer decided and why, because a label on a client's call with no
  * visible reasoning is the thing an AM cannot defend in a meeting.
@@ -101,6 +109,24 @@ export const HANGUP_MAX_SECONDS = 6;
 
 /** Call statuses that mean nobody picked up. */
 const MISSED_STATUS = /missed|no-?answer|no_answer|voicemail|busy|failed|cancel|unanswered|declin/i;
+
+/**
+ * Whether GoHighLevel actually recorded that nobody answered this call.
+ *
+ * This is a FACT about the call, not a reading of it, and that distinction is the whole point of
+ * the function existing separately from `automaticCallLabel`. That function also returns "missed"
+ * when there is no duration AND no status -- but that is the ABSENCE of data, not evidence of a
+ * missed call, and it must not be allowed to overrule anything.
+ *
+ * `lead-verification-service.ts` has taken the same view since long before this file existed: it
+ * marks a no-answer call `missed_call` up front and re-asserts that status after the AI pass,
+ * because "whether a call was answered is a FACT from its metadata, not a judgment". This is the
+ * same rule, applied one layer further along.
+ */
+export function hasRecordedNoAnswer(callStatus: string | undefined): boolean {
+  const status = (callStatus || "").trim();
+  return Boolean(status) && MISSED_STATUS.test(status);
+}
 
 /** Wording that only appears in a robocall or a cold sales script. */
 const SPAM_WORDING =
@@ -265,10 +291,11 @@ export interface ResolvedLabel {
 /**
  * The label a call should show right now, respecting the layer order.
  *
- * A manual label is returned untouched. Otherwise the stored AI label is used where there is one,
- * and the automatic rules answer when there is not. The old nine-category verdict is consulted
- * before the automatic rules only when it is specific enough to mean something -- see
- * `callLabelFromVerdict`.
+ * A manual label is returned untouched, then a stored AI label where there is one. After those,
+ * a recorded no-answer settles it -- the phone system said nobody picked up, and that outranks any
+ * reading of the lead. Only then is the old nine-category verdict consulted, and only where it is
+ * specific enough to mean something (see `callLabelFromVerdict`); the automatic rules answer when
+ * it is not. The full order, and why, is at the top of this file.
  */
 export function resolveCallLabel(lead: LabelledLead): ResolvedLabel {
   if (lead.labelSource === "manual" && lead.callLabel) {
@@ -283,6 +310,27 @@ export function resolveCallLabel(lead: LabelledLead): ResolvedLabel {
       label: lead.callLabel,
       source: "ai",
       reason: lead.labelReason || "AI review read the call and set this label.",
+    };
+  }
+
+  // A recorded no-answer beats the old nine-category verdict, on the owner's instruction
+  // (8 November 2026) and measured on live data: of 121 real calls GoHighLevel recorded as
+  // unanswered, 32 were stored under some other verdict, and 3 of those were being reported as
+  // Good or Unrelated -- a voicemail shown to a client as an answered call.
+  //
+  // This sits BELOW a hand-set label and below AI review, which are deliberate decisions about
+  // the label itself, and ABOVE the verdict, which is a judgement about the lead rather than a
+  // record of the call. The two were never really in conflict: a voicemail from somebody who
+  // genuinely wants a quote is both a missed call AND a valid new lead. The old nine categories
+  // had no single word for that, so the verdict had to pick one and picked the wrong one for this
+  // column. The lead & call verification page still shows that verdict, untouched.
+  if (hasRecordedNoAnswer(lead.callStatus)) {
+    return {
+      label: "missed",
+      source: "automatic",
+      reason: `Nobody answered — GoHighLevel recorded this call as "${(lead.callStatus || "").trim()}".${
+        lead.category ? ` The earlier verification read the lead itself as "${lead.category}", which is a separate question from whether the phone was picked up.` : ""
+      }`,
     };
   }
 

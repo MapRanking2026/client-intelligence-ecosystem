@@ -4,6 +4,7 @@ import { z } from "zod";
 import type { TenantContext } from "@/src/lib/contracts/mtos";
 import type { IntegrationSnapshotRecord } from "@/src/lib/contracts/integration-sync";
 import type {
+  CallLabel,
   LeadCategory,
   LeadChannel,
   LeadChannelCount,
@@ -15,7 +16,7 @@ import type {
   VerifiedLead,
 } from "@/src/lib/mtos-data";
 import { LEAD_CHANNEL_LABEL } from "@/src/lib/mtos-data";
-import { automaticCallLabel } from "@/src/lib/contracts/call-labels";
+import { CALL_LABEL_LABEL, automaticCallLabel } from "@/src/lib/contracts/call-labels";
 import { getMtosDataSource } from "@/src/lib/server/data/seed-mtos-data-source";
 import { getFirebaseAdminDb } from "@/src/lib/server/firebase/admin";
 import { withQuotaFallback } from "@/src/lib/server/firebase/quota";
@@ -802,6 +803,79 @@ export async function applyLeadVerdicts(
   const review: LeadVerificationReview = {
     ...existing,
     leads,
+    totals: computeTotals(leads),
+    byChannel: computeByChannel(leads),
+  };
+  await persistReview(db, context.tenantId, review);
+  return review;
+}
+
+/**
+ * Set or clear the five-label reading of one or more calls, by hand.
+ *
+ * Additive on purpose: this touches `callLabel` / `labelSource` / `labelReason` and nothing else.
+ * The nine-category verdict, the status, the channel and the recording are left exactly as they
+ * are, so the lead & call verification page keeps reporting what it always did and a label set on
+ * the dashboard cannot quietly change what that page shows.
+ *
+ * Clearing (`label: null`) restores the automatic reading rather than storing a label of its own.
+ * That is what "Reset to automatic" has to mean -- if it wrote today's automatic answer as a fixed
+ * label, the row would stop following the rules the day the rules improved, and nobody would know
+ * which rows were frozen.
+ *
+ * The automatic label is deliberately not consulted here. `resolveCallLabel` re-derives it from the
+ * call's own metadata every time it is read, so a reset row shows this run's rules.
+ */
+export async function applyCallLabels(
+  context: TenantContext,
+  clientId: string,
+  labels: Record<string, { label: CallLabel | null; reason?: string }>,
+): Promise<LeadVerificationReview> {
+  const db = getFirebaseAdminDb();
+  if (!db) {
+    throw new Error("Lead verification is not available without the Firestore-backed data source.");
+  }
+  const existing = await getStoredLeadVerification(context, clientId);
+  if (!existing) {
+    throw new Error("Run verification first — there is nothing to label yet.");
+  }
+
+  let touched = 0;
+  const leads = existing.leads.map((lead) => {
+    const change = labels[lead.id];
+    if (!change) return lead;
+    touched += 1;
+
+    if (change.label === null) {
+      // Drop the hand-set fields entirely rather than writing an empty string, so
+      // `resolveCallLabel` falls through to the layer below as if nothing was ever set.
+      const reset = { ...lead };
+      delete reset.callLabel;
+      delete reset.labelSource;
+      delete reset.labelReason;
+      return reset;
+    }
+
+    return {
+      ...lead,
+      callLabel: change.label,
+      labelSource: "manual" as const,
+      labelReason:
+        change.reason?.trim() ||
+        `${CALL_LABEL_LABEL[change.label]} — set by hand on the call dashboard.`,
+    };
+  });
+
+  if (!touched) {
+    throw new Error("None of those calls are in the stored pull, so there was nothing to label.");
+  }
+
+  const review: LeadVerificationReview = {
+    ...existing,
+    leads,
+    // The five labels sit alongside the nine categories, so the totals and the channel breakdown
+    // are recomputed from the untouched status/category fields and come out unchanged. Recomputing
+    // anyway keeps this function honest if that ever stops being true.
     totals: computeTotals(leads),
     byChannel: computeByChannel(leads),
   };

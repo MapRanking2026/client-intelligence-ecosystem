@@ -20,6 +20,7 @@ import { loadEnvConfig } from "@next/env";
 
 import { CALL_LABELS, CALL_LABEL_LABEL, CALL_LABEL_TONE } from "@/src/lib/contracts/call-labels";
 import { columnLayout, donutArcs } from "@/src/lib/contracts/brief-charts";
+import { buildCallTable, withLabelProvenance } from "@/src/lib/contracts/call-dashboard";
 import {
   callMix,
   callsByNumber,
@@ -161,6 +162,39 @@ async function main() {
         problems.push(`${doc.id}: the columns hold a different number of calls than the tiles`);
       }
       const labelled = stacked.buckets.filter((bucket) => bucket.showLabel).length;
+      // Phase D's table, from the same real calls.
+      const table = withLabelProvenance(
+        buildCallTable(calls, period, {}, { everPulled: true, limit: 250 }),
+        review.leads || [],
+      );
+      const tabSum = table.tabs.slice(1).reduce((sum, tab) => sum + tab.count, 0);
+      if (tabSum !== table.tabs[0].count) {
+        reconciliationFailures += 1;
+        problems.push(`${doc.id}: the filter tabs sum to ${tabSum} but All says ${table.tabs[0].count}`);
+      }
+      if (table.tabs[0].count !== inPeriod.length) {
+        reconciliationFailures += 1;
+        problems.push(`${doc.id}: the table's All tab says ${table.tabs[0].count}, the tiles say ${inPeriod.length}`);
+      }
+      if (table.state !== "rows" && inPeriod.length > 0) {
+        reconciliationFailures += 1;
+        problems.push(`${doc.id}: ${inPeriod.length} calls in the period but the table reports "${table.state}"`);
+      }
+      // A row must never show a label with no display name, and never a bare snake_case word.
+      const badLabel = table.rows.find((row) => !row.labelName || row.labelName.includes("_"));
+      if (badLabel) {
+        reconciliationFailures += 1;
+        problems.push(`${doc.id}: row ${badLabel.id} would show the label "${badLabel.labelName}"`);
+      }
+      const noReason = table.rows.filter((row) => !row.reason || row.reason.length < 10).length;
+      if (noReason) {
+        reconciliationFailures += 1;
+        problems.push(`${doc.id}: ${noReason} row(s) would show a label with no reason behind it`);
+      }
+      const byHand = table.rows.filter((row) => row.overridden).length;
+      const withRecording = table.rows.filter((row) => row.recordingUrl).length;
+      const withTopic = table.rows.filter((row) => row.topic).length;
+
 
       // The three views of the same calls must agree, or a client sees one figure in a tile and a
       // different one in the chart below it.
@@ -219,6 +253,9 @@ async function main() {
       );
       console.log(
         `   shapes:    donut ${donut.length} arc(s) summing to ${Math.round(donutShare * 100)}%  ·  ${stacked.buckets.length} column(s), tallest ${Math.round(tallest)}% of the panel, ${labelled} labelled`,
+      );
+      console.log(
+        `   table:     ${table.rows.length} row(s) of ${inPeriod.length}, state "${table.state}"  ·  ${byHand} set by hand  ·  ${withRecording} playable  ·  ${withTopic} with a topic`,
       );
       console.log(`   reconciles: ${agrees ? "yes" : "NO"}`);
     }

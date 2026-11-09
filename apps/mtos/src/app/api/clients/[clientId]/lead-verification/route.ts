@@ -7,6 +7,7 @@ import { orderByOccurredAt } from "@cie/core";
 import { resolveTenantContext } from "@/src/lib/auth/resolve-tenant-context";
 import {
   addManualLeads,
+  applyCallLabels,
   applyLeadVerdicts,
   getStoredLeadVerification,
   runLeadVerification,
@@ -48,6 +49,21 @@ const requestSchema = z.discriminatedUnion("action", [
     verdicts: z.record(
       z.string(),
       z.object({ status: statusEnum.optional(), category: categoryEnum.optional() }),
+    ),
+  }),
+  /*
+    The five-label reading, set or cleared by hand. Separate from set_verdict on purpose: the two
+    write different fields, and a dashboard label must not be able to change what the lead & call
+    verification page reports. `label: null` clears it and restores the automatic reading.
+  */
+  z.object({
+    action: z.literal("set_label"),
+    labels: z.record(
+      z.string(),
+      z.object({
+        label: z.enum(["good", "missed", "spam", "job_seeker", "unrelated"]).nullable(),
+        reason: z.string().max(400).optional(),
+      }),
     ),
   }),
   z.object({
@@ -117,6 +133,9 @@ export async function POST(
         break;
       case "set_verdict":
         review = await applyLeadVerdicts(context, clientId, payload.verdicts);
+        break;
+      case "set_label":
+        review = await applyCallLabels(context, clientId, payload.labels);
         break;
       case "add_manual_leads":
         review = await addManualLeads(context, clientId, payload.leads);

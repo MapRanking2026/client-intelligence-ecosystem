@@ -13,8 +13,14 @@ import {
   PeriodChip,
 } from "@/src/components/mtos/call-dashboard";
 import { CallDashboardToolbar } from "@/src/components/mtos/call-dashboard-toolbar";
+import { CallTable } from "@/src/components/mtos/call-table";
 import { resolveTenantContext } from "@/src/lib/auth/resolve-tenant-context";
-import { numberFilterOptions } from "@/src/lib/contracts/call-dashboard";
+import { CALL_LABELS, type CallLabel } from "@/src/lib/contracts/call-labels";
+import {
+  buildCallTable,
+  numberFilterOptions,
+  withLabelProvenance,
+} from "@/src/lib/contracts/call-dashboard";
 import {
   COMPARISON_MODE_LABEL,
   callMix,
@@ -92,6 +98,9 @@ export default async function CallDashboardPage({
     ? (one("compare") as ComparisonMode)
     : "previous_period";
   const numberFilter = one("number");
+  const labelFilter = CALL_LABELS.includes(one("label") as CallLabel)
+    ? (one("label") as CallLabel)
+    : undefined;
 
   if (!selected) {
     return (
@@ -164,6 +173,22 @@ export default async function CallDashboardPage({
     ? compareNumbers(numbers, callsByNumber(before))
     : undefined;
 
+  /*
+    The table is built from the UNFILTERED calls so its tab counts can narrow themselves, and then
+    given the leads so each row can say which layer set its label and why. `everPulled` is the one
+    thing the contract cannot work out: a client with no stored review and a client whose stored
+    review covers a silent month both arrive as an empty array, and those are different sentences.
+  */
+  const table = withLabelProvenance(
+    buildCallTable(
+      calls,
+      period,
+      { label: labelFilter, number: numberFilter },
+      { everPulled: Boolean(review), limit: 250 },
+    ),
+    review?.leads || [],
+  );
+
   const periodLabel = LEAD_WINDOW_LABEL[preset];
   const comparisonLabel = COMPARISON_MODE_LABEL[comparison];
 
@@ -229,6 +254,7 @@ export default async function CallDashboardPage({
           periodLabel={periodLabel}
           comparisonLabel={comparisonLabel}
         />
+        <CallTable clientId={selected.id} table={table} totalInPeriod={inPeriod.length} />
       </div>
     </AppShell>
   );

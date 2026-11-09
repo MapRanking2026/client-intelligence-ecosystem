@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowLeft, Palette, PhoneIncoming } from "lucide-react";
+import { ArrowLeft, FileText, Palette, PhoneIncoming } from "lucide-react";
 
 import { AppShell } from "@/src/components/mtos/app-shell";
 import { ClientHint } from "@/src/components/mtos/client-hint";
@@ -205,6 +205,20 @@ export default async function CallDashboardPage({
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          {/*
+            The report carries the period, the comparison and the number filter across, but NOT
+            the label filter: a client report filtered to one label answers a question nobody
+            asked, and filtered to Missed it is an accusation.
+          */}
+          <Link
+            href={`/calls/report?client=${selected.id}&period=${preset}&compare=${comparison}${
+              numberFilter ? `&number=${numberFilter}` : ""
+            }`}
+            className="btn btn-ghost btn-sm"
+          >
+            <FileText />
+            Client report
+          </Link>
           <Link href="/settings/report-brand" className="btn btn-ghost btn-sm">
             <Palette />
             Report branding

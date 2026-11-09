@@ -37,6 +37,7 @@ export function ReportBrandClient({ initialBrand }: { initialBrand: ReportBrand 
   const [font, setFont] = useState(initialBrand.font);
   const [primary, setPrimary] = useState(initialBrand.primaryColor || "1a73e8");
   const [logoDataUrl, setLogoDataUrl] = useState(initialBrand.logoDataUrl || "");
+  const [includeRecordings, setIncludeRecordings] = useState(initialBrand.includeRecordings === true);
   const [saving, setSaving] = useState(false);
   const [extracting, setExtracting] = useState(false);
   const [msg, setMsg] = useState<{ tone: "good" | "risk"; text: string } | null>(null);
@@ -92,7 +93,7 @@ export function ReportBrandClient({ initialBrand }: { initialBrand: ReportBrand 
     try {
       const res = await fetch("/api/settings/report-brand", {
         method: "PUT", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ companyName, reportTypeLabelDefault: reportTypeLabel, footerText, font, primaryColor: p, logoDataUrl }),
+        body: JSON.stringify({ companyName, reportTypeLabelDefault: reportTypeLabel, footerText, font, primaryColor: p, logoDataUrl, includeRecordings }),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Couldn't save");
@@ -158,6 +159,32 @@ export function ReportBrandClient({ initialBrand }: { initialBrand: ReportBrand 
             </div>
           </div>
         </div>
+
+        {/*
+          Recordings are internal by default. A recording is a customer speaking, captured so we
+          could review the call; a client report is a document that gets forwarded, so embedding
+          them is a decision somebody makes here rather than something that happens quietly. The
+          dashboard and the verification page are unaffected -- the team always has playback.
+        */}
+        <label className="panel flex items-start gap-3" style={{ cursor: "pointer" }}>
+          <input
+            type="checkbox"
+            checked={includeRecordings}
+            onChange={(e) => setIncludeRecordings(e.target.checked)}
+            style={{ width: 16, height: 16, marginTop: 2, flex: "none" }}
+          />
+          <span>
+            <span className="text-[0.88rem]" style={{ color: "var(--text)", fontWeight: 600 }}>
+              Include call recordings in client reports
+            </span>
+            <span className="muted mt-1 block text-[0.8rem]">
+              Off by default, and off is the right answer for most workspaces: the recordings stay
+              internal, on the call dashboard and the verification page, where the team can always
+              play them. Turn this on only where the client is entitled to hear the calls, and
+              remember a printed report travels further than the person you send it to.
+            </span>
+          </span>
+        </label>
 
         {msg ? <div className={`chip ${msg.tone}`} style={{ alignSelf: "flex-start" }}>{msg.tone === "good" ? <Check style={{ width: 13, height: 13 }} /> : null}{msg.text}</div> : null}
 

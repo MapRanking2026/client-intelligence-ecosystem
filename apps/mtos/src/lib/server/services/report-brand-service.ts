@@ -45,6 +45,14 @@ export interface ReportBrand {
    * default MapRanking logo bundled with the report generator.
    */
   logoDataUrl?: string;
+  /**
+   * Whether a client-facing report may embed the call recordings.
+   *
+   * False unless somebody deliberately turns it on, and false is also what an unset field reads
+   * as. A recording is a customer speaking, captured for our own review; putting it in a document
+   * that gets forwarded is a decision a human makes per workspace, not a default.
+   */
+  includeRecordings?: boolean;
   updatedAt?: string;
   updatedBy?: string;
 }
@@ -55,6 +63,7 @@ export const MAPRANKING_BRAND: ReportBrand = {
   reportTypeLabelDefault: "Local SEO Performance Report",
   footerText: "Confidential  |  mapranking.com",
   font: "Arial",
+  includeRecordings: false,
   primaryColor: "1a73e8",
   colors: {
     navy: "0d1b2a",

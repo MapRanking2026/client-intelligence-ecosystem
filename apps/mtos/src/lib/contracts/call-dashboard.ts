@@ -147,6 +147,25 @@ export function formatPhone(phone: string | undefined): string | undefined {
   return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`;
 }
 
+/**
+ * The number to print UNDER the caller's name, or nothing.
+ *
+ * Where the CRM has no name for a caller it stores the number as the name, so a cell built from
+ * `name || phone` with the phone repeated beneath prints "(415) 825-7214" twice, one above the
+ * other. Live data on 9 November 2026: most callers on most clients have no CRM name, so this was
+ * the usual row rather than an edge case.
+ *
+ * Only a pair of real, parseable numbers counts as a repeat. Two names that both fail to parse
+ * are not equal just because neither is a phone number.
+ */
+export function callerSubline(name: string | undefined, phone: string | undefined): string | undefined {
+  if (!name || !phone) return undefined;
+  const a = normalisePhone(name);
+  const b = normalisePhone(phone);
+  if (a && b && a === b) return undefined;
+  return phone;
+}
+
 // ---------------------------------------------------------------------------
 // The table
 // ---------------------------------------------------------------------------

@@ -60,6 +60,7 @@
     "check:snapshot-regression": "tsx scripts/check-snapshot-regression.ts",
     "check:call-labels": "tsx scripts/check-call-labels.ts",
     "check:call-report": "tsx scripts/check-call-report.ts",
+    "check:call-client-report": "tsx scripts/check-call-client-report.ts",
     "check:call-dashboard": "tsx scripts/check-call-dashboard.ts",
     "verify:call-labels": "tsx scripts/verify-call-labels.ts",
     "verify:call-report": "tsx scripts/verify-call-report.ts"

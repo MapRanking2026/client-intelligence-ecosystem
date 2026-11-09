@@ -5,7 +5,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Loader2, MessageSquareText, RotateCcw, X } from "lucide-react";
 
 import { CALL_LABELS, CALL_LABEL_LABEL, type CallLabel } from "@/src/lib/contracts/call-labels";
-import type { CallDashboardTable, CallTableRow } from "@/src/lib/contracts/call-dashboard";
+import { callerSubline, type CallDashboardTable, type CallTableRow } from "@/src/lib/contracts/call-dashboard";
 
 /**
  * The calls table: the evidence under every figure above it.
@@ -174,7 +174,7 @@ export function CallTable({
                     <span style={{ color: "var(--text)", fontWeight: 600 }}>
                       {row.callerName || row.callerPhone || "Not recorded"}
                     </span>
-                    {row.callerName && row.callerPhone ? (
+                    {callerSubline(row.callerName, row.callerPhone) ? (
                       <div className="muted text-[0.74rem]">{row.callerPhone}</div>
                     ) : null}
                     {row.callsFromThisCaller > 1 ? (

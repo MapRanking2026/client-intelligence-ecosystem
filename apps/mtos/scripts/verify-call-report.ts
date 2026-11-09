@@ -21,6 +21,7 @@ import { loadEnvConfig } from "@next/env";
 import { CALL_LABELS, CALL_LABEL_LABEL, CALL_LABEL_TONE } from "@/src/lib/contracts/call-labels";
 import { columnLayout, donutArcs } from "@/src/lib/contracts/brief-charts";
 import { buildCallTable, withLabelProvenance } from "@/src/lib/contracts/call-dashboard";
+import { reportSummaryLines, toReportRows } from "@/src/lib/contracts/call-client-report";
 import {
   callMix,
   callsByNumber,
@@ -40,6 +41,8 @@ import { leadVerificationPath } from "@/src/lib/server/firebase/collections";
 function percent(value: number | undefined): string {
   return value === undefined ? "—" : `${Math.round(value * 100)}%`;
 }
+
+let reportSentences = 0;
 
 async function main() {
   loadEnvConfig(process.cwd());
@@ -195,6 +198,45 @@ async function main() {
       const withRecording = table.rows.filter((row) => row.recordingUrl).length;
       const withTopic = table.rows.filter((row) => row.topic).length;
 
+      // Phase E's client report, from the same real rows. The setting is read live further down;
+      // here both answers are exercised, because the one that must never leak is the default.
+      const reportRowsOff = toReportRows(table.rows, false);
+      const serialisedOff = JSON.stringify(reportRowsOff);
+      if (serialisedOff.includes("recording") || serialisedOff.includes("messageId")) {
+        reconciliationFailures += 1;
+        problems.push(`${doc.id}: a recording URL survived into the report with recordings switched off`);
+      }
+      if (serialisedOff.includes("sourceName") || serialisedOff.includes("\"reason\"")) {
+        reconciliationFailures += 1;
+        problems.push(`${doc.id}: the report rows still carry our own label provenance`);
+      }
+      const reportRowsOn = toReportRows(table.rows, true);
+      if (reportRowsOn.filter((row) => row.recordingUrl).length !== withRecording) {
+        reconciliationFailures += 1;
+        problems.push(`${doc.id}: switching recordings on did not carry all ${withRecording} through`);
+      }
+      const summary = reportSummaryLines({
+        mix,
+        tiles,
+        callers,
+        periodLabel: "Last 30 days",
+        comparisonLabel: undefined,
+      });
+      const prose = [summary.headline, ...summary.lines].join(" ");
+      if (/NaN|undefined|Infinity|\$\{/.test(prose)) {
+        reconciliationFailures += 1;
+        problems.push(`${doc.id}: the report's own sentences read "${prose.slice(0, 120)}"`);
+      }
+      if (inPeriod.length === 0 && summary.goodCallRate !== undefined) {
+        reconciliationFailures += 1;
+        problems.push(`${doc.id}: a good-call rate of ${summary.goodCallRate} over no calls at all`);
+      }
+      if (inPeriod.length > 0 && !summary.headline.includes(inPeriod.length.toLocaleString("en-US"))) {
+        reconciliationFailures += 1;
+        problems.push(`${doc.id}: the report headline "${summary.headline}" does not count ${inPeriod.length} calls`);
+      }
+      reportSentences += summary.lines.length;
+
 
       // The three views of the same calls must agree, or a client sees one figure in a tile and a
       // different one in the chart below it.
@@ -268,6 +310,7 @@ async function main() {
   console.log(`  set aside, no call recorded: ${droppedNoCallEvidence}  — no duration, status, direction or recording`);
   console.log(`  set aside, no timestamp:     ${droppedNoTimestamp}`);
   console.log(`every client reconciles:       ${reconciliationFailures === 0 ? "yes" : `NO — ${reconciliationFailures} client(s)`}`);
+  console.log(`report sentences written:     ${reportSentences}, none of them over a figure that was not measured`);
   if (totalCalls) {
     console.log(`\nwhat each section has to work with:`);
     console.log(

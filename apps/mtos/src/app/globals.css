@@ -648,3 +648,70 @@ a { color: inherit; text-decoration: none; }
 .toast-cta:hover { text-decoration: underline; }
 @keyframes toast-in { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: none; } }
 @media (prefers-reduced-motion: reduce) { .toast { animation: none; } }
+
+/* ---------------------------------------------------------------------------
+   Printing the client report (handoff §12)
+
+   The report is an ordinary page on screen and a document on paper, and the difference is this
+   block. Nothing here applies to any other route: `.report-block`, `.report-cover` and
+   `.report-footer` exist only on /calls/report, and `.no-print` is opt-in everywhere else.
+
+   The three rules that actually matter when this goes to a printer:
+
+   1. `print-color-adjust: exact` on the coloured parts. Browsers drop backgrounds when printing
+      to save ink, which turns a navy cover with white text into white text on white paper. The
+      cover sets it inline too, because the brand colour is a tenant's and lives in the markup.
+   2. `break-inside: avoid` on each block. Without it a six-row table splits across a page break
+      with its header on the previous sheet, and a reader holding page 2 cannot tell what the
+      columns are.
+   3. `.table-scroll { overflow: visible }`. On screen a wide table scrolls sideways inside its
+      card; on paper there is nothing to scroll, so the overflow has to be released or the last
+      columns are simply cut off at the edge of the sheet.
+
+   The app chrome -- sidebar, header, toolbars, buttons, the recording players -- is hidden by
+   `.no-print`, applied at the call sites rather than guessed at here.
+   --------------------------------------------------------------------------- */
+.report-block { break-inside: avoid; }
+.report-block + .report-block { margin-top: 16px; }
+
+@media print {
+  .no-print { display: none !important; }
+
+  /* The app chrome, hidden by selector rather than by editing the shared shell: the sidebar,
+     the top bar and any toast are furniture, and none of them means anything on paper. */
+  .sidebar, .topbar, .toast-stack { display: none !important; }
+  .main-scroll, .shell { display: block !important; overflow: visible !important; height: auto !important; }
+
+  @page { margin: 14mm; }
+
+  html, body {
+    background: #fff !important;
+    color: #000;
+  }
+
+  /* Ink, not shadows: a drop shadow prints as a grey smudge. */
+  .card, .panel, .panel-tight {
+    box-shadow: none !important;
+    border-color: #c8ced8 !important;
+    background: #fff !important;
+    break-inside: avoid;
+  }
+
+  /* Release the horizontal scroll so the right-hand columns are not guillotined. */
+  .table-scroll { overflow: visible !important; max-height: none !important; }
+  table.tbl { width: 100%; }
+  table.tbl thead { display: table-header-group; }
+  table.tbl tr { break-inside: avoid; }
+
+  /* Keep the colour that carries meaning -- the label dots and the cover. */
+  .report-cover, .sig-dot, .chip, .catbar span, svg {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  .report-cover { border-radius: 0 !important; }
+  .report-footer { break-before: avoid; }
+
+  /* Underlining every link turns the tables into a mess of blue; the URLs are no use on paper. */
+  a { text-decoration: none !important; color: inherit !important; }
+}

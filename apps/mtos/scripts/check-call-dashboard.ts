@@ -12,6 +12,7 @@
  */
 import {
   buildCallTable,
+  callerSubline,
   callersNote,
   formatCallDuration,
   formatCallTime,
@@ -263,6 +264,13 @@ console.log("\nthe callers note, which has to admit what it cannot know");
 
 console.log("\nsmall helpers");
 {
+  // The CRM stores the number as the name when it has no name for a caller, so a cell built from
+  // `name || phone` with the phone underneath printed the same number twice.
+  check("the number under the name is dropped when the name is that number", callerSubline("(415) 825-7214", "(415) 825-7214") === undefined);
+  check("and when it is the same number spelled differently", callerSubline("+1 415-825-7214", "(415) 825-7214") === undefined);
+  check("a real name keeps its number", callerSubline("Dana Reed", "(415) 825-7214") === "(415) 825-7214");
+  check("no name, nothing underneath", callerSubline(undefined, "(415) 825-7214") === undefined);
+  check("two unparseable names are not the same number", callerSubline("Mayfair", "Mayfair Ltd") === "Mayfair Ltd");
   check("no filters is no filters", !hasAnyFilter({}));
   check("a label counts as one", hasAnyFilter({ label: "good" }));
   check("a number counts as one", hasAnyFilter({ number: "4805559001" }));

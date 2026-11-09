@@ -22,6 +22,9 @@ export async function PUT(request: Request) {
   if (typeof body.reportTypeLabelDefault === "string") patch.reportTypeLabelDefault = body.reportTypeLabelDefault.trim().slice(0, 80);
   if (typeof body.footerText === "string") patch.footerText = body.footerText.trim().slice(0, 120);
   if (typeof body.font === "string" && body.font.trim()) patch.font = body.font.trim().slice(0, 60);
+  // Recordings in a client report are off until somebody says otherwise, so only an explicit
+  // boolean moves the switch -- a body that simply omits the field leaves the stored value alone.
+  if (typeof body.includeRecordings === "boolean") patch.includeRecordings = body.includeRecordings;
   if (typeof body.primaryColor === "string" && HEX.test(body.primaryColor)) {
     const primary = body.primaryColor.replace(/^#/, "").toLowerCase();
     patch.primaryColor = primary;

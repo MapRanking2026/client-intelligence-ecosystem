@@ -11,12 +11,13 @@ import type { CallMix, CallPeriod, CallersSummary, Change, HeadlineTile } from "
  *
  * ## Three rules, and the third is the one that matters
  *
- * **1. A recording is not in the report unless somebody switched it on.** The switch lives in
- * Report Branding and is false until a human sets it. This file is where that decision is
- * *enforced*, not merely honoured: `toReportRows` deletes the recording URL when recordings are
- * off, so a component downstream cannot leak one by rendering a field it should have ignored. A
- * setting that only hides a player would still ship the authenticated URL into the markup of a
- * document that gets forwarded.
+ * **1. A recording is not in the report, or mentioned in it, unless somebody switched it on.** The
+ * switch lives in Report Branding and is false until a human sets it. This file is where that
+ * decision is *enforced*, not merely honoured: `toReportRows` deletes the recording URL when
+ * recordings are off, so a component downstream cannot leak one by rendering a field it should
+ * have ignored, and `reportRecordings` returns no count and no sentence, so one cannot write about
+ * them either. A setting that only hid a player would still ship the authenticated URL into the
+ * markup of a document that gets forwarded. Off means the subject does not come up.
  *
  * **2. The provenance stays behind.** The dashboard tells us who decided each label -- you, the AI
  * review, or a rule -- because that is how we audit ourselves. The report does not. "A computer
@@ -96,16 +97,23 @@ export function toReportRows(rows: CallTableRow[], includeRecordings: boolean | 
 export interface ReportRecordings {
   /** Whether the report carries players at all. */
   included: boolean;
-  /** How many of the rows have a recording behind them, whether or not it is included. */
+  /**
+   * How many recordings this report carries.
+   *
+   * Zero whenever the setting is off, however many of the calls were in fact recorded. The count
+   * is deliberately not the truth about the calls here -- it is the truth about the report, so a
+   * component cannot render "89 of these calls were recorded" out of a field it found populated.
+   */
   available: number;
   /** Rows with a recording, in the report's order. Empty when recordings are off. */
   rows: ReportRow[];
   batchSize: number;
   /**
-   * What to print about recordings, or nothing when there is nothing worth saying.
+   * What to print about recordings, or nothing when there is nothing to say.
    *
-   * A report for a month with no recordings at all says nothing -- announcing the absence of
-   * something the client never asked for only raises the question.
+   * Absent whenever the setting is off, and absent when nothing was recorded. A client who has
+   * agreed to being recorded does not need telling in a performance report that recordings exist
+   * and are being withheld; the sentence answers a question nobody asked and invites a second one.
    */
   note?: string;
 }
@@ -113,18 +121,28 @@ export interface ReportRecordings {
 /**
  * The recordings section.
  *
- * Note the asymmetry: when recordings are OFF but exist, we say so. Silently dropping twenty-eight
- * recordings from a report about twenty-eight calls is the kind of omission that looks like
- * concealment the first time a client hears one on a call with us.
+ * Switched off, this returns nothing to render and nothing to say -- no players, no count, no
+ * sentence explaining that recordings exist but are being kept back. The call recording is
+ * disclosed to the caller when the call connects and is a tool for our own review; a performance
+ * report that mentions it is raising a subject the report is not about. Off means absent, not
+ * mentioned-but-withheld.
+ *
+ * There used to be a count of the recordings taken before the stripping, passed in so the section
+ * could say how many were being held back. It is gone from the signature on purpose: a number that
+ * exists only to describe what the report does not contain is a number that will one day get
+ * printed.
  */
 export function reportRecordings(
   rows: ReportRow[],
   includeRecordings: boolean | undefined,
-  totalWithRecording: number,
 ): ReportRecordings {
   const included = includeRecordings === true;
+  if (!included) {
+    return { included: false, available: 0, rows: [], batchSize: RECORDINGS_PER_BATCH };
+  }
+
   const withRecording = rows.filter((row) => Boolean(row.recordingUrl));
-  const available = included ? withRecording.length : totalWithRecording;
+  const available = withRecording.length;
 
   if (available === 0) {
     return { included, available: 0, rows: [], batchSize: RECORDINGS_PER_BATCH };
@@ -133,11 +151,9 @@ export function reportRecordings(
   return {
     included,
     available,
-    rows: included ? withRecording : [],
+    rows: withRecording,
     batchSize: RECORDINGS_PER_BATCH,
-    note: included
-      ? `${available.toLocaleString("en-US")} of these calls were recorded. They load ${RECORDINGS_PER_BATCH} at a time so the page opens quickly.`
-      : `${available.toLocaleString("en-US")} of these calls were recorded. The recordings are held in our own system and are not part of this report.`,
+    note: `${available.toLocaleString("en-US")} of these calls were recorded. They load ${RECORDINGS_PER_BATCH} at a time so the page opens quickly.`,
   };
 }
 

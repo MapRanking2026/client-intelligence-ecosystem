@@ -95,6 +95,8 @@ console.log("recordings are off until somebody turns them on");
   check("true carries the two URLs through", on.filter((r) => r.recordingUrl).length === 2);
   check("and leaves the third without one", on[2].recordingUrl === undefined);
 
+  // `countRecordings` still exists for our own screens -- the dashboard wants to know. What it no
+  // longer does is feed the report, which is why the client report cannot print the number.
   check("the count is taken before the stripping", countRecordings(rows) === 2);
 }
 
@@ -137,20 +139,32 @@ console.log("the caller cell");
 console.log("the recordings section");
 {
   const rows = toReportRows([row("a", { recordingUrl: "/r/1" }), row("b", { recordingUrl: "/r/2" })], true);
-  const on = reportRecordings(rows, true, 2);
+  const on = reportRecordings(rows, true);
   check("included", on.included);
   check("two players", on.rows.length === 2);
   check("twenty-five at a time", on.batchSize === RECORDINGS_PER_BATCH && RECORDINGS_PER_BATCH === 25);
   check("and says why they arrive in batches", (on.note || "").includes("25 at a time"));
 
+  // Switched off, the subject does not come up. Not a count, not a sentence explaining that
+  // recordings exist and are being kept back -- the caller was told the call was recorded when it
+  // connected, and a performance report that raises it again is answering a question nobody asked.
   const offRows = toReportRows([row("a", { recordingUrl: "/r/1" }), row("b", { recordingUrl: "/r/2" })], false);
-  const off = reportRecordings(offRows, false, 2);
+  const off = reportRecordings(offRows, false);
   check("switched off, no players", off.rows.length === 0);
-  check("but the count is still told", off.available === 2);
-  check("and the omission is stated rather than silent", (off.note || "").includes("not part of this report"));
+  check("switched off, nothing is said at all", off.note === undefined);
+  check("and no count is carried that a component could print", off.available === 0);
+  check("the whole section renders to nothing", !off.included && off.available === 0);
   check("without a URL anywhere in it", !JSON.stringify(off).includes("/r/"));
+  check(
+    "no part of the off result mentions recordings in words",
+    !JSON.stringify(off).toLowerCase().includes("record"),
+  );
 
-  const none = reportRecordings([], false, 0);
+  // Two calls recorded out of two hundred in the period: off is still silent, not "198 of these".
+  const manyOff = reportRecordings(toReportRows([row("a", { recordingUrl: "/r/1" })], false), undefined);
+  check("an unset setting is silent too", manyOff.note === undefined && manyOff.available === 0);
+
+  const none = reportRecordings([], true);
   check("a month with no recordings says nothing at all", none.note === undefined);
 }
 

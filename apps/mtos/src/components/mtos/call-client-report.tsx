@@ -413,12 +413,12 @@ export function ReportCallsTable({
 }
 
 /**
- * The recordings.
+ * The recordings, when there are any to show.
  *
- * Two outcomes, both of which say something. Switched on, the players appear twenty-five at a
- * time. Switched off, the section is one sentence saying how many calls were recorded and that the
- * recordings stay with us -- because a report about twenty-eight calls that silently omits
- * twenty-eight recordings looks like concealment the first time the client learns they exist.
+ * One outcome, not two. Switched on, the players appear twenty-five at a time. Switched off, there
+ * is no section: no players, no count, no sentence about recordings being held back. The guard
+ * below is belt and braces -- `reportRecordings` already returns nothing to render when the
+ * setting is off -- because this is the component that would do the leaking.
  */
 export function ReportRecordingsSection({
   recordings,
@@ -427,7 +427,7 @@ export function ReportRecordingsSection({
   recordings: ReportRecordings;
   brand: ReportBrand;
 }) {
-  if (recordings.available === 0) return null;
+  if (!recordings.included || recordings.available === 0) return null;
 
   return (
     <section className="card report-block">

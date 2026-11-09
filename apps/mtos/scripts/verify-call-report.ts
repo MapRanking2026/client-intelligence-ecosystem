@@ -21,7 +21,11 @@ import { loadEnvConfig } from "@next/env";
 import { CALL_LABELS, CALL_LABEL_LABEL, CALL_LABEL_TONE } from "@/src/lib/contracts/call-labels";
 import { columnLayout, donutArcs } from "@/src/lib/contracts/brief-charts";
 import { buildCallTable, withLabelProvenance } from "@/src/lib/contracts/call-dashboard";
-import { reportSummaryLines, toReportRows } from "@/src/lib/contracts/call-client-report";
+import {
+  reportRecordings,
+  reportSummaryLines,
+  toReportRows,
+} from "@/src/lib/contracts/call-client-report";
 import {
   callMix,
   callsByNumber,
@@ -214,6 +218,18 @@ async function main() {
       if (reportRowsOn.filter((row) => row.recordingUrl).length !== withRecording) {
         reconciliationFailures += 1;
         problems.push(`${doc.id}: switching recordings on did not carry all ${withRecording} through`);
+      }
+      // Off must be silent, not withheld-and-announced. On a client with recordings this is the
+      // check that would catch a sentence like "89 of these calls were recorded" coming back.
+      const sectionOff = reportRecordings(reportRowsOff, false);
+      if (sectionOff.note !== undefined || sectionOff.available !== 0 || sectionOff.rows.length) {
+        reconciliationFailures += 1;
+        problems.push(`${doc.id}: the report would mention recordings with the setting off`);
+      }
+      const sectionOn = reportRecordings(reportRowsOn, true);
+      if (withRecording > 0 && sectionOn.available !== withRecording) {
+        reconciliationFailures += 1;
+        problems.push(`${doc.id}: switching recordings on offered ${sectionOn.available} of ${withRecording}`);
       }
       const summary = reportSummaryLines({
         mix,

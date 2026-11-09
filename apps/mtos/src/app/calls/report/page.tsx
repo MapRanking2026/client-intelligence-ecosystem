@@ -16,7 +16,6 @@ import { PrintReportButton } from "@/src/components/mtos/call-report-actions";
 import { resolveTenantContext } from "@/src/lib/auth/resolve-tenant-context";
 import { buildCallTable, withLabelProvenance } from "@/src/lib/contracts/call-dashboard";
 import {
-  countRecordings,
   reportRecordings,
   reportSummaryLines,
   toReportRows,
@@ -71,9 +70,11 @@ const TABLE_LIMIT = 250;
  *
  * ## Recordings
  *
- * Off unless Report Branding says otherwise. The stripping happens in `toReportRows`, so the
- * authenticated URL is gone from the data before any of this markup sees it -- the setting is not
- * a hidden player, it is a missing field.
+ * Off unless Report Branding says otherwise, and off means absent rather than withheld: the
+ * stripping happens in `toReportRows`, so the authenticated URL is gone from the data before any
+ * of this markup sees it, and `reportRecordings` returns no count and no sentence, so the document
+ * does not raise the subject at all. The caller was told the call was recorded when it connected;
+ * a performance report is not where that gets discussed again.
  */
 export default async function CallReportPage({
   searchParams,
@@ -177,9 +178,8 @@ export default async function CallReportPage({
     review?.leads || [],
   );
 
-  const recordingsAvailable = countRecordings(table.rows);
   const rows = toReportRows(table.rows, brand.includeRecordings);
-  const recordings = reportRecordings(rows, brand.includeRecordings, recordingsAvailable);
+  const recordings = reportRecordings(rows, brand.includeRecordings);
 
   const periodLabel = LEAD_WINDOW_LABEL[preset];
   // "No comparison" has to stay absent rather than become a label, or the figures table grows a

@@ -19,7 +19,7 @@ import { loadEnvConfig } from "@next/env";
 
 import { CALL_LABEL_LABEL, CALL_LABEL_SOURCE_LABEL, resolveCallLabel, isInboundCall, hasRecordedDirection } from "@/src/lib/contracts/call-labels";
 import type { CallLabel, CallLabelSource, LeadVerificationReview } from "@/src/lib/mtos-data";
-import { leadVerificationPath, tenantUsersCollectionPath } from "@/src/lib/server/firebase/collections";
+import { leadVerificationPath } from "@/src/lib/server/firebase/collections";
 
 async function main() {
   loadEnvConfig(process.cwd());

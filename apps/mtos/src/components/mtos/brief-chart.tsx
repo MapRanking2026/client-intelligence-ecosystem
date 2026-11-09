@@ -1,8 +1,11 @@
 import { SourceChips } from "@/src/components/mtos/source-chip";
+import { columnLayout, donutArcs } from "@/src/lib/contracts/brief-charts";
 import type {
   BriefChart,
   ChartCard,
+  ChartColumns,
   ChartCompareRow,
+  ChartDonut,
   ChartFunnelRow,
   ChartGoal,
   ChartLineSeries,
@@ -14,7 +17,7 @@ import type {
 /**
  * A chart in the review brief, drawn above the paragraph that explains it.
  *
- * Deliberately plain: inline SVG and divs, no charting library. Seven shapes, each only ever asked
+ * Deliberately plain: inline SVG and divs, no charting library. Nine shapes, each only ever asked
  * to draw between two and six values, is not what a charting dependency is for -- and these render
  * on the server inside a page that already loads a client's whole month, so the bundle is the one
  * cost worth refusing.
@@ -388,6 +391,159 @@ function Goal({ goal }: { goal: ChartGoal }) {
   );
 }
 
+/**
+ * The call-mix donut, with the figure that matters in the hole.
+ *
+ * Exported on its own, unlike the six shapes above, because the call dashboard needs it outside a
+ * brief: `BriefChart` carries a `BriefSectionId` and a set of source chips, and a dashboard panel
+ * has neither. Faking a section id to reach a drawing would be the wrong way round.
+ *
+ * The geometry is all in `donutArcs`. This decides nothing except what it looks like.
+ */
+export function DonutChart({
+  donut,
+  size = 160,
+  thickness = 26,
+}: {
+  donut: ChartDonut;
+  size?: number;
+  thickness?: number;
+}) {
+  const arcs = donutArcs(donut.slices, { size, thickness });
+  // Nothing to draw. An empty ring with a legend reads as a real answer of "nothing"; the caller
+  // says what an empty period means in its own words.
+  if (!arcs.length) return null;
+  const total = arcs.reduce((sum, arc) => sum + arc.value, 0);
+
+  return (
+    <div className="flex flex-wrap items-center gap-5">
+      <svg
+        width={size}
+        height={size}
+        viewBox={`0 0 ${size} ${size}`}
+        role="img"
+        aria-label={arcs
+          .map((arc) => `${arc.label} ${arc.value} (${Math.round(arc.share * 100)}%)`)
+          .join(", ")}
+        style={{ flexShrink: 0 }}
+      >
+        {arcs.map((arc) => (
+          <path key={arc.label} d={arc.path} fill={arc.color}>
+            <title>{`${arc.label}: ${arc.value.toLocaleString("en-US")} (${Math.round(arc.share * 100)}%)`}</title>
+          </path>
+        ))}
+        {donut.centreValue ? (
+          <text
+            x={size / 2}
+            y={size / 2}
+            textAnchor="middle"
+            style={{ fontSize: "1.3rem", fontWeight: 700, fill: "var(--text)" }}
+          >
+            {donut.centreValue}
+          </text>
+        ) : null}
+        {donut.centreLabel ? (
+          <text
+            x={size / 2}
+            y={size / 2 + 18}
+            textAnchor="middle"
+            style={{ fontSize: "0.68rem", fill: "var(--slate-400)" }}
+          >
+            {donut.centreLabel}
+          </text>
+        ) : null}
+      </svg>
+      <div className="grid min-w-0 flex-1 gap-1.5 text-[0.78rem]">
+        {arcs.map((arc) => (
+          <span key={arc.label} className="inline-flex items-center gap-2">
+            <span className="sig-dot" style={{ background: arc.color, flexShrink: 0 }} />
+            <span className="min-w-0 flex-1 truncate" style={{ color: "var(--text-2)" }}>
+              {arc.label}
+            </span>
+            <b style={{ color: "var(--text)" }}>{arc.value.toLocaleString("en-US")}</b>
+            <span style={{ color: "var(--slate-400)" }}>{Math.round((arc.value / total) * 100)}%</span>
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Stacked columns over time: one column per day, week or month, split by label.
+ *
+ * Also exported for the call dashboard, for the same reason as the donut.
+ *
+ * Every column in the window is drawn, including the empty ones. A week the phone did not ring is
+ * a fact about the month, and closing the gap would quietly compress the axis and make a dead
+ * fortnight look like a busy one.
+ */
+export function ColumnsChart({
+  columns,
+  height = 150,
+  maxLabels = 12,
+}: {
+  columns: ChartColumns;
+  height?: number;
+  maxLabels?: number;
+}) {
+  const layout = columnLayout(columns, { maxLabels });
+  if (layout.empty) return null;
+
+  return (
+    <div>
+      <div className="flex items-end gap-[3px]" style={{ height }}>
+        {layout.buckets.map((bucket) => (
+          <div
+            key={bucket.key}
+            className="flex min-w-0 flex-1 flex-col justify-end"
+            style={{ height: "100%" }}
+            title={`${bucket.label}: ${bucket.total.toLocaleString("en-US")}`}
+          >
+            {/* Drawn top-down so the legend's first label sits at the bottom of every column. */}
+            {[...bucket.segments].reverse().map((segment) => (
+              <span
+                key={segment.key}
+                style={{
+                  display: "block",
+                  height: `${segment.heightPercent}%`,
+                  background: segment.color,
+                  // Only the top of the stack is rounded, so the bands read as one column.
+                  borderRadius: 0,
+                }}
+              />
+            ))}
+            {bucket.total === 0 ? (
+              <span
+                style={{ display: "block", height: 2, background: "var(--surface-3)", borderRadius: 2 }}
+              />
+            ) : null}
+          </div>
+        ))}
+      </div>
+      <div className="mt-1.5 flex gap-[3px]">
+        {layout.buckets.map((bucket) => (
+          <span
+            key={bucket.key}
+            className="min-w-0 flex-1 overflow-visible whitespace-nowrap text-center text-[0.64rem]"
+            style={{ color: "var(--slate-400)" }}
+          >
+            {bucket.showLabel ? bucket.label : " "}
+          </span>
+        ))}
+      </div>
+      <div className="mt-2.5 flex flex-wrap gap-3 text-[0.76rem]" style={{ color: "var(--text-2)" }}>
+        {layout.legend.map((entry) => (
+          <span key={entry.key} className="inline-flex items-center gap-1.5">
+            <span className="sig-dot" style={{ background: entry.color }} />
+            {entry.label}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function BriefChartPanel({ chart }: { chart: BriefChart }) {
   return (
     <Panel chart={chart}>
@@ -398,6 +554,8 @@ export function BriefChartPanel({ chart }: { chart: BriefChart }) {
       {chart.kind === "funnel" && chart.funnel ? <Funnel rows={chart.funnel} /> : null}
       {chart.kind === "stack" && chart.stack ? <Stack segments={chart.stack} /> : null}
       {chart.kind === "goal" && chart.goal ? <Goal goal={chart.goal} /> : null}
+      {chart.kind === "donut" && chart.donut ? <DonutChart donut={chart.donut} /> : null}
+      {chart.kind === "columns" && chart.columns ? <ColumnsChart columns={chart.columns} /> : null}
     </Panel>
   );
 }

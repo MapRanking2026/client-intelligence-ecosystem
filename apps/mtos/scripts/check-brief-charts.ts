@@ -11,10 +11,14 @@
  */
 import {
   chartsForSection,
+  columnLayout,
   deltaLine,
   deriveBriefCharts,
+  donutArcs,
   formatMetricValue,
+  toneColor,
   type BriefChart,
+  type ChartColumns,
 } from "@/src/lib/contracts/brief-charts";
 import type {
   AdsPerformancePack,
@@ -401,8 +405,158 @@ check(
   find(impossible, "chart-lead-quality") === undefined,
 );
 
+// ---------------------------------------------------------------------------
+// The donut's geometry (the call dashboard, 8 November 2026)
+// ---------------------------------------------------------------------------
+//
+// Arc maths is where the bugs are, and none of them are visible in a type. Each of these pins a
+// specific way an SVG donut goes wrong rather than just checking that the numbers add up.
+
+const MIX = [
+  { label: "Good", value: 60, color: toneColor("good") },
+  { label: "Missed", value: 30, color: toneColor("risk") },
+  { label: "Spam", value: 10, color: toneColor("watch") },
+];
+
+const arcs = donutArcs(MIX);
+check("three slices give three arcs", arcs.length === 3);
+check("shares sum to exactly one", Math.abs(arcs.reduce((sum, arc) => sum + arc.share, 0) - 1) < 1e-9);
+check("the biggest slice keeps its share", Math.abs(arcs[0].share - 0.6) < 1e-9);
+check("slices keep the order they were given", arcs.map((arc) => arc.label).join() === "Good,Missed,Spam");
+check("every arc has a path", arcs.every((arc) => arc.path.startsWith("M ")));
+check("every path closes, or the fill leaks", arcs.every((arc) => arc.path.trim().endsWith("Z")));
+check("every arc keeps a themed colour", arcs.every((arc) => arc.color.startsWith("var(")));
+check(
+  "a slice over half the circle sets the large-arc flag",
+  donutArcs([
+    { label: "Most", value: 80, color: "var(--good)" },
+    { label: "Rest", value: 20, color: "var(--risk)" },
+  ])[0].path.includes(" 0 1 1 "),
+);
+check(
+  "and a slice under half does not",
+  donutArcs([
+    { label: "Some", value: 20, color: "var(--good)" },
+    { label: "Rest", value: 80, color: "var(--risk)" },
+  ])[0].path.includes(" 0 0 1 "),
+);
+check(
+  "the first slice starts at twelve o'clock",
+  // Size 160, so centre 80 and outer radius 80: the top of the circle is (80.00, 0.00).
+  donutArcs(MIX)[0].path.startsWith("M 80.00 0.00"),
+);
+
+// The one that would silently render an empty circle.
+const whole = donutArcs([{ label: "Good", value: 12, color: "var(--good)" }]);
+check("a single slice covering everything still produces an arc", whole.length === 1);
+check(
+  "drawn as TWO half arcs, because one arc from a point back to itself draws nothing",
+  whole[0].path.split(" M ").length === 2,
+);
+check("and it is the whole circle", Math.abs(whole[0].share - 1) < 1e-9);
+
+check(
+  "a zero slice is dropped, not drawn invisibly with a legend row",
+  donutArcs([
+    { label: "Good", value: 5, color: "var(--good)" },
+    { label: "Job seeker", value: 0, color: "var(--info)" },
+  ]).length === 1,
+);
+check("no slices at all gives no arcs", donutArcs([]).length === 0);
+check(
+  "all-zero slices give no arcs",
+  donutArcs([{ label: "Good", value: 0, color: "var(--good)" }]).length === 0,
+);
+check(
+  "a negative value is not drawn either",
+  donutArcs([{ label: "Odd", value: -4, color: "var(--good)" }]).length === 0,
+);
+check(
+  "thickness changes the hole, not the outside",
+  donutArcs(MIX, { thickness: 40 })[0].path !== donutArcs(MIX, { thickness: 10 })[0].path &&
+    donutArcs(MIX, { thickness: 40 })[0].path.startsWith("M 80.00 0.00"),
+);
+
+check("a tone maps to a CSS variable, so the theme still owns the colour", toneColor("good") === "var(--good)");
+check(
+  "and every tone has one",
+  (["good", "watch", "risk", "info", "muted", "teal"] as const).every((tone) =>
+    toneColor(tone).startsWith("var("),
+  ),
+);
+
+// ---------------------------------------------------------------------------
+// The stacked columns
+// ---------------------------------------------------------------------------
+
+function columns(counts: number[][]): ChartColumns {
+  return {
+    legend: [
+      { key: "good", label: "Good", color: toneColor("good") },
+      { key: "missed", label: "Missed", color: toneColor("risk") },
+    ],
+    buckets: counts.map((pair, index) => ({
+      key: `d${index}`,
+      label: `${index + 1} Nov`,
+      segments: [
+        { key: "good", label: "Good", value: pair[0], color: toneColor("good") },
+        { key: "missed", label: "Missed", value: pair[1], color: toneColor("risk") },
+      ],
+    })),
+  };
+}
+
+const week = columnLayout(columns([[4, 1], [0, 0], [2, 2], [8, 2], [1, 0], [0, 0], [3, 3]]));
+check("every column in the window is kept, the empty ones included", week.buckets.length === 7);
+check("the tallest column sets the scale", week.max === 10);
+check("a column's total is its segments", week.buckets[0].total === 5);
+check("an empty column has a zero total", week.buckets[1].total === 0);
+check("and no segments to draw", week.buckets[1].segments.length === 0);
+check(
+  "the tallest column reaches full height",
+  week.buckets[3].segments.reduce((sum, seg) => sum + seg.heightPercent, 0) === 100,
+);
+check(
+  "a quiet day is scaled against the BUSIEST day, not against itself",
+  // 5 against a maximum of 10 is half the panel, not a full column.
+  Math.abs(week.buckets[0].segments.reduce((sum, seg) => sum + seg.heightPercent, 0) - 50) < 1e-9,
+);
+check("a zero segment inside a real column is dropped", week.buckets[4].segments.length === 1);
+check("the legend survives", week.legend.length === 2);
+check("a week with calls is not empty", !week.empty);
+
+const silent = columnLayout(columns([[0, 0], [0, 0]]));
+check("a window with no calls reports itself empty, for the caller to explain", silent.empty);
+check(
+  "and no height is a fraction of zero",
+  silent.buckets.every((bucket) => bucket.segments.every((seg) => seg.heightPercent === 0)),
+);
+check("no columns at all is also empty", columnLayout(columns([])).empty);
+
+const ninety = columnLayout(
+  columns(Array.from({ length: 90 }, () => [1, 0])),
+  { maxLabels: 12 },
+);
+check("ninety columns are all drawn", ninety.buckets.length === 90);
+check("but not all labelled", ninety.buckets.filter((bucket) => bucket.showLabel).length < 20);
+check("at least a few are", ninety.buckets.filter((bucket) => bucket.showLabel).length >= 10);
+check("the first is labelled, so the window has a start", ninety.buckets[0].showLabel);
+check("and the last, so it has an end", ninety.buckets[89].showLabel);
+check(
+  "labels are spread across the axis, not bunched at the front",
+  // A chart labelled only at the front reads as one that stops in March.
+  ninety.buckets.findLastIndex((bucket, index) => index < 89 && bucket.showLabel) > 44,
+);
+check(
+  "a seven-column week labels every day",
+  columnLayout(columns([[1, 0], [1, 0], [1, 0], [1, 0], [1, 0], [1, 0], [1, 0]])).buckets.every(
+    (bucket) => bucket.showLabel,
+  ),
+);
+
 console.log(`\n${passed} passed, ${failed} failed`);
 console.log("Not covered by these checks:");
 console.log("  - whether the drawn SVG is legible, which is a screen to look at");
 console.log("  - whether a real client's pack has the fields these fixtures do, which needs Firestore");
+console.log("  - whether the donut's arcs look right on screen, which needs a browser and a pair of eyes");
 if (failed) process.exit(1);

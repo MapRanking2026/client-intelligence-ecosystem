@@ -18,7 +18,8 @@
  */
 import { loadEnvConfig } from "@next/env";
 
-import { CALL_LABEL_LABEL } from "@/src/lib/contracts/call-labels";
+import { CALL_LABELS, CALL_LABEL_LABEL, CALL_LABEL_TONE } from "@/src/lib/contracts/call-labels";
+import { columnLayout, donutArcs } from "@/src/lib/contracts/brief-charts";
 import {
   callMix,
   callsByNumber,
@@ -108,6 +109,59 @@ async function main() {
       const numbers = callsByNumber(inPeriod);
       const measures = comparisonMeasures(inPeriod, before.length > 0 ? before : undefined);
 
+      // Phase C's two shapes, built from this client's real calls. The geometry is unit-tested on
+      // made-up numbers in check:brief-charts; what live data adds is the awkward cases those
+      // fixtures do not have -- a client with a single label, a 31-day window, a quiet fortnight.
+      const donut = donutArcs(
+        mix.slices.map((slice) => ({ label: slice.name, value: slice.count, color: slice.tone })),
+      );
+      const stacked = columnLayout({
+        legend: CALL_LABELS.map((label) => ({
+          key: label,
+          label: CALL_LABEL_LABEL[label],
+          color: CALL_LABEL_TONE[label],
+        })),
+        buckets: columns.buckets.map((bucket) => ({
+          key: bucket.key,
+          label: bucket.label,
+          segments: CALL_LABELS.map((label) => ({
+            key: label,
+            label: CALL_LABEL_LABEL[label],
+            value: bucket.counts[label],
+            color: CALL_LABEL_TONE[label],
+          })),
+        })),
+      });
+
+      const donutShare = donut.reduce((sum, arc) => sum + arc.share, 0);
+      if (donut.length && Math.abs(donutShare - 1) > 1e-9) {
+        reconciliationFailures += 1;
+        problems.push(`${doc.id}: the donut's slices sum to ${donutShare}, not 1`);
+      }
+      if (donut.some((arc) => !arc.path.startsWith("M ") || !arc.path.trim().endsWith("Z"))) {
+        reconciliationFailures += 1;
+        problems.push(`${doc.id}: a donut arc is not a closed path, so its fill would leak`);
+      }
+      if (donut.reduce((sum, arc) => sum + arc.value, 0) !== inPeriod.length) {
+        reconciliationFailures += 1;
+        problems.push(`${doc.id}: the donut holds a different number of calls than the tiles`);
+      }
+      const tallest = Math.max(
+        0,
+        ...stacked.buckets.map((bucket) =>
+          bucket.segments.reduce((sum, segment) => sum + segment.heightPercent, 0),
+        ),
+      );
+      if (tallest > 100.0001) {
+        reconciliationFailures += 1;
+        problems.push(`${doc.id}: a stacked column reaches ${tallest}% of the panel, so it overflows`);
+      }
+      if (stacked.buckets.reduce((sum, bucket) => sum + bucket.total, 0) !== inPeriod.length) {
+        reconciliationFailures += 1;
+        problems.push(`${doc.id}: the columns hold a different number of calls than the tiles`);
+      }
+      const labelled = stacked.buckets.filter((bucket) => bucket.showLabel).length;
+
       // The three views of the same calls must agree, or a client sees one figure in a tile and a
       // different one in the chart below it.
       const tileTotal = tiles[0].value;
@@ -162,6 +216,9 @@ async function main() {
       const rate = measures.find((row) => row.key === "good_rate");
       console.log(
         `   measures:  ${measures.length} row(s)  ·  good-call rate ${percent(rate?.value)} vs ${percent(rate?.previous)} before`,
+      );
+      console.log(
+        `   shapes:    donut ${donut.length} arc(s) summing to ${Math.round(donutShare * 100)}%  ·  ${stacked.buckets.length} column(s), tallest ${Math.round(tallest)}% of the panel, ${labelled} labelled`,
       );
       console.log(`   reconciles: ${agrees ? "yes" : "NO"}`);
     }

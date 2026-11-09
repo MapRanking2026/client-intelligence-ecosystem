@@ -42,7 +42,16 @@ import type {
  * declares its own direction and the tone is computed from that.
  */
 
-export type BriefChartKind = "cards" | "line" | "rank" | "compare" | "funnel" | "stack" | "goal";
+export type BriefChartKind =
+  | "cards"
+  | "line"
+  | "rank"
+  | "compare"
+  | "funnel"
+  | "stack"
+  | "goal"
+  | "donut"
+  | "columns";
 
 /** The prototype's tone names, which the app's chip and dot classes already use. */
 export type ChartTone = "good" | "watch" | "risk" | "info" | "muted" | "teal";
@@ -95,6 +104,217 @@ export interface ChartLineSeries {
   lowerIsBetter?: boolean;
 }
 
+// ---------------------------------------------------------------------------
+// The donut and the stacked columns (the call dashboard, 8 November 2026)
+// ---------------------------------------------------------------------------
+
+/**
+ * ## Why these two carry a colour and not a `ChartTone`
+ *
+ * The seven older shapes draw between two and six values with a fixed meaning, so a named tone --
+ * "good", "risk" -- says everything. These two draw a *set* whose members are decided elsewhere:
+ * the call dashboard's five labels already own their colours in `contracts/call-labels.ts`, and a
+ * second opinion about what colour "Job seeker" is would be one definition too many. So a slice
+ * carries a CSS colour, and `toneColor` turns a `ChartTone` into one for callers that think in
+ * tones. One vocabulary, defined once per thing being coloured.
+ */
+
+/** A CSS colour for a named tone, so a tone-thinking caller can feed these shapes. */
+export function toneColor(tone: ChartTone): string {
+  return {
+    good: "var(--good)",
+    watch: "var(--watch)",
+    risk: "var(--risk)",
+    info: "var(--info)",
+    muted: "var(--slate-300)",
+    teal: "var(--teal-400)",
+  }[tone];
+}
+
+export interface ChartDonutSlice {
+  label: string;
+  value: number;
+  /** A CSS colour, e.g. `var(--good)`. See the note above. */
+  color: string;
+}
+
+export interface ChartDonut {
+  slices: ChartDonutSlice[];
+  /** The big figure in the hole, already formatted. Absent when there is nothing true to put there. */
+  centreValue?: string;
+  /** The word under it, e.g. "good calls". */
+  centreLabel?: string;
+}
+
+/** One coloured piece of one column. */
+export interface ChartColumnSegment {
+  key: string;
+  label: string;
+  value: number;
+  color: string;
+}
+
+export interface ChartColumnBucket {
+  key: string;
+  /** The axis label, already short: "8 Nov", "Nov 26". */
+  label: string;
+  segments: ChartColumnSegment[];
+}
+
+export interface ChartColumns {
+  buckets: ChartColumnBucket[];
+  /**
+   * The legend, in a fixed order.
+   *
+   * Fixed because the segments of each column are drawn in this order too. Sorting each column by
+   * its own size would make the same label sit at a different height in every column, and the eye
+   * reads a stacked column by following one band across.
+   */
+  legend: Array<{ key: string; label: string; color: string }>;
+}
+
+/** One finished arc of a donut: everything the renderer needs and no geometry left to do. */
+export interface DonutArc {
+  label: string;
+  value: number;
+  /** 0..1 of the whole. */
+  share: number;
+  color: string;
+  /** An SVG path for the annulus segment, ready for a `d` attribute. */
+  path: string;
+}
+
+/**
+ * The arcs of a donut, as SVG paths.
+ *
+ * The geometry lives here rather than in the component for one reason: arc maths is where the
+ * bugs are. A sign error puts the sweep the wrong way round, a missed `large-arc-flag` turns a
+ * 300-degree slice into the 60 degrees it is not, and a single slice covering everything cannot be
+ * drawn as one arc at all, because its start and end points are the same and SVG draws nothing.
+ * None of that is visible in a type; all of it is visible in a test.
+ *
+ * Slices worth nothing are dropped. A zero-width arc is invisible but still takes a legend row and
+ * a colour, which reads as "this happened, just not much" rather than "this did not happen".
+ *
+ * Angles run clockwise from twelve o'clock, which is how everybody reads a pie.
+ */
+export function donutArcs(
+  slices: ChartDonutSlice[],
+  options: { size?: number; thickness?: number } = {},
+): DonutArc[] {
+  const size = options.size ?? 160;
+  const thickness = options.thickness ?? 26;
+  const centre = size / 2;
+  const outer = centre;
+  const inner = Math.max(0, centre - thickness);
+
+  const present = slices.filter((slice) => slice.value > 0);
+  const total = present.reduce((sum, slice) => sum + slice.value, 0);
+  if (!total) return [];
+
+  // On a circle, (x, y) for an angle measured clockwise from twelve o'clock. y is inverted because
+  // SVG's y axis points down.
+  const point = (radius: number, angle: number) => ({
+    x: centre + radius * Math.sin(angle),
+    y: centre - radius * Math.cos(angle),
+  });
+
+  const ring = (from: number, to: number): string => {
+    const largeArc = to - from > Math.PI ? 1 : 0;
+    const a = point(outer, from);
+    const b = point(outer, to);
+    const c = point(inner, to);
+    const d = point(inner, from);
+    return [
+      `M ${a.x.toFixed(2)} ${a.y.toFixed(2)}`,
+      `A ${outer} ${outer} 0 ${largeArc} 1 ${b.x.toFixed(2)} ${b.y.toFixed(2)}`,
+      `L ${c.x.toFixed(2)} ${c.y.toFixed(2)}`,
+      `A ${inner} ${inner} 0 ${largeArc} 0 ${d.x.toFixed(2)} ${d.y.toFixed(2)}`,
+      "Z",
+    ].join(" ");
+  };
+
+  const arcs: DonutArc[] = [];
+  let cursor = 0;
+  for (const slice of present) {
+    const share = slice.value / total;
+    const sweep = share * Math.PI * 2;
+    const end = cursor + sweep;
+    // A slice that is the whole circle has to be drawn as two halves: one arc from a point back to
+    // itself is a no-op in SVG, so a client with nothing but good calls would get an empty donut.
+    const path =
+      present.length === 1
+        ? `${ring(0, Math.PI)} ${ring(Math.PI, Math.PI * 2)}`
+        : ring(cursor, end);
+    arcs.push({ label: slice.label, value: slice.value, share, color: slice.color, path });
+    cursor = end;
+  }
+  return arcs;
+}
+
+/** A column, scaled and told whether to show its axis label. */
+export interface ColumnLayoutBucket {
+  key: string;
+  label: string;
+  /** False where the axis is too crowded to label every column. */
+  showLabel: boolean;
+  total: number;
+  segments: Array<ChartColumnSegment & { heightPercent: number }>;
+}
+
+export interface ColumnLayout {
+  buckets: ColumnLayoutBucket[];
+  /** The tallest column's total, which the scale is read against. */
+  max: number;
+  legend: ChartColumns["legend"];
+  /** True when every column is empty, so the caller can say so in its own words instead. */
+  empty: boolean;
+}
+
+/**
+ * Scale the columns and thin out the axis labels.
+ *
+ * Heights are a percentage of the tallest column rather than absolute pixels, so the same layout
+ * works at any panel height and the component stays free of magic numbers.
+ *
+ * Labels are thinned by a stride rather than by dropping the tail: ninety daily columns cannot all
+ * be labelled, and labelling the first dozen then stopping would read as a chart that ends in
+ * March. The first and last are always labelled, because those two are the ones a reader checks to
+ * know what window they are looking at.
+ */
+export function columnLayout(
+  columns: ChartColumns,
+  options: { maxLabels?: number } = {},
+): ColumnLayout {
+  const maxLabels = Math.max(2, options.maxLabels ?? 12);
+  const totals = columns.buckets.map((bucket) =>
+    bucket.segments.reduce((sum, segment) => sum + Math.max(0, segment.value), 0),
+  );
+  const max = Math.max(0, ...totals);
+  const stride = Math.max(1, Math.ceil(columns.buckets.length / maxLabels));
+  const last = columns.buckets.length - 1;
+
+  return {
+    max,
+    legend: columns.legend,
+    empty: max === 0,
+    buckets: columns.buckets.map((bucket, index) => ({
+      key: bucket.key,
+      label: bucket.label,
+      showLabel: index === 0 || index === last || index % stride === 0,
+      total: totals[index],
+      segments: bucket.segments
+        .filter((segment) => segment.value > 0)
+        .map((segment) => ({
+          ...segment,
+          // Of the tallest column, not of this column: a stack has to be comparable across the
+          // axis, so a quiet day must look quiet rather than filling its own column.
+          heightPercent: max === 0 ? 0 : (segment.value / max) * 100,
+        })),
+    })),
+  };
+}
+
 export interface ChartGoal {
   have: number;
   goal: number;
@@ -126,6 +346,8 @@ export interface BriefChart {
   stack?: ChartStackSegment[];
   line?: ChartLineSeries;
   goal?: ChartGoal;
+  donut?: ChartDonut;
+  columns?: ChartColumns;
 }
 
 // ---------------------------------------------------------------------------

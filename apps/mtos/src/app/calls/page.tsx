@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Phone, ArrowRight, Sparkles, ShieldAlert, BadgeCheck } from "lucide-react";
+import { Phone, ArrowRight, Sparkles, ShieldAlert, BadgeCheck, BarChart3 } from "lucide-react";
 
 import { AppShell } from "@/src/components/mtos/app-shell";
 import { LeadVerificationQuickActions } from "@/src/components/mtos/lead-verification-quick-actions";
@@ -193,11 +193,25 @@ export default async function CallIntelligencePage({
             can verify what&apos;s real and recover what was missed.
           </p>
         </div>
-        {selected ? (
-          <Link href="/calls" className="chip">
-            Switch client
+        <div className="flex flex-wrap items-center gap-2">
+          {/*
+            The call dashboard is a separate route rather than a rewrite of this page: this one is
+            what AMs use to pull a window, vet lead by lead and play recordings, and it keeps
+            working untouched. Both read the same stored pull, so nothing is fetched twice.
+          */}
+          <Link
+            href={selected ? `/calls/dashboard?client=${selected.id}` : "/calls/dashboard"}
+            className="btn btn-ghost btn-sm"
+          >
+            <BarChart3 />
+            Call dashboard
           </Link>
-        ) : null}
+          {selected ? (
+            <Link href="/calls" className="chip">
+              Switch client
+            </Link>
+          ) : null}
+        </div>
       </div>
 
       {!selected ? (

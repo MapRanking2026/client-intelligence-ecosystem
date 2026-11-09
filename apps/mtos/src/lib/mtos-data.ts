@@ -1076,6 +1076,75 @@ export interface VerifiedLead {
   verdictSource?: "ai" | "manual";
   /** True for pasted/imported leads not sourced from a connected integration. */
   manual?: boolean;
+
+  // ---------------------------------------------------------------------------
+  // The call dashboard (owner's specification, 8 November 2026). Every field
+  // below is OPTIONAL and additive: the nine categories above are unchanged, the
+  // lead & call verification page still reports on them, and a lead stored
+  // before these existed stays readable. A field that is absent means "this pull
+  // did not capture it", which the dashboard says out loud rather than drawing
+  // as a zero.
+  // ---------------------------------------------------------------------------
+
+  /**
+   * The client's own tracking number that RECEIVED this call -- not the caller's.
+   *
+   * Every client runs several tracking numbers, so "how many calls did this line take" is
+   * unanswerable without it. Only populated by pulls made after 8 November 2026; older stored
+   * pulls have no value here and the per-number breakdown says so instead of inventing one.
+   */
+  calledNumber?: string;
+  /** The tracking number's friendly name from the CRM, e.g. "Main line". */
+  calledNumberName?: string;
+  /** The CRM contact this call belongs to. The unit of caller identity, ahead of the phone. */
+  contactId?: string;
+  /** The call's transcript or message body, where the sub-account captured one. Usually absent. */
+  transcript?: string;
+
+  /** The five-label reading of this call. See contracts/call-labels.ts. */
+  callLabel?: CallLabel;
+  /** Which of the three layers decided `callLabel`. */
+  labelSource?: CallLabelSource;
+  /** Why, in plain words. Shown in the row, because a label nobody can defend is worse than none. */
+  labelReason?: string;
+  /**
+   * The label the automatic rules would give, kept alongside a manual or AI one.
+   *
+   * This is what "Reset to automatic" restores. Without storing it, Reset would have to
+   * re-derive from metadata that may since have been re-pulled, and would sometimes hand back a
+   * different label than the one the row showed before anybody touched it.
+   */
+  autoLabel?: CallLabel;
+
+  /** One to three words on what the call was about. Never invented from nothing. */
+  topic?: string;
+  /** A one-line summary of the call. */
+  topicSummary?: string;
+  /** Where the topic came from, so the modal can say. */
+  topicSource?: "ai" | "derived";
+}
+
+/**
+ * The five words the call dashboard reports in.
+ *
+ * Deliberately NOT a replacement for `LeadCategory`: the owner asked for these alongside the nine
+ * categories, so both exist and nothing stored changes meaning. `contracts/call-labels.ts` holds
+ * the rules that decide one, and why two of them cannot be decided without a transcript.
+ */
+export type CallLabel = "good" | "missed" | "spam" | "job_seeker" | "unrelated";
+
+/** Which layer set a call's label: a person, the AI review pass, or the always-on rules. */
+export type CallLabelSource = "manual" | "ai" | "automatic";
+
+/**
+ * One of a client's tracking numbers, as GoHighLevel reports it.
+ *
+ * `friendlyName` is the CRM's own label for the line ("Main line"). A number nobody renamed has
+ * none, and the dashboard prints "No name in the CRM" rather than repeating the digits twice.
+ */
+export interface ClientTrackingNumber {
+  phoneNumber: string;
+  friendlyName?: string;
 }
 
 export interface LeadChannelCount {

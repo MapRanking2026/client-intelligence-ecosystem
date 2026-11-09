@@ -2524,8 +2524,78 @@ function mapGhlCall(message: JsonRecord, conversation: JsonRecord): JsonRecord {
       messageId,
       conversationId: firstString(conversation.id, message.conversationId),
       contactId: firstString(conversation.contactId, message.contactId),
+      // The client's own tracking number that took the call, which is NOT the `phone` above --
+      // that one is the caller. Every client runs several tracking lines, so "how many calls did
+      // this number take" is unanswerable without keeping both ends of the call.
+      //
+      // Which end is which depends on the direction: on an inbound call the client's number is
+      // the one that was dialled (`to`), on an outbound call it is the one that dialled (`from`).
+      // GoHighLevel often omits `direction` entirely, and `isGhlCallMessage` accepts messages
+      // whose only call evidence is `meta.call`, so this falls back to `to` -- inbound being the
+      // overwhelming majority and the only direction the dashboard reports on.
+      calledNumber: /^out/i.test(direction || "")
+        ? firstString(call.from, message.from)
+        : firstString(call.to, message.to),
+      // Whatever text came with the call. Usually nothing: GoHighLevel carries a transcript only
+      // when the sub-account has transcription switched on. Two of the five call labels (a job
+      // seeker, and spam judged by its wording) can only be decided from this, so where it is
+      // absent those labels are simply not reachable and the row says why rather than guessing.
+      transcript: firstString(message.body, call.transcript, meta.transcript),
     },
   };
+}
+
+/**
+ * A sub-account's tracking numbers and what each one is called.
+ *
+ * Needed for the per-number call breakdown: a block per number showing its CRM name, total calls,
+ * unique callers and label mix. Without this the dashboard can still list the numbers that appear
+ * in the call data, but every one of them reads "No name in the CRM", which is most of the value
+ * gone -- an AM looking at four lines needs to know which is the Google Ads number.
+ *
+ * Three things here differ from every other GoHighLevel read in this file, all of them deliberate:
+ *
+ *  - The scope is `phonenumbers.read`, NOT `.readonly`. It is the only GoHighLevel scope in this
+ *    codebase that breaks that pattern, and HighLevel's documentation states it directly.
+ *  - The header is `version: v3`, not the `2021-07-28` the conversations and contacts endpoints
+ *    take. Sending the older version to this endpoint does not degrade, it fails.
+ *  - It degrades to an empty list rather than throwing. A connection authorised before the scope
+ *    was requested will 401 here, which is expected and temporary until the sub-account is
+ *    reconnected -- and a missing set of names must not take down a call pull that otherwise
+ *    worked. The caller reports the absence; see the dashboard's number-list warning.
+ */
+async function fetchGhlLocationNumbers(
+  headers: Record<string, string>,
+  locationId: string,
+): Promise<{ numbers: Array<{ phoneNumber: string; friendlyName?: string }>; diagnostic: string }> {
+  try {
+    const payload = await fetchJson(
+      `https://services.leadconnectorhq.com/phone-system/numbers/location/${encodeURIComponent(locationId)}`,
+      { headers: { ...headers, version: "v3" } },
+    );
+    const data = (payload.data || payload) as JsonRecord;
+    const list = Array.isArray(data.numbers) ? (data.numbers as JsonRecord[]) : [];
+    const numbers = list.flatMap((entry) => {
+      const phoneNumber = firstString(entry.phoneNumber, entry.number);
+      if (!phoneNumber) {
+        return [];
+      }
+      const friendlyName = firstString(entry.friendlyName, entry.name) || undefined;
+      return [{ phoneNumber, friendlyName }];
+    });
+    return { numbers, diagnostic: `numbers: ${numbers.length} found` };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "unknown";
+    // A 401/403 here means this connection predates the `phonenumbers.read` scope. Say so in
+    // words the settings page can show, rather than leaving a bare status code in a diagnostic.
+    const needsReconsent = /401|403|scope|unauthor/i.test(message);
+    return {
+      numbers: [],
+      diagnostic: needsReconsent
+        ? `numbers unavailable: this GoHighLevel connection was authorised before MTOS asked for the phone-numbers scope. Reconnect GoHighLevel to read each number's name. (${message})`
+        : `numbers error: ${message}`,
+    };
+  }
 }
 
 /**
@@ -2689,19 +2759,31 @@ export async function fetchGhlClientLeadsAndCalls(
   context: TenantContext,
   locationId: string,
   sinceIso: string,
-): Promise<{ leads: JsonRecord[]; diagnostic: string } | null> {
+): Promise<{
+  leads: JsonRecord[];
+  /** The sub-account's tracking numbers. Empty when the connection lacks `phonenumbers.read`. */
+  numbers: Array<{ phoneNumber: string; friendlyName?: string }>;
+  diagnostic: string;
+} | null> {
   const token = await getGhlLocationToken(context, locationId);
   if (!token) {
     return null;
   }
   const headers = { ...getBearerHeaders(token), Version: "2021-07-28" };
-  const [leadResult, callResult] = await Promise.all([
+  const [leadResult, callResult, numberResult] = await Promise.all([
     fetchGhlRecentLeads(headers, locationId, sinceIso, GHL_LEAD_FULL_CAP),
     fetchGhlRecentCalls(headers, locationId, sinceIso, GHL_CALL_FULL_CAP, GHL_CALL_CONVO_FULL_SCAN),
+    // The tracking numbers and their CRM names, for the per-number breakdown. Never throws: a
+    // connection authorised before the phone-numbers scope existed returns an empty list and a
+    // diagnostic saying to reconnect, which must not fail a call pull that otherwise succeeded.
+    fetchGhlLocationNumbers(headers, locationId),
   ]);
   return {
     leads: [...callResult.calls, ...leadResult.leads].slice(0, GHL_LEAD_FULL_CAP + GHL_CALL_FULL_CAP),
-    diagnostic: [leadResult.diagnostic, callResult.diagnostic].filter(Boolean).join(" | "),
+    numbers: numberResult.numbers,
+    diagnostic: [leadResult.diagnostic, callResult.diagnostic, numberResult.diagnostic]
+      .filter(Boolean)
+      .join(" | "),
   };
 }
 

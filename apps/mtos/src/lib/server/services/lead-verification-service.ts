@@ -15,6 +15,7 @@ import type {
   VerifiedLead,
 } from "@/src/lib/mtos-data";
 import { LEAD_CHANNEL_LABEL } from "@/src/lib/mtos-data";
+import { automaticCallLabel } from "@/src/lib/contracts/call-labels";
 import { getMtosDataSource } from "@/src/lib/server/data/seed-mtos-data-source";
 import { getFirebaseAdminDb } from "@/src/lib/server/firebase/admin";
 import { withQuotaFallback } from "@/src/lib/server/firebase/quota";
@@ -522,9 +523,22 @@ export async function runLeadVerification(
   // so a busy client's older leads/calls aren't truncated by the shared-snapshot
   // cap. Falls back to whatever the snapshot holds if the direct pull can't run.
   let rawLeads = withinWindowEnd(Array.isArray(clientCrm?.leads) ? (clientCrm?.leads as JsonRecord[]) : []);
+  /**
+   * The client's tracking numbers by number, for the per-number breakdown.
+   *
+   * Empty when the GoHighLevel connection was authorised before MTOS asked for
+   * `phonenumbers.read`. The dashboard then still lists the numbers that appear in the call data
+   * and says each has no name, rather than hiding the section or inventing labels.
+   */
+  const trackingNumbers: Record<string, string> = {};
   if (locationId) {
     try {
       const direct = await fetchGhlClientLeadsAndCalls(context, locationId, windowStart);
+      for (const entry of direct?.numbers ?? []) {
+        if (entry.friendlyName) {
+          trackingNumbers[entry.phoneNumber] = entry.friendlyName;
+        }
+      }
       if (direct && direct.leads.length) {
         rawLeads = withinWindowEnd(direct.leads);
         if (direct.diagnostic) {
@@ -570,6 +584,11 @@ export async function runLeadVerification(
       const direction = str(callData.direction) || undefined;
       const callStatus = str(callData.status) || undefined;
       const contactId = str(callData.contactId);
+      const calledNumber = str(callData.calledNumber) || undefined;
+      const transcript = str(callData.transcript) || undefined;
+      // The always-on layer. A manual or AI label is laid over this further down; `autoLabel`
+      // keeps it so "Reset to automatic" restores exactly the label the row first showed.
+      const auto = automaticCallLabel({ durationSec, callStatus, direction, text: transcript });
       return {
         id,
         name: str(raw.name) || undefined,
@@ -589,6 +608,15 @@ export async function runLeadVerification(
           : undefined,
         contactUrl: contactId ? contactUrl(locationId, contactId) : undefined,
         verdictSource: "ai",
+        // The call dashboard's fields. All additive; everything above is unchanged.
+        contactId: contactId || undefined,
+        calledNumber,
+        calledNumberName: calledNumber ? trackingNumbers[calledNumber] : undefined,
+        transcript,
+        callLabel: auto.label,
+        autoLabel: auto.label,
+        labelSource: "automatic",
+        labelReason: auto.reason,
       };
     }
 
@@ -671,6 +699,65 @@ export async function runLeadVerification(
     gbp_call: { count: sumGbpCalls(gbpPayload, clientId), label: "GBP calls" },
     meta_ads: { count: null, label: "Meta Ads (not connected)" },
   };
+
+  /*
+    Carry across every verdict and label a person set by hand.
+
+    A refresh rebuilds every lead from the raw pull and persists with `{ merge: false }`, so until
+    now an AM who hand-vetted two hundred calls and then pressed "Refresh from sources" lost all
+    of it, silently. That is both a bug and the thing the owner's specification forbids: AI review
+    must never overwrite a manual label.
+
+    Matched on the lead id, which for a call is `call-{GoHighLevel message id}` -- stable across
+    pulls, because it is GoHighLevel's own identifier for that message rather than anything
+    generated here. A lead that has dropped out of the window simply finds no match and is gone,
+    which is correct: it is outside the period being reported on.
+
+    The automatic label is NOT carried across. It is re-derived from this pull's metadata every
+    time, which is the point of it being automatic -- and `autoLabel` is what Reset restores, so
+    a person's Reset gives them this run's rules rather than a stale reading.
+  */
+  const manualCount = await (async () => {
+    const previous = await getStoredLeadVerification(context, clientId).catch(() => null);
+    if (!previous?.leads?.length) {
+      return 0;
+    }
+    const held = new Map(previous.leads.filter((lead) => lead.verdictSource === "manual" || lead.labelSource === "manual").map((lead) => [lead.id, lead]));
+    if (!held.size) {
+      return 0;
+    }
+    let carried = 0;
+    for (const lead of baseLeads) {
+      const kept = held.get(lead.id);
+      if (!kept) {
+        continue;
+      }
+      carried += 1;
+      if (kept.verdictSource === "manual") {
+        lead.status = kept.status;
+        lead.category = kept.category;
+        lead.verdictSource = "manual";
+      }
+      if (kept.labelSource === "manual" && kept.callLabel) {
+        lead.callLabel = kept.callLabel;
+        lead.labelSource = "manual";
+        lead.labelReason = kept.labelReason || "You set this label by hand.";
+      }
+      // Keep a topic somebody paid to generate rather than re-running the AI pass for it.
+      if (kept.topic && !lead.topic) {
+        lead.topic = kept.topic;
+        lead.topicSummary = kept.topicSummary;
+        lead.topicSource = kept.topicSource;
+      }
+    }
+    return carried;
+  })();
+
+  if (manualCount) {
+    warnings.push(
+      `Kept your own labels on ${manualCount} ${manualCount === 1 ? "call" : "calls"} — a refresh re-reads everything else but never overwrites a label you set by hand.`,
+    );
+  }
 
   const review = assembleReview(clientId, baseLeads, platformCounts, {
     source,

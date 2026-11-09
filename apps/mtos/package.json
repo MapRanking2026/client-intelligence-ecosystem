@@ -21,6 +21,7 @@
     "check:google-meet": "tsx scripts/check-google-meet.ts",
     "check:touch-progress": "tsx scripts/check-touch-progress.ts",
     "check:prep-brief": "tsx scripts/check-prep-brief.ts",
+    "check:prep-generation": "tsx scripts/check-prep-generation.ts",
     "check:agenda-email": "tsx scripts/check-agenda-email.ts",
     "check:touch-approval": "tsx scripts/check-touch-approval.ts",
     "check:follow-through-finish": "tsx scripts/check-follow-through-finish.ts",

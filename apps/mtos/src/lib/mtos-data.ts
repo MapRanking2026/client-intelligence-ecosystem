@@ -76,6 +76,18 @@ export interface PrepPackClaudeState {
   /** Which LLM provider actually answered (claude/openai/gemini). */
   provider?: string;
   errorMessage?: string;
+  /**
+   * What the model got wrong on a run that still produced a usable preparation.
+   *
+   * Set when the response missed the strict shape of one or more of the six legacy fields --
+   * too few wins, a malformed recommendation -- and the preparation went ahead on the fields
+   * that were sound plus the deterministic text for the ones that were not. The status stays
+   * "generated", because it was: the brief and the fourteen sections are there. This field is
+   * how the run says so anyway, rather than reporting a partial run as a clean one.
+   *
+   * Additive and optional. A record written before 9 November 2026 simply does not carry it.
+   */
+  shortfall?: string;
 }
 
 export type MetricAvailability = "available" | "unavailable";

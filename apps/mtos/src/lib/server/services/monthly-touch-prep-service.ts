@@ -63,7 +63,7 @@ interface PrepareMonthlyTouchOptions {
   includeClaude?: boolean;
 }
 
-interface ClaudeTouchOutput {
+export interface ClaudeTouchOutput {
   executiveBrief: string;
   agenda: string[];
   talkingPoints: string[];
@@ -1505,7 +1505,23 @@ async function generateClaudeTouchOutput(
         userText: [
           groundingBlock,
           varietyDirective,
-          "Return a JSON object with exactly these keys and types:",
+          // This block used to open "Return a JSON object with exactly these keys and types:" and
+          // then list six. The system prompt's own output contract asks for those six AND the
+          // fourteen written sections, the QC promises, the read-aloud agenda and the client
+          // email -- so the two instructions contradicted each other, and a model obeys "exactly
+          // these keys". The sections were therefore never written, and the review screen showed
+          // every one of them as "the preparation did not write this section".
+          //
+          // Measured on this tenant, 9 November 2026: the stored prompt is version 7 and its
+          // contract does ask for `sections`, so the fault was entirely here, in the message that
+          // came after it. This now RESTATES that contract instead of replacing it. The six legacy
+          // fields keep their shapes spelled out, because they are validated strictly and the
+          // exact types are worth repeating; the rest is named and pointed back at the contract,
+          // which carries the full JSON shape and the source-chip rules.
+          "Return ONE JSON object following the output contract in the instructions above.",
+          "It must carry the fourteen written sections and the fields around them -- `sections`,",
+          "`missing`, `retention`, `qcPromises`, `qcFocus`, `qcProposals`, `agendaReadAloud`,",
+          "`clientAgendaEmail`, `unreportedSeoWins` -- and ALSO these six, whose shapes are exact:",
           '  executiveBrief: a single string (use "\\n\\n" between paragraphs -- NOT an object)',
           "  agenda: array of 4-6 strings (each a plain string, not an object)",
           "  talkingPoints: array of 3-6 strings",
@@ -1516,8 +1532,10 @@ async function generateClaudeTouchOutput(
           '      confidence: exactly "High" | "Medium" | "Low",',
           "      evidence: array of 1-3 objects, each { label: string, source: string, freshness: string } }",
           "",
-          "Every list entry must be a plain string except recommendations and evidence, which are the",
-          "objects described above. Respect the item limits -- extra items are discarded.",
+          "In those six, every list entry must be a plain string except recommendations and",
+          "evidence, which are the objects described above. Respect the item limits -- extra items",
+          "are discarded. The sections are the document the account manager actually reads: writing",
+          "the six fields well and leaving `sections` out is not a usable answer.",
           "Use only the preparation bundle below. Do not invent sources.",
           "",
         JSON.stringify(
@@ -1560,37 +1578,120 @@ async function generateClaudeTouchOutput(
         temperature: 0.2,
   });
   const normalized = normalizeClaudeTouchPayload(llmResult.data);
-  const parsed = claudeResponseSchema.parse(normalized);
 
   /**
-   * The full preparation brief, read out of the SAME response, tolerantly.
+   * The full preparation brief, read out of the response FIRST, tolerantly.
    *
-   * Deliberately not part of `claudeResponseSchema`: that schema throws, and the six fields it
-   * guards feed the call guide and the deck, which must keep working. A model that returns
-   * thirteen good brief sections and one malformed one should cost the AM that section, not the
-   * whole preparation half an hour before a client call. A response from before the v2 prompt
-   * carries none of these fields and reads as a brief with no sections, which the review screen
-   * shows as "not written" rather than as an error.
+   * Deliberately not part of `claudeResponseSchema`, and deliberately read before it: that schema
+   * throws, and the six fields it guards feed the call guide and the deck. A model that returns
+   * fourteen good brief sections and a short `wins` array should cost the AM a tile, not the whole
+   * preparation half an hour before a client call.
+   *
+   * Until 9 November 2026 the strict parse ran on the line ABOVE this one, and a comment here said
+   * exactly what the paragraph above says -- which made the intent clear and the behaviour the
+   * opposite of it. A throw took the brief with it, `prepBrief` was never assigned, and because the
+   * research stage treats a failed analysis as a failed stage, steps 2, 3 and 4 stayed blocked and
+   * the sixteen-section document could never be written at all. One missing win cost the document.
+   *
+   * A response from before the v2 prompt carries none of these fields and reads as a brief with no
+   * sections, which the review screen shows as "not written" rather than as an error.
    */
   const brief = normalizePrepBrief(normalized, getNowIso());
 
-  const output = {
-    executiveBrief: parsed.executiveBrief,
-    agenda: unique(parsed.agenda).slice(0, 6),
-    talkingPoints: unique(parsed.talkingPoints).slice(0, 6),
-    wins: unique(parsed.wins),
-    risks: unique(parsed.risks),
-    recommendations: parsed.recommendations.map((recommendation) => ({
-      id: `claude-${nanoid(8)}`,
-      title: recommendation.title,
-      summary: recommendation.summary,
-      rationale: recommendation.rationale,
-      confidence: recommendation.confidence,
-      evidence: recommendation.evidence,
-    })),
-  } satisfies ClaudeTouchOutput;
+  const parsed = claudeResponseSchema.safeParse(normalized);
+  if (parsed.success) {
+    const output = {
+      executiveBrief: parsed.data.executiveBrief,
+      agenda: unique(parsed.data.agenda).slice(0, 6),
+      talkingPoints: unique(parsed.data.talkingPoints).slice(0, 6),
+      wins: unique(parsed.data.wins),
+      risks: unique(parsed.data.risks),
+      recommendations: parsed.data.recommendations.map((recommendation) => ({
+        id: `claude-${nanoid(8)}`,
+        title: recommendation.title,
+        summary: recommendation.summary,
+        rationale: recommendation.rationale,
+        confidence: recommendation.confidence,
+        evidence: recommendation.evidence,
+      })),
+    } satisfies ClaudeTouchOutput;
+    return { output, brief, provider: llmResult.provider, model: llmResult.model };
+  }
 
-  return { output, brief, provider: llmResult.provider, model: llmResult.model };
+  /**
+   * The response did not satisfy the strict schema. Salvage it field by field.
+   *
+   * Every field that IS well-formed is kept; the ones that are not are left absent, and the caller
+   * then keeps the deterministic text it had already written for them. So a run that returns two
+   * wins instead of three loses the wins tile to generic copy and keeps the executive brief, the
+   * agenda, the recommendations and all fourteen sections.
+   *
+   * The shortfall is recorded rather than swallowed. Nobody should be told a run was clean when it
+   * was not -- but "the model was one win short" is a note on a usable preparation, not a reason to
+   * throw a document away in front of somebody about to walk into a call.
+   */
+  const shortfall = parsed.error.issues
+    .map((issue) => `${issue.path.join(".") || "response"}: ${issue.message}`)
+    .slice(0, 4)
+    .join("; ");
+  return {
+    output: salvageTouchOutput(normalized),
+    brief,
+    provider: llmResult.provider,
+    model: llmResult.model,
+    shortfall,
+  };
+}
+
+/**
+ * Whatever of the six strict fields can be used, with the rest left absent.
+ *
+ * Each field is validated on its own, so one bad field cannot take a good one down with it. The
+ * item floors from `claudeResponseSchema` are deliberately NOT applied here -- this runs precisely
+ * because one of them was not met, and a list of two wins is still two true things about the month.
+ * The ceilings ARE applied, because they are what the call guide and the deck have room for.
+ */
+export function salvageTouchOutput(normalized: unknown): Partial<ClaudeTouchOutput> {
+  if (!normalized || typeof normalized !== "object") return {};
+  const row = normalized as JsonRecord;
+  const stringList = z.array(z.string().min(1));
+  const list = (value: unknown, max: number): string[] | undefined => {
+    const result = stringList.safeParse(value);
+    if (!result.success || !result.data.length) return undefined;
+    return unique(result.data).slice(0, max);
+  };
+
+  const brief = typeof row.executiveBrief === "string" && row.executiveBrief.trim()
+    ? row.executiveBrief
+    : undefined;
+
+  // Recommendations are salvaged per item: three good ones and a malformed fourth keeps three.
+  const itemSchema = claudeResponseSchema.shape.recommendations.element;
+  const recommendations = (Array.isArray(row.recommendations) ? row.recommendations : [])
+    .map((item) => itemSchema.safeParse(item))
+    .filter((result): result is z.ZodSafeParseSuccess<z.infer<typeof itemSchema>> => result.success)
+    .slice(0, 4)
+    .map((result) => ({
+      id: `claude-${nanoid(8)}`,
+      title: result.data.title,
+      summary: result.data.summary,
+      rationale: result.data.rationale,
+      confidence: result.data.confidence,
+      evidence: result.data.evidence,
+    }));
+
+  const salvaged: Partial<ClaudeTouchOutput> = {};
+  if (brief) salvaged.executiveBrief = brief;
+  const agenda = list(row.agenda, 6);
+  if (agenda) salvaged.agenda = agenda;
+  const talkingPoints = list(row.talkingPoints, 6);
+  if (talkingPoints) salvaged.talkingPoints = talkingPoints;
+  const wins = list(row.wins, 8);
+  if (wins) salvaged.wins = wins;
+  const risks = list(row.risks, 8);
+  if (risks) salvaged.risks = risks;
+  if (recommendations.length) salvaged.recommendations = recommendations;
+  return salvaged;
 }
 
 function isProfileInactive(
@@ -1916,18 +2017,23 @@ export async function prepareMonthlyTouch(
         leadVerification,
       );
       if (claudeOutput) {
+        // Each field is taken only if the model produced it. On a clean run that is all six; on a
+        // salvaged run the absent ones keep the deterministic text written above, which is the
+        // whole point -- a short `wins` array costs the AM that tile, not the preparation.
         prepBrief = claudeOutput.brief;
-        executiveBrief = claudeOutput.output.executiveBrief;
-        agenda = claudeOutput.output.agenda;
-        talkingPoints = claudeOutput.output.talkingPoints;
-        aiRecommendations = claudeOutput.output.recommendations;
-        wins = claudeOutput.output.wins;
-        risks = claudeOutput.output.risks;
+        const written = claudeOutput.output;
+        if (written.executiveBrief) executiveBrief = written.executiveBrief;
+        if (written.agenda?.length) agenda = written.agenda;
+        if (written.talkingPoints?.length) talkingPoints = written.talkingPoints;
+        if (written.recommendations?.length) aiRecommendations = written.recommendations;
+        if (written.wins?.length) wins = written.wins;
+        if (written.risks?.length) risks = written.risks;
         claudeState = {
           status: "generated",
           generatedAt: getNowIso(),
           model: claudeOutput.model,
           provider: claudeOutput.provider,
+          ...(claudeOutput.shortfall ? { shortfall: claudeOutput.shortfall } : {}),
         };
       }
     } catch (error) {

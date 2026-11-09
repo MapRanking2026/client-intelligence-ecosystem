@@ -226,6 +226,75 @@ console.log("\nwhich layer wins");
   check("a stored spam verdict beats a long duration", verdictWins.label === "spam");
   check("and says where it came from", verdictWins.reason.includes("earlier verification"));
 
+  // A verdict set by hand on the verification page is a person deciding, and used to be credited
+  // to "Automatic rule" because only `labelSource` was consulted. Five real calls, 9 Nov 2026.
+  const handVerdict = resolveCallLabel({
+    status: "flagged",
+    category: "spam",
+    callDurationSec: 300,
+    callStatus: "completed",
+    verdictSource: "manual",
+  });
+  check("a hand-set verdict is credited to the person", handVerdict.source === "manual");
+  check("and reads the same label as before the credit was fixed", handVerdict.label === "spam");
+  check(
+    "and the reason says where they set it",
+    handVerdict.reason.includes("by hand") && handVerdict.reason.includes("verification page"),
+  );
+
+  const handAgreeing = resolveCallLabel({
+    status: "valid",
+    category: "valid_new_lead",
+    callDurationSec: 300,
+    callStatus: "completed",
+    verdictSource: "manual",
+  });
+  check(
+    "a hand-set verdict the rule agrees with is still the person's decision",
+    handAgreeing.source === "manual" && handAgreeing.label === "good",
+  );
+  check(
+    "and the reason admits the rule would have said the same",
+    handAgreeing.reason.includes("would have said the same"),
+  );
+
+  const aiVerdict = resolveCallLabel({
+    status: "flagged",
+    category: "spam",
+    callDurationSec: 300,
+    callStatus: "completed",
+    verdictSource: "ai",
+  });
+  check("an AI-set verdict is not credited to the person", aiVerdict.source === "automatic");
+
+  // The one place a hand-set verdict does NOT take the credit: the phone system overruled it.
+  const handVerdictOverruled = resolveCallLabel({
+    status: "valid",
+    category: "valid_new_lead",
+    callStatus: "voicemail",
+    verdictSource: "manual",
+  });
+  check(
+    "a recorded no-answer still beats a hand-set verdict",
+    handVerdictOverruled.label === "missed",
+  );
+  check(
+    "and the credit stays with the rule, because the rule is what decided",
+    handVerdictOverruled.source === "automatic",
+  );
+
+  const handWithNoVerdictToRead = resolveCallLabel({
+    status: "needs_review",
+    category: "incomplete",
+    callDurationSec: 300,
+    callStatus: "completed",
+    verdictSource: "manual",
+  });
+  check(
+    'a hand-set "we could not tell" leaves the rules to answer, and to be credited',
+    handWithNoVerdictToRead.source === "automatic" && handWithNoVerdictToRead.label === "good",
+  );
+
   // The owner's decision, 8 November 2026: a recorded no-answer is a fact and beats the verdict.
   const recordedFact = resolveCallLabel({
     status: "valid",

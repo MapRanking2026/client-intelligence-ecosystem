@@ -273,7 +273,7 @@ export function callLabelFromVerdict(
 /** A lead as this module needs to see it. Narrow on purpose, so it is easy to test. */
 export type LabelledLead = Pick<
   VerifiedLead,
-  "status" | "category" | "callDurationSec" | "callStatus" | "callDirection"
+  "status" | "category" | "callDurationSec" | "callStatus" | "callDirection" | "verdictSource"
 > & {
   callLabel?: CallLabel;
   labelSource?: CallLabelSource;
@@ -296,6 +296,27 @@ export interface ResolvedLabel {
  * reading of the lead. Only then is the old nine-category verdict consulted, and only where it is
  * specific enough to mean something (see `callLabelFromVerdict`); the automatic rules answer when
  * it is not. The full order, and why, is at the top of this file.
+ *
+ * ## Two ways a person can decide a label, and both are credited to the person
+ *
+ * `labelSource === "manual"` is somebody picking one of the five labels from the dropdown on the
+ * call dashboard. `verdictSource === "manual"` is somebody setting the nine-category verdict by
+ * hand on the lead & call verification page; the label is then read off that verdict. Different
+ * screens, same thing happened -- a human looked at the call and decided.
+ *
+ * Until now the second case was credited to "Automatic rule", because this function only looked at
+ * `labelSource`. Five real calls on live data were affected (9 November 2026). The label shown was
+ * right; the credit was wrong, and wrong in the direction that matters: the table offers a Reset
+ * to automatic button, so a reader told a computer had guessed would reset it in good conscience
+ * and throw away somebody's decision.
+ *
+ * What does NOT move is the recorded no-answer branch below. Where the phone system says nobody
+ * picked up, the phone system decided the label and the hand-set verdict was overruled, so the
+ * credit stays with the rule and the reason names the verdict it set aside.
+ *
+ * None of this reaches a client. The source, the reason and the override flag are all dropped by
+ * `toReportRows` on the way into the client report, which shows the label and nothing about who
+ * arrived at it.
  */
 export function resolveCallLabel(lead: LabelledLead): ResolvedLabel {
   if (lead.labelSource === "manual" && lead.callLabel) {
@@ -342,16 +363,33 @@ export function resolveCallLabel(lead: LabelledLead): ResolvedLabel {
     text: lead.transcript,
   });
 
+  // A verdict somebody set by hand is a person's decision, whichever screen they set it on, so the
+  // label it produces is credited to the person rather than to the rule that would have run.
+  const byHand = lead.verdictSource === "manual";
+
   if (fromVerdict && fromVerdict !== automatic.label) {
     // The stored verdict is more specific than the metadata, so it wins -- but say which it was.
     return {
       label: fromVerdict,
-      source: "automatic",
-      reason: `Carried over from the earlier verification, which marked this call "${
-        lead.category ?? "unknown"
-      }".`,
+      source: byHand ? "manual" : "automatic",
+      reason: byHand
+        ? `You set this call's verdict to "${lead.category ?? "unknown"}" by hand on the lead & call verification page, and this label follows it.`
+        : `Carried over from the earlier verification, which marked this call "${
+            lead.category ?? "unknown"
+          }".`,
     };
   }
+
+  if (fromVerdict && byHand) {
+    // The hand-set verdict and the rule agree. The person still decided it; the credit says so,
+    // and the reason admits the rule would have reached the same label on its own.
+    return {
+      label: fromVerdict,
+      source: "manual",
+      reason: `You set this call's verdict to "${lead.category ?? "unknown"}" by hand, which reads as this label. The automatic rule would have said the same: ${automatic.reason.charAt(0).toLowerCase()}${automatic.reason.slice(1)}`,
+    };
+  }
+
   return { label: automatic.label, source: "automatic", reason: automatic.reason };
 }
 

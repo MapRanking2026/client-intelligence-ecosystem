@@ -112,6 +112,28 @@ console.log("what the report drops on purpose");
   check("no reason", !keys.includes("reason"));
   check("no override flag", !keys.includes("overridden"));
   check("the label itself stays", only.labelName === "Good");
+
+  // A call a person decided by hand reaches the client as a label and nothing else. The dashboard
+  // credits them -- that is the whole point of the column -- but a client report that says a human
+  // overrode a computer is inviting a conversation about our process instead of about their calls.
+  const handSet = toReportRows(
+    [
+      row("b", {
+        source: "manual",
+        sourceName: "You",
+        reason: `You set this call's verdict to "spam" by hand on the lead & call verification page.`,
+        overridden: true,
+        label: "spam",
+        labelName: "Spam",
+      }),
+    ],
+    true,
+  );
+  const serialised = JSON.stringify(handSet);
+  check("the label a person chose is shown", handSet[0].labelName === "Spam");
+  check("but not that a person chose it", !serialised.includes("You") && !serialised.includes("manual"));
+  check("nor where they chose it", !serialised.includes("verification page"));
+  check("nor that anything was overridden", !serialised.includes("overridden"));
 }
 
 console.log("the caller cell");

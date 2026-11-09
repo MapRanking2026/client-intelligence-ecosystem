@@ -69,6 +69,9 @@ async function main() {
   let callsWithContact = 0;
   let callsWithPhone = 0;
   let reconciliationFailures = 0;
+  let handDecided = 0;
+  let handCredited = 0;
+  let handOverruled = 0;
   const problems: string[] = [];
 
   for (const tenantId of tenantIds) {
@@ -199,6 +202,21 @@ async function main() {
         problems.push(`${doc.id}: ${noReason} row(s) would show a label with no reason behind it`);
       }
       const byHand = table.rows.filter((row) => row.overridden).length;
+      // Of the rows a person decided, how many the who-decided-it column credits to them. The gap
+      // is rows where a recorded no-answer overruled the person, which is correct -- it is counted
+      // separately rather than hidden. Before 9 November 2026 every hand-set VERDICT sat in that
+      // gap and read "Automatic rule", so the loop below fails on any other reason for being there.
+      const creditedToPerson = table.rows.filter((row) => row.source === "manual").length;
+      const overruled = table.rows.filter((row) => row.overridden && row.source !== "manual");
+      handDecided += byHand;
+      handCredited += creditedToPerson;
+      handOverruled += overruled.length;
+      for (const row of overruled) {
+        if (!/Nobody answered/.test(row.reason || "")) {
+          reconciliationFailures += 1;
+          problems.push(`${doc.id}: row ${row.id} was set by hand but credited to "${row.sourceName}"`);
+        }
+      }
       const withRecording = table.rows.filter((row) => row.recordingUrl).length;
       const withTopic = table.rows.filter((row) => row.topic).length;
 
@@ -313,7 +331,7 @@ async function main() {
         `   shapes:    donut ${donut.length} arc(s) summing to ${Math.round(donutShare * 100)}%  ·  ${stacked.buckets.length} column(s), tallest ${Math.round(tallest)}% of the panel, ${labelled} labelled`,
       );
       console.log(
-        `   table:     ${table.rows.length} row(s) of ${inPeriod.length}, state "${table.state}"  ·  ${byHand} set by hand  ·  ${withRecording} playable  ·  ${withTopic} with a topic`,
+        `   table:     ${table.rows.length} row(s) of ${inPeriod.length}, state "${table.state}"  ·  ${byHand} set by hand, ${creditedToPerson} credited to a person  ·  ${withRecording} playable  ·  ${withTopic} with a topic`,
       );
       console.log(`   reconciles: ${agrees ? "yes" : "NO"}`);
     }
@@ -327,6 +345,9 @@ async function main() {
   console.log(`  set aside, no timestamp:     ${droppedNoTimestamp}`);
   console.log(`every client reconciles:       ${reconciliationFailures === 0 ? "yes" : `NO — ${reconciliationFailures} client(s)`}`);
   console.log(`report sentences written:     ${reportSentences}, none of them over a figure that was not measured`);
+  console.log(
+    `labels a person decided:       ${handDecided}, of which ${handCredited} credited to the person and ${handOverruled} overruled by a recorded no-answer`,
+  );
   if (totalCalls) {
     console.log(`\nwhat each section has to work with:`);
     console.log(

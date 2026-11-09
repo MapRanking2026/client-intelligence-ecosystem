@@ -214,6 +214,17 @@ console.log("\nwhere a label came from");
     "a hand-set VERDICT also counts as overridden, so the person's work is not silently taken over",
     handVerdict.rows[0].overridden,
   );
+  // And the who-decided-it column now agrees with the override flag. These two disagreeing is
+  // what shipped until 9 November 2026: the row was flagged as overridden while the column read
+  // "Automatic rule", which is the pair of readings most likely to get somebody's work reset.
+  check(
+    'the column credits the person rather than reading "Automatic rule"',
+    handVerdict.rows[0].sourceName === "You" && handVerdict.rows[0].source === "manual",
+  );
+  check(
+    "the override flag and the credit can no longer disagree",
+    handVerdict.rows[0].overridden === (handVerdict.rows[0].source === "manual"),
+  );
 }
 
 console.log("\nthe number filter's options");

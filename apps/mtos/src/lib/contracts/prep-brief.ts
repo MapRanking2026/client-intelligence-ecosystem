@@ -559,6 +559,71 @@ export function approvalSummary(review?: { declinedSections?: string[] }): {
 }
 
 // ---------------------------------------------------------------------------
+// Whether the preparation is finished
+// ---------------------------------------------------------------------------
+
+/**
+ * The fifteen numbered sections, without the header.
+ *
+ * The header is derived from the client and the calendar rather than written by the preparation,
+ * so counting it would make a brief that wrote nothing at all read as one-sixteenth done.
+ */
+export const BRIEF_BODY_SECTION_IDS: BriefSectionId[] = BRIEF_SECTIONS.filter(
+  (section) => section.id !== "h",
+).map((section) => section.id);
+
+export interface BriefCompleteness {
+  /** Always fifteen; stated rather than assumed so the screen's "x of 15" cannot drift. */
+  total: number;
+  populated: number;
+  /** The sections with nothing in them, in brief order, as the AM reads them. */
+  missing: BriefSectionId[];
+  /** True when every one of the fifteen has something in it. */
+  ready: boolean;
+}
+
+/**
+ * How much of the brief the preparation actually wrote.
+ *
+ * This is the gate between Prep and Review. Prep stays active until all fifteen sections have
+ * something in them, because a brief with holes in it is exactly what the AM used to discover on
+ * the review screen -- and until 9 November 2026 every one of the fifteen said "the preparation
+ * did not write this section", because the response was being rebuilt from six keys and the
+ * sections were dropped before the brief reader saw them. A count on the Prep screen is the thing
+ * that would have caught that in a minute rather than in weeks.
+ *
+ * Three ways a section counts as populated, and they are deliberately different facts:
+ *
+ *   - the preparation wrote blocks for it, which is the normal case;
+ *   - the AM wrote it themselves, because their own words are not a gap;
+ *   - the AM declined it, because a decline is a decision about the section and not a hole in it.
+ *
+ * Section 15, the client-facing agenda, is populated by the agenda email record rather than by the
+ * model, so it is never counted against the preparation.
+ */
+export function briefCompleteness(
+  brief: PrepBrief | undefined,
+  review?: { declinedSections?: string[]; sectionEdits?: Record<string, string> },
+): BriefCompleteness {
+  const declined = new Set(review?.declinedSections || []);
+  const edits = review?.sectionEdits || {};
+  const missing = BRIEF_BODY_SECTION_IDS.filter((id) => {
+    if (id === "15") return false;
+    if (declined.has(id)) return false;
+    if ((edits[id] || "").trim()) return false;
+    return !(brief?.sections || []).some(
+      (section) => section.id === id && Boolean((section.markdown || "").trim()),
+    );
+  });
+  return {
+    total: BRIEF_BODY_SECTION_IDS.length,
+    populated: BRIEF_BODY_SECTION_IDS.length - missing.length,
+    missing,
+    ready: missing.length === 0,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // What gets posted to the Client's Book
 // ---------------------------------------------------------------------------
 

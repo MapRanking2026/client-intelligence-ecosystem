@@ -10,7 +10,9 @@ import { Linkified } from "@/src/components/mtos/annotate";
 import { JoinMeetButton, LiveModeLauncher } from "@/src/components/mtos/live-mode";
 import { LiveCallStep } from "@/src/components/mtos/live-call-step";
 import { TranscriptWaitPanel } from "@/src/components/mtos/transcript-wait-panel";
-import { PrepWorkflowPanel } from "@/src/components/mtos/prep-workflow-panel";
+import { PrepStagePanel } from "@/src/components/mtos/prep-stage-panel";
+import { CallMaterialProgress } from "@/src/components/mtos/call-material-progress";
+import { ApprovalStatusCard } from "@/src/components/mtos/approval-status";
 import { TouchProgressRail } from "@/src/components/mtos/touch-progress-rail";
 import { ReviewBrief } from "@/src/components/mtos/review-brief";
 import { BriefHeader } from "@/src/components/mtos/brief-header";
@@ -43,7 +45,14 @@ import {
   resumeNotice,
   type TouchStep,
 } from "@/src/lib/contracts/touch-progress";
-import { EMPTY_PREP_BRIEF, approvalSummary } from "@/src/lib/contracts/prep-brief";
+import { EMPTY_PREP_BRIEF, approvalSummary, briefCompleteness } from "@/src/lib/contracts/prep-brief";
+import type { BriefSectionId } from "@/src/lib/contracts/prep-brief";
+import {
+  DEFAULT_LIVE_CALL_FORMAT,
+  PREP_SECTION_PURPOSE,
+  REVIEW_SECTION_LABEL,
+  REVIEW_SECTION_PURPOSE,
+} from "@/src/lib/contracts/touch-stages";
 import { mergeQcIntoBrief } from "@/src/lib/contracts/qc-coaching";
 import { LEGACY_QA_EXPLAINER, LEGACY_QA_TAG, legacyGradeLabel } from "@/src/lib/contracts/qc-legacy";
 import { getLatestQcCoaching } from "@/src/lib/server/services/qc-am-service";
@@ -73,9 +82,24 @@ export const dynamic = "force-dynamic";
  * AM scrolled past the whole month to find the thing they needed now, and its primary action never
  * changed -- `Capture & close out` sat at the top of a touch whose meeting had not happened.
  *
- * This one has the five stages across the top, one primary action that belongs to the stage the
- * touch is actually in, and the page shows that stage's work. The other stages stay one click away
- * rather than being hidden, because an AM does sometimes want to re-read the preparation mid-call.
+ * This one has the five stages across the top -- stuck there, so they are still on the screen
+ * fifteen brief sections down -- with the stage's one action inside the rail, and below it the work
+ * of the stage being looked at. The other stages stay one click away rather than being hidden,
+ * because an AM does sometimes want to re-read the preparation mid-call.
+ *
+ * The rail is the only progress indicator here. There used to be three: the rail, a second
+ * numbered rail inside the preparation panel for its own four sub-steps, and a card between them
+ * naming a stage and an action of its own. Each was right about something different, which made
+ * "where am I" a question with three answers and no way to tell which one counted.
+ *
+ * Each stage holds its parts in one fixed order, declared in `touch-stages` and pinned by
+ * `check:touch-stages` rather than left to the order somebody typed the JSX in:
+ *
+ *   Prep    the Google Meet sync, then readiness and evidence confidence, then the account review.
+ *   Review  the fifteen-section brief with its evidence inside it, then the client email, then how
+ *           the call will be run, then the one approval.
+ *   Live    the generated presentation or call guide -- or, while it is still building, its
+ *           progress, because an empty deck mid-call sends the AM to last month's ClickUp page.
  *
  * It was built alongside the old one and lived at `/v2` while it was tried on real touches. It is
  * the default here now; the old screen is still readable at `/legacy`, and `/v2` still answers
@@ -167,6 +191,22 @@ function Section({
   );
 }
 
+/**
+ * A panel of evidence, labelled, for rendering inside the brief section it supports.
+ *
+ * Lighter than `Section` on purpose: it sits inside a section card that already has a heading, so
+ * a second card around it would read as a card inside a card.
+ */
+function Evidence({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
+  return (
+    <div className="mt-4">
+      <div className="eyebrow muted">{label}</div>
+      {hint ? <p className="muted mb-2 mt-1 text-[0.8rem]">{hint}</p> : null}
+      <div className={hint ? "" : "mt-2"}>{children}</div>
+    </div>
+  );
+}
+
 export default async function MonthlyTouchRunSheetPage({
   params,
   searchParams,
@@ -231,6 +271,27 @@ export default async function MonthlyTouchRunSheetPage({
   const sectionSummary = approvalSummary(touch.review);
 
   /*
+    How much of the fifteen-section brief the preparation actually wrote.
+
+    Prep holds the touch until this is whole, and the Prep screen names the sections that are not.
+    It is the number that would have caught the November regression in a minute: every section of
+    every brief read "the preparation did not write this section" for weeks, because the response
+    was being rebuilt from six keys and the sections were dropped before the reader saw them.
+  */
+  const briefProgress = briefCompleteness(touch.prepBrief, touch.review);
+
+  /*
+    The format this touch will be run in, and whether the thing that format needs exists yet.
+    Read here rather than inside the Live markup because the same answer decides whether the Live
+    screen leads with the material or with its progress.
+  */
+  const liveFormat = touch.live?.format || preferences.liveCallFormat || DEFAULT_LIVE_CALL_FORMAT;
+  const liveMaterialReady =
+    liveFormat === "deck"
+      ? touch.presentation?.status === "generated" && (touch.presentation?.slides?.length ?? 0) > 0
+      : touch.callGuide?.status === "generated" && (touch.callGuide?.sections?.length ?? 0) > 0;
+
+  /*
     The charts the brief can draw from what the preparation already stored. Derived here rather
     than in the component because it reads the whole prep pack, which the review step does not
     otherwise need on the client, and because the preference that hides them is a server read.
@@ -255,6 +316,110 @@ export default async function MonthlyTouchRunSheetPage({
       : undefined;
   const reviewBrief = mergeQcIntoBrief(touch.prepBrief || EMPTY_PREP_BRIEF, qcCoaching);
 
+  /**
+   * The evidence, in the brief section whose findings it supports.
+   *
+   * Every one of these was a card of its own below the approval card: the scorecard, the lead
+   * verification, the keyword heatmaps, the ads panels, the issue list, the strategic action, the
+   * participation checklist and the recommendations. So the AM approved the brief and then met the
+   * evidence for it -- the same mistake as reviewing a five-question summary of a preparation and
+   * meeting the detail while the client was listening, one level down.
+   *
+   * Each goes where it is read: the numbers with the wins they explain, the heatmaps and the ad
+   * accounts with the service review, the issues with the issues, the recommendations with the
+   * growth they propose, and what the client owes us with the open items.
+   */
+  const briefExtras: Partial<Record<BriefSectionId, ReactNode>> =
+    view === "review"
+      ? {
+          ...(touch.executiveBrief
+            ? {
+                "3": (
+                  <Evidence
+                    label="What the account review found"
+                    hint="The findings the brief and the client email were both written from."
+                  >
+                    <p className="text-[0.88rem] leading-7" style={{ color: "var(--text-2)" }}>
+                      <Linkified text={touch.executiveBrief} clientId={client.id} />
+                    </p>
+                  </Evidence>
+                ),
+              }
+            : {}),
+          ...(prepPack
+            ? {
+                "7": (
+                  <Evidence
+                    label="Client participation"
+                    hint="What we are waiting on from them — every item needs a date from the client, not from us."
+                  >
+                    <ParticipationChecklist participation={prepPack.clientParticipation} />
+                  </Evidence>
+                ),
+                "8": (
+                  <>
+                    <Evidence
+                      label="Business scorecard"
+                      hint="The business numbers behind the wins. A dash means the number was not available, not zero."
+                    >
+                      <ScorecardGrid scorecard={prepPack.businessScorecard} clientId={client.id} />
+                    </Evidence>
+                    {touch.leadVerification ? (
+                      <Evidence
+                        label="Leads, calls and forms — vetted and reconciled"
+                        hint="Each lead vetted, attributed and reconciled against Google Ads and the Google profile, so a win is a real one."
+                      >
+                        <LeadVerificationSummary review={touch.leadVerification} clientId={client.id} />
+                      </Evidence>
+                    ) : null}
+                  </>
+                ),
+                "9": (
+                  <Evidence
+                    label="Issues, business impact and what we are doing"
+                    hint="Every issue arrives with a proposed solution, an owner and a date."
+                  >
+                    <IssuesSolutionsList items={prepPack.issuesAndSolutions} />
+                  </Evidence>
+                ),
+                "10": (
+                  <>
+                    <Evidence label="Keyword heatmaps and profile performance">
+                      <SeoPerformancePanel seo={prepPack.seoPerformance} />
+                    </Evidence>
+                    <Evidence label="Google Ads and Meta Ads">
+                      <AdsPerformancePanel ads={prepPack.adsPerformance} />
+                    </Evidence>
+                  </>
+                ),
+                "12": (
+                  <>
+                    <Evidence label="Strategic action">
+                      <StrategicActionPanel action={prepPack.strategicAction} />
+                    </Evidence>
+                    <Evidence
+                      label="Evidence-backed recommendations"
+                      hint="What to say, why it matters, and the evidence behind it."
+                    >
+                      {touch.aiRecommendations.length ? (
+                        <div className="grid gap-4 xl:grid-cols-2">
+                          {touch.aiRecommendations.map((item) => (
+                            <RecommendationCard key={item.id} item={item} />
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="muted text-[0.86rem]">
+                          The account review has not produced recommendations for this touch yet.
+                        </p>
+                      )}
+                    </Evidence>
+                  </>
+                ),
+              }
+            : {}),
+        }
+      : {};
+
   /*
     What READY confirms while the AM waits for the client: the brief was approved, the agenda
     actually went out, and the call is when they think it is. Each is left out when it is not
@@ -276,11 +441,11 @@ export default async function MonthlyTouchRunSheetPage({
   );
 
   /**
-   * The one action for the stage the touch is in.
+   * The one action for the stage the touch is in, shown inside the sticky rail.
    *
-   * Prep and Review scroll to the workflow rather than duplicating its buttons: there is exactly
-   * one Generate Preparation in the application, and it is the one inside step 1, so the two can
-   * never disagree about whether it is allowed to run.
+   * Prep and Review scroll to the stage's own work rather than duplicating its buttons: there is
+   * exactly one Generate Monthly Prep in the application and exactly one approval, so the rail and
+   * the stage can never disagree about whether either is allowed to run.
    */
   const primaryAction =
     stage === "live" ? (
@@ -296,7 +461,7 @@ export default async function MonthlyTouchRunSheetPage({
         {primary.label}
       </Link>
     ) : (
-      <Link href={`/monthly-touch/${touch.id}?view=${stage}#workflow`} className="btn btn-primary">
+      <Link href={`/monthly-touch/${touch.id}?stage=${stage}#workflow`} className="btn btn-primary">
         <FileText />
         {primary.label}
       </Link>
@@ -317,13 +482,13 @@ export default async function MonthlyTouchRunSheetPage({
             {client.accountManager ? ` · ${client.accountManager}` : ""}
           </p>
         </div>
-        <Link href={`/monthly-touch/${touch.id}/legacy`} className="btn btn-ghost btn-sm">
-          Open the original run-sheet
-        </Link>
       </div>
 
-      <GoogleMeetingPanel touchId={touch.id} emails={client.googleMeetingEmails} />
-
+      {/*
+        The one progress indicator, carrying the one action for the stage the touch is in. Sticky,
+        because the brief under it is fifteen sections long and an indicator nobody can see while
+        they work is exactly what led to it being duplicated inside the preparation panel.
+      */}
       <TouchProgressRail
         touchId={touch.id}
         progress={progress}
@@ -331,163 +496,141 @@ export default async function MonthlyTouchRunSheetPage({
         resume={resume}
         followThroughDueAt={touch.followThrough?.dueAt}
         timeZone={profile.timeZone}
+        action={primaryAction}
       />
 
-      <div className="card mt-4 flex flex-wrap items-center justify-between gap-3">
-        <p className="muted max-w-xl text-[0.84rem]">{primary.hint}</p>
-        {primaryAction}
-      </div>
-
-      {/* ---------- Prep and Review: the ordered workflow plus what it produced ---------- */}
-      {view === "prep" || view === "review" ? (
+      {/* ---------- 1. Prep: the meeting, the two scores, then the account review ---------- */}
+      {view === "prep" ? (
         <>
+          {/*
+            1a. The meeting itself, first.
+
+            Everything after it quotes this meeting's date and time at a client as fact, so it is
+            the first thing confirmed rather than the last: on 9 November 2026 a six-day-old
+            calendar sync had the confirmation email offering to remind a client about a call they
+            had already rebooked away from.
+          */}
+          <GoogleMeetingPanel touchId={touch.id} emails={client.googleMeetingEmails} />
+
+          {/* 1b. Whether the account is ready for a review, and how good the evidence behind it is. */}
           <div className="mt-4">
+            <p className="muted mb-2 text-[0.8rem]">{PREP_SECTION_PURPOSE.readiness}</p>
             <ScoreBreakdown readiness={workflow.readiness!} confidence={workflow.confidence!} />
           </div>
 
-          <div id="workflow" className="mt-5">
-            <PrepWorkflowPanel touchId={touch.id} workflow={workflow} clientName={client.name} />
+          {/* 1c. The account review, and the fifteen-section brief it has to produce. */}
+          <div id="workflow">
+            <PrepStagePanel
+              touchId={touch.id}
+              clientName={client.name}
+              workflow={workflow}
+              brief={briefProgress}
+              hasBrief={Boolean(touch.prepBrief)}
+            />
           </div>
 
-          {prepPack ? (
-            <div className="mt-5">
-              <DataGapsBanner gaps={prepPack.dataGaps} />
-            </div>
-          ) : null}
+          {prepPack ? <DataGapsBanner gaps={prepPack.dataGaps} /> : null}
+        </>
+      ) : null}
 
-          {view === "review" ? (
-            <>
-              {/*
-                The full Pre-Monthly Touch brief: the same fifteen sections that are posted to the
-                Client's Book, replacing the five-question summary. The AM edits or declines them
-                here and approves the lot once, in the agenda card at the bottom.
+      {/* ---------- 2. Review: the brief, the email, the format, the one approval ---------- */}
+      {view === "review" ? (
+        <>
+          {prepPack ? <DataGapsBanner gaps={prepPack.dataGaps} /> : null}
 
-                Rendered even before the preparation has written a brief, so the screen says which
-                sections are missing instead of hiding the step until a model call succeeds.
-              */}
-              <ReviewBrief
-                touchId={touch.id}
-                clientId={client.id}
-                brief={reviewBrief}
-                review={touch.review}
-                charts={charts}
-                header={
-                  <BriefHeader
-                    client={client}
-                    touch={touch}
-                    accountManager={{ name: profile.name, email: profile.email }}
-                    timeZone={profile.timeZone}
-                  />
-                }
-                agendaEmail={
-                  <AgendaApprovalPanel
-                    touchId={touch.id}
-                    email={agendaEmail.state}
-                    sent={agendaEmail.sent}
-                    availableCc={agendaEmail.availableCc}
-                    ccEnabled={agendaEmail.ccEnabled}
-                    format={touch.live?.format || preferences.liveCallFormat || "guide"}
-                    approval={touch.approval}
-                    approving={sectionSummary.approving}
-                    declined={sectionSummary.declined}
-                    pageName={touchPageName(
-                      touch.scheduledAt || prepPack?.schedule.scheduledAt || client.touchDate,
-                      profile.timeZone,
-                    )}
-                  />
-                }
+          {/*
+            2a. The full Pre-Monthly Touch brief: the same fifteen sections that are posted to the
+            Client's Book, with the charts, the business numbers, the lead verification and the
+            recommendations inside the sections they belong to, so every one of them is read before
+            anything is approved.
+
+            Rendered even before the preparation has written a brief, so the screen says which
+            sections are missing instead of hiding the step until a model call succeeds.
+          */}
+          <ReviewBrief
+            touchId={touch.id}
+            clientId={client.id}
+            brief={reviewBrief}
+            review={touch.review}
+            charts={charts}
+            header={
+              <BriefHeader
+                client={client}
+                touch={touch}
+                accountManager={{ name: profile.name, email: profile.email }}
+                timeZone={profile.timeZone}
               />
-            </>
-          ) : null}
+            }
+            extras={briefExtras}
+          />
 
-          {view === "review" && prepPack ? (
-            <>
-              {touch.executiveBrief ? (
-                <Section
-                  eyebrow="The month"
-                  title="What the account review found"
-                  subtitle="The findings the preparation notes and the client email were both written from."
-                >
-                  <p className="text-[0.88rem] leading-7" style={{ color: "var(--text-2)" }}>
-                    <Linkified text={touch.executiveBrief} clientId={client.id} />
-                  </p>
-                </Section>
-              ) : null}
-
-              {touch.leadVerification ? (
-                <Section
-                  eyebrow="Lead & call verification"
-                  title="Leads, calls and forms — vetted and reconciled"
-                  subtitle="Run during the account review: each lead vetted, attributed, and reconciled against Google Ads and the Google profile."
-                >
-                  <LeadVerificationSummary review={touch.leadVerification} clientId={client.id} />
-                </Section>
-              ) : null}
-
-              <Section
-                eyebrow="Scorecard"
-                title="Business scorecard"
-                subtitle="The business numbers, read before the services. A dash means the number was not available, not zero."
-              >
-                <ScorecardGrid scorecard={prepPack.businessScorecard} clientId={client.id} />
-              </Section>
-
-              <Section eyebrow="SEO & GBP" title="Keyword heatmaps and profile performance">
-                <SeoPerformancePanel seo={prepPack.seoPerformance} />
-              </Section>
-
-              <Section eyebrow="Paid media" title="Google Ads and Meta Ads">
-                <AdsPerformancePanel ads={prepPack.adsPerformance} />
-              </Section>
-
-              <Section
-                eyebrow="Issues"
-                title="Issues, business impact and what we are doing"
-                subtitle="Every issue arrives with a proposed solution, an owner and a date."
-              >
-                <IssuesSolutionsList items={prepPack.issuesAndSolutions} />
-              </Section>
-
-              <div className="mt-4 grid gap-4 xl:grid-cols-2">
-                <div className="card">
-                  <div className="card-head">
-                    <div className="card-title">Strategic action</div>
-                  </div>
-                  <StrategicActionPanel action={prepPack.strategicAction} />
-                </div>
-                <div className="card">
-                  <div className="card-head">
-                    <div className="card-title">Client participation</div>
-                  </div>
-                  <ParticipationChecklist participation={prepPack.clientParticipation} />
-                </div>
+          {/*
+            2b. the client confirmation email, 2c. how the call will be run, 2d. the one approval --
+            in that order, from one component. The format chosen there is what the button builds and
+            the email shown there is what it sends, so the screen cannot promise one thing and the
+            server do another.
+          */}
+          <div id="approve" className="mt-5">
+            <div className="section-head" style={{ marginTop: 0 }}>
+              <div>
+                <div className="eyebrow muted">Review · the last three decisions</div>
+                <h2 className="h3 mt-2">{REVIEW_SECTION_LABEL.confirmation_email}</h2>
+                <p className="muted mt-1.5 max-w-2xl text-[0.84rem]">
+                  {REVIEW_SECTION_PURPOSE.confirmation_email}
+                </p>
               </div>
+            </div>
+            <AgendaApprovalPanel
+              touchId={touch.id}
+              email={agendaEmail.state}
+              sent={agendaEmail.sent}
+              availableCc={agendaEmail.availableCc}
+              ccEnabled={agendaEmail.ccEnabled}
+              format={liveFormat}
+              approval={touch.approval}
+              approving={sectionSummary.approving}
+              declined={sectionSummary.declined}
+              pageName={touchPageName(
+                touch.scheduledAt || prepPack?.schedule.scheduledAt || client.touchDate,
+                profile.timeZone,
+              )}
+            />
+          </div>
 
-              <Section
-                eyebrow="AI assistance"
-                title="Evidence-backed recommendations"
-                subtitle="What to say, why it matters, and the evidence behind it."
-              >
-                {touch.aiRecommendations.length ? (
-                  <div className="grid gap-4 xl:grid-cols-2">
-                    {touch.aiRecommendations.map((item) => (
-                      <RecommendationCard key={item.id} item={item} />
-                    ))}
-                  </div>
-                ) : (
-                  <p className="muted text-[0.86rem]">
-                    The account review has not produced recommendations for this touch yet.
-                  </p>
-                )}
-              </Section>
-            </>
+          {/*
+            And what the approval actually did, left on the screen rather than only inside the
+            dialog that ran it. The ClickUp page and the client email are the two writes an AM needs
+            to be able to confirm afterwards, so the card names them and links the page it wrote.
+          */}
+          {touch.approval?.startedAt ? (
+            <ApprovalStatusCard touchId={touch.id} approval={touch.approval} />
           ) : null}
         </>
       ) : null}
 
-      {/* ---------- Live: the call itself, with the two generators behind it ---------- */}
+      {/* ---------- 3. Live: the call itself, with the two generators behind it ---------- */}
       {view === "live" ? (
         <>
+          {/*
+            The chosen material, or an honest account of why it is not here yet.
+
+            The approval builds it as its last step, and the AM can reach Live before that step has
+            finished -- the timeline is one click away and the approval's progress dialog can be
+            closed. That used to be a Live screen with an empty deck on it: no slides, no
+            explanation and nothing to press, which mid-call means presenting from last month.
+          */}
+          {!liveMaterialReady ? (
+            <CallMaterialProgress
+              touchId={touch.id}
+              format={liveFormat}
+              {...(touch.approval?.steps.build ? { step: touch.approval.steps.build } : {})}
+            />
+          ) : null}
+
+          {touch.approval?.startedAt ? (
+            <ApprovalStatusCard touchId={touch.id} approval={touch.approval} />
+          ) : null}
+
           <LiveCallStep
             touchId={touch.id}
             clientId={client.id}
@@ -561,7 +704,7 @@ export default async function MonthlyTouchRunSheetPage({
         </>
       ) : null}
 
-      {/* ---------- Follow-through ---------- */}
+      {/* ---------- 4. Follow-through ---------- */}
       {view === "follow_through" ? (
         <div className="card mt-4">
           <div className="card-head">
@@ -606,7 +749,7 @@ export default async function MonthlyTouchRunSheetPage({
         </div>
       ) : null}
 
-      {/* ---------- QA ---------- */}
+      {/* ---------- 5. QA ---------- */}
       {view === "qa" ? (
         <div className="card mt-4">
           <div className="card-head">

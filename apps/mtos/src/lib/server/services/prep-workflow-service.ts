@@ -36,7 +36,9 @@ import {
   isStageOpen,
   recomputeGates,
 } from "@/src/lib/server/services/prep-workflow-rules";
+import { briefCompleteness } from "@/src/lib/contracts/prep-brief";
 import { prepareMonthlyTouch } from "@/src/lib/server/services/monthly-touch-prep-service";
+import { advanceTouchProgress } from "@/src/lib/server/services/touch-state-service";
 import { computeConfidence, computeReadiness, deriveTouchStatus } from "@/src/lib/server/services/prep-readiness-service";
 import { getNowIso, stripUndefinedDeep } from "@/src/lib/server/services/mtos-ai";
 
@@ -432,12 +434,36 @@ export async function runResearchStage(context: TenantContext, touchId: string):
   };
 
   const saved = await persist(context, prepared, workflow);
+
+  /**
+   * Prep hands over to Review by itself, and only once the brief is whole.
+   *
+   * The AM used to finish a five-minute preparation and still have to find the review: the stage
+   * marker only moved when something downstream wrote it, so the screen they were left looking at
+   * was the one they had just finished with. It moves here instead, at the one moment the work of
+   * the stage genuinely ended.
+   *
+   * The gate is the brief rather than the stage record. A review opened over a brief with holes in
+   * it is what the account review failing halfway used to look like -- fifteen headings and
+   * nothing under them -- so a partial brief leaves the touch in Prep, where the screen names the
+   * sections that are empty and the button says to run it again.
+   *
+   * Non-fatal: the marker is a convenience, and a touch whose preparation succeeded must not
+   * report a failure because one extra write did not land.
+   */
+  const brief = briefCompleteness(saved.prepBrief, saved.review);
+  if (!failureReason && brief.ready) {
+    await advanceTouchProgress(context, touchId, "review").catch(() => undefined);
+  }
+
   return {
     touch: saved,
     workflow: saved.prepWorkflow!,
     message: failureReason
       ? failureReason
-      : `The account review is done. ${sourceChecks.filter((check) => check.reachable).length} of ${sourceChecks.length} sources answered, and the agenda is ready for the client email.`,
+      : brief.ready
+        ? `The account review is done and all ${brief.total} brief sections are written. ${sourceChecks.filter((check) => check.reachable).length} of ${sourceChecks.length} sources answered. Review is open.`
+        : `The account review ran and ${sourceChecks.filter((check) => check.reachable).length} of ${sourceChecks.length} sources answered, but the brief came back with ${brief.missing.length} of ${brief.total} sections empty (${brief.missing.join(", ")}). Run it again before you review it.`,
   };
 }
 

@@ -106,6 +106,15 @@ export interface ApprovalPlanOptions {
   declined: string[];
   /** False when the agenda email is declined, or when there is nothing sendable. */
   sendingEmail: boolean;
+  /**
+   * True when the client already has the agenda, because the AM pressed "Approve and Send".
+   *
+   * Stated separately from `sendingEmail` because the three cases read differently and an AM has
+   * to be able to tell them apart before they press the button: one email is about to go out, one
+   * already went out, or the client is being told nothing. Collapsing "already sent" into "not
+   * sending" is how a plan comes to say the client was declined an agenda they are holding.
+   */
+  alreadySent?: boolean;
   /** Who the email goes to, for the line that names them. Empty when unknown. */
   recipient: string;
   /** `guide` builds the timed run-sheet, `deck` builds the client presentation. */
@@ -127,9 +136,11 @@ export function approvalPlan(options: ApprovalPlanOptions): string[] {
     options.declined.length
       ? `Approve the ${options.approving} of ${total} brief sections you didn't decline — sections ${options.declined.join(", ")} stay out of everything below.`
       : `Approve all ${options.approving} brief sections.`,
-    options.sendingEmail
-      ? `Send the agenda email${options.recipient ? ` to ${options.recipient}` : ""} from support@mapranking.com through your own Intercom, so the reply comes back to you.`
-      : "Not send the agenda email — you declined it, so the client is told nothing.",
+    options.alreadySent
+      ? `Not send the agenda email again — you already sent it${options.recipient ? ` to ${options.recipient}` : ""}, and it goes out once.`
+      : options.sendingEmail
+        ? `Send the agenda email${options.recipient ? ` to ${options.recipient}` : ""} from support@mapranking.com through your own Intercom, so the reply comes back to you.`
+        : "Not send the agenda email — you moved forward without it, so the client is told nothing.",
     `Post the approved brief to the client's Client's Book in ClickUp, as "${options.pageName}" under Client Meetings Notes, and create the empty "Post Monthly Touch Notes" subpage inside it for the write-up after the call.`,
     options.format === "deck"
       ? "Build the Map Ranking client presentation and your presenter script from the approved sections."

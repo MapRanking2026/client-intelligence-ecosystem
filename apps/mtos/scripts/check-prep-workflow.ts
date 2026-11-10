@@ -22,6 +22,7 @@
  * Run with: npm run check:prep-workflow
  */
 import { emptyPrepWorkflowState, type PrepWorkflowState } from "@/src/lib/contracts/prep-workflow";
+import { BRIEF_BODY_SECTION_IDS, EMPTY_PREP_BRIEF } from "@/src/lib/contracts/prep-brief";
 import type { ClientRecord, MonthlyTouchRecord } from "@/src/lib/mtos-data";
 import {
   bundledPrepDocumentSections,
@@ -182,6 +183,23 @@ function prepPack(overrides: { metricsAvailable?: boolean; adsChannels?: string[
       notes: [],
     },
     claude: { status: "generated" as const, generatedAt: NOW },
+  };
+}
+
+/**
+ * A brief with all fifteen sections written.
+ *
+ * Section 15 is the client-facing agenda, which the agenda email record fills rather than the
+ * model, so it is left out here and still counts as populated.
+ */
+function wholeBrief() {
+  return {
+    ...EMPTY_PREP_BRIEF,
+    sections: BRIEF_BODY_SECTION_IDS.filter((id) => id !== "15").map((id) => ({
+      id,
+      title: `Section ${id}`,
+      markdown: `What section ${id} found.`,
+    })),
   };
 }
 
@@ -880,9 +898,28 @@ scenario("A first Monthly Touch with no previous meeting notes");
 scenario("The run-sheet stage and the board column read the work, not a button");
 {
   check("an unprepared touch is in Prep", deriveRunSheetStage(touch()) === "prep");
+  /*
+    The gate between Prep and Review is the brief, not the stage record.
+
+    A finished account review used to be enough on its own, and that is exactly how the November
+    regression got as far as the review screen: the stage said `complete` while all fifteen
+    sections read "the preparation did not write this section". Prep holds the touch until the
+    brief is whole, so a complete review with no brief behind it is still Prep.
+
+    The brief gate itself has its own run: `npm run check:touch-stages`.
+  */
   check(
-    "a reviewed touch is in Review",
-    deriveRunSheetStage(touch({ prepWorkflow: workflowAt("confirmation_email") })) === "review",
+    "a finished account review with no brief behind it is still in Prep",
+    deriveRunSheetStage(touch({ prepWorkflow: workflowAt("confirmation_email") })) === "prep",
+  );
+  check(
+    "a finished account review and a whole brief is in Review",
+    deriveRunSheetStage(
+      touch({
+        prepWorkflow: workflowAt("confirmation_email"),
+        prepBrief: wholeBrief(),
+      }),
+    ) === "review",
   );
   check(
     "a fully prepared and filed touch is in Live",

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useMemo, useRef, useState } from "react";
-import { AlertTriangle, Check, Loader2, Mail, Presentation, Rocket, Undo2, X } from "lucide-react";
+import { AlertTriangle, Check, CheckCircle2, Loader2, Mail, Presentation, Rocket, Send, Undo2, X } from "lucide-react";
 
 import { useTouchAutosave } from "@/src/components/mtos/use-touch-autosave";
 import {
@@ -15,11 +15,17 @@ import {
   type ApprovalStepId,
   type TouchApprovalState,
 } from "@/src/lib/contracts/touch-approval";
+import type { AgendaSendOutcome } from "@/src/lib/contracts/agenda-email";
 import type { LiveCallFormat, TouchAgendaEmailState } from "@/src/lib/mtos-data";
 
 /**
- * Section 15 and the one approval: the client-facing agenda email, the live-call format, and the
- * single button that ends the review step.
+ * The last three parts of the review: the client-facing agenda email, the live-call format, and
+ * the single button that ends the review step.
+ *
+ * The email can be sent from here, with "Approve and Send", or left for the approval to send. Both
+ * go through one sender on the server, which refuses a second send against the Intercom
+ * conversation id the first one stored -- so an AM who sends it here and then approves does not
+ * put two agendas for the same meeting in a client's inbox.
  *
  * One component rather than three, because the three are one decision. The format chosen here is
  * what the button builds, the email shown here is what the button sends, and the plan printed
@@ -79,10 +85,17 @@ export function AgendaApprovalPanel({
   const [optionsOpen, setOptionsOpen] = useState(false);
   const [approval, setApproval] = useState<TouchApprovalState | undefined>(storedApproval);
   const [running, setRunning] = useState(false);
+  const [sending, setSending] = useState(false);
+  // What the last send attempt did, in the server's own words, kept on the card rather than in a
+  // toast: "it went out" and "it could not go out" are both things the AM needs to still be able
+  // to read a minute later, while they are deciding whether to approve.
+  const [sendOutcome, setSendOutcome] = useState<AgendaSendOutcome | undefined>();
   const [message, setMessage] = useState<string | undefined>();
   const [showModal, setShowModal] = useState(false);
 
-  const locked = sent || Boolean(approval?.finishedAt);
+  const alreadySent =
+    sent || sendOutcome?.status === "sent" || sendOutcome?.status === "already_sent";
+  const locked = alreadySent || Boolean(approval?.finishedAt);
   const blocking = email.blockingGaps || [];
 
   const plan = useMemo(
@@ -91,11 +104,12 @@ export function AgendaApprovalPanel({
         approving,
         declined,
         sendingEmail: !declinedEmail,
+        ...(alreadySent ? { alreadySent: true } : {}),
         recipient: email.recipient || "",
         format,
         pageName,
       }),
-    [approving, declined, declinedEmail, email.recipient, format, pageName],
+    [alreadySent, approving, declined, declinedEmail, email.recipient, format, pageName],
   );
 
   const toggleDecline = useCallback(() => {
@@ -113,6 +127,43 @@ export function AgendaApprovalPanel({
     },
     [autosave],
   );
+
+  /**
+   * Send the agenda now, before the approval.
+   *
+   * The owner's case: the AM has read the brief, the email is right, and the client should have the
+   * time in their inbox while the AM is still editing section 9. Flushes the autosave first, so
+   * what goes out is the wording on the screen rather than the wording the server last stored.
+   */
+  const send = useCallback(async () => {
+    setSending(true);
+    setSendOutcome(undefined);
+    await autosave.flush();
+    try {
+      const response = await fetch(`/api/monthly-touches/${touchId}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "send_agenda_email" }),
+      });
+      const body = (await response.json().catch(() => ({}))) as {
+        data?: AgendaSendOutcome;
+        error?: string;
+      };
+      setSendOutcome(
+        body.data ?? {
+          status: "failed",
+          detail: body.error || "The send could not be completed. Nothing was sent.",
+        },
+      );
+    } catch (error) {
+      setSendOutcome({
+        status: "failed",
+        detail: `The send request did not reach MTOS (${error instanceof Error ? error.message : "unknown error"}). Nothing was sent. Try again.`,
+      });
+    } finally {
+      setSending(false);
+    }
+  }, [autosave, touchId]);
 
   const approve = useCallback(async () => {
     setRunning(true);
@@ -157,11 +208,14 @@ export function AgendaApprovalPanel({
         declined={declinedEmail}
         onToggleDecline={toggleDecline}
         locked={locked}
-        sent={sent}
+        sent={Boolean(alreadySent)}
         availableCc={availableCc}
         ccEnabled={ccEnabled}
         blocking={blocking}
         onHtml={(html) => autosave.save({ agendaEmail: { html } })}
+        onSend={send}
+        sending={sending}
+        {...(sendOutcome ? { outcome: sendOutcome } : {})}
       />
 
       <FormatOptions
@@ -240,6 +294,9 @@ function EmailCard({
   ccEnabled,
   blocking,
   onHtml,
+  onSend,
+  sending,
+  outcome,
 }: {
   email: TouchAgendaEmailState;
   subject: string;
@@ -252,6 +309,9 @@ function EmailCard({
   ccEnabled: boolean;
   blocking: string[];
   onHtml: (html: string) => void;
+  onSend: () => void;
+  sending: boolean;
+  outcome?: AgendaSendOutcome;
 }) {
   const bodyRef = useRef<HTMLDivElement | null>(null);
   // The initial HTML is written in once, by ref, and never again: re-rendering a `contentEditable`
@@ -297,12 +357,12 @@ function EmailCard({
         </div>
         <div className="flex items-center gap-2">
           <span className={`chip ${declined ? "risk" : sent ? "good" : "info"}`}>
-            {declined ? "Declined" : sent ? "Sent" : "Sends at approval"}
+            {declined ? "Not being sent" : sent ? "Sent" : "Send it, or let the approval send it"}
           </span>
-          {!locked ? (
+          {declined && !locked ? (
             <button type="button" className="btn btn-ghost btn-sm" onClick={onToggleDecline}>
-              {declined ? <Undo2 /> : <X />}
-              {declined ? "Undo decline" : "Decline"}
+              <Undo2 />
+              Send it after all
             </button>
           ) : null}
         </div>
@@ -405,8 +465,66 @@ function EmailCard({
           ? "This email will not be sent, and the client will hear nothing from us before the call."
           : sent
             ? `Sent${email.sentAt ? ` ${whenLabel(email.sentAt)}` : ""}${email.sentVia ? ` via ${email.sentVia}` : ""}. This is what the client received.`
-            : "Edit it like a document — bold, lists and links come through as formatting. It goes out the moment you approve."}
+            : "Edit it like a document — bold, lists and links come through as formatting."}
       </p>
+
+      {/*
+        What the last send attempt did. A blocked or failed send is shown here rather than swallowed
+        because the thing to fix -- a missing address, an empty body, an Intercom permission -- is
+        in this card, a few lines above the message saying so.
+      */}
+      {outcome ? (
+        <p
+          className="mt-3 rounded-[10px] px-3 py-2.5 text-[0.82rem] leading-6"
+          style={
+            outcome.status === "sent" || outcome.status === "already_sent"
+              ? { background: "var(--good-bg)", color: "var(--good)" }
+              : outcome.status === "declined"
+                ? { background: "var(--watch-bg)", color: "var(--watch)" }
+                : { background: "var(--risk-bg)", color: "var(--risk)" }
+          }
+        >
+          {outcome.status === "sent" || outcome.status === "already_sent" ? (
+            <CheckCircle2
+              style={{ width: 14, height: 14, display: "inline", marginRight: 6, verticalAlign: "-2px" }}
+            />
+          ) : null}
+          {outcome.detail}
+        </p>
+      ) : null}
+
+      {/*
+        Approve and Send sits under the email it sends, not in a toolbar at the top: the AM is the
+        last person to read this before a client does, and the button belongs where they finish
+        reading. Moving forward without it is a quiet link rather than a second button, because
+        sending it is the normal path and the two are not equal choices.
+      */}
+      {!locked && !declined ? (
+        <div className="mt-3 flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={onSend}
+            disabled={sending || blocking.length > 0}
+          >
+            {sending ? <Loader2 className="animate-spin" /> : <Send />}
+            Approve and Send
+          </button>
+          <span className="muted text-[0.8rem]">
+            {blocking.length
+              ? "Fix the item above first — there is nowhere to send it."
+              : `Goes to ${email.recipient || "the client"} now. If you don't, the approval sends it.`}
+          </span>
+        </div>
+      ) : null}
+
+      {!locked && !declined ? (
+        <p className="mt-2.5">
+          <button type="button" className="link-quiet" onClick={onToggleDecline}>
+            Move forward without sending
+          </button>
+        </p>
+      ) : null}
     </div>
   );
 }

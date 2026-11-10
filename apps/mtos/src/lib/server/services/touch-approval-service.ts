@@ -1,5 +1,5 @@
 import type { TenantContext } from "@/src/lib/contracts/mtos";
-import { agendaEmailHasBody } from "@/src/lib/contracts/agenda-email";
+import { agendaEmailHasBody, type AgendaSendOutcome } from "@/src/lib/contracts/agenda-email";
 import { approvalSummary, approvedBriefMarkdown } from "@/src/lib/contracts/prep-brief";
 import {
   APPROVAL_STEPS,
@@ -49,6 +49,92 @@ import {
  * Nothing here runs without the button. The handoff's rule is that anything leaving MTOS waits for
  * an explicit human action, and this whole file is what that one action does.
  */
+
+/**
+ * Send the client's agenda email, at most once, whoever asks.
+ *
+ * The only place in MTOS that sends it. It was inlined in the approval, and when the owner asked
+ * for an "Approve and Send" button on the review screen the obvious thing to do was to write a
+ * second sender beside it -- which is how a client gets two agendas for one meeting, three weeks
+ * later, when somebody presses both. One function, one idempotency check, two callers.
+ *
+ * Returns rather than throws: every outcome here is something the AM needs told in words, and a
+ * declined email and a failed one are different sentences.
+ */
+export async function sendAgendaEmailNow(
+  context: TenantContext,
+  touchId: string,
+): Promise<AgendaSendOutcome> {
+  const { touch, client } = await loadTouch(context, touchId);
+  const [profile, preferences] = await Promise.all([
+    getAccountManagerProfile(context),
+    getAccountManagerPreferences(context),
+  ]);
+  const view = await readAgendaEmail(context, touch, client);
+  const email = view.state;
+
+  if (email.declined) {
+    return {
+      status: "declined",
+      detail: "You chose to move forward without the agenda email, so the client was told nothing before the call.",
+    };
+  }
+
+  // The idempotency check. `sent` is this touch's own record; the conversation id is Intercom's
+  // proof, and it survives a write that landed after the response was lost.
+  if (view.sent || email.intercomConversationId) {
+    return {
+      status: "already_sent",
+      detail: `Already sent${email.sentAt ? ` ${email.sentAt}` : ""}. Nothing was sent again.`,
+      ...(email.sentVia ? { sentVia: email.sentVia } : {}),
+      ...(email.sentAt ? { sentAt: email.sentAt } : {}),
+    };
+  }
+
+  if (email.blockingGaps?.length || !agendaEmailHasBody(email.html)) {
+    return {
+      status: "blocked",
+      detail:
+        email.blockingGaps?.length
+          ? email.blockingGaps[0]
+          : "The agenda email has almost no text in it, so there is nothing worth sending.",
+    };
+  }
+
+  const sent = await sendAgendaEmailViaIntercom(context, {
+    // Their own preference when they set one, else the address they sign in with.
+    accountManagerEmail: preferences.clientEmailsSendThrough?.trim() || profile.email,
+    recipient: email.recipient || "",
+    cc: view.ccEnabled ? view.availableCc : [],
+    subject: email.subject,
+    html: email.html,
+    ...(email.intercomConversationId ? { existingConversationId: email.intercomConversationId } : {}),
+  });
+
+  if (!sent.sent) {
+    return {
+      status: "failed",
+      detail: sent.detail,
+      ...(sent.sendItYourself ? { sendItYourself: true } : {}),
+    };
+  }
+
+  const sentAt = getNowIso();
+  const db = requireDb();
+  await db.doc(monthlyTouchPath(context.tenantId, touchId)).set(
+    {
+      agendaEmail: {
+        ...email,
+        sentAt,
+        sentVia: sent.sentVia,
+        intercomConversationId: sent.conversationId,
+      },
+    },
+    { mergeFields: ["agendaEmail"] },
+  );
+
+  return { status: "sent", detail: sent.detail, sentVia: sent.sentVia, sentAt };
+}
 
 export interface ApprovalRunResult {
   approval: TouchApprovalState;
@@ -200,72 +286,37 @@ export async function approveAndPrepareCall(
     await advanceTouchProgress(context, touchId, "live").catch(() => undefined);
   }
 
-  // ---- Step 2: the agenda email ----------------------------------------------------------------
-  if (!stepIsSettled(approval.steps.email)) {
-    const view = await readAgendaEmail(context, touch, client);
-    const email = view.state;
+  /*
+    ---- Step 2: the agenda email ----------------------------------------------------------------
 
-    if (email.declined) {
-      approval = settle(approval, "email", {
-        status: "skipped",
-        detail: "You declined the agenda email, so the client was told nothing before the call.",
-      });
+    Through the one sender, so an AM who already pressed "Approve and Send" on the review screen
+    gets `already_sent` here and the client gets one agenda rather than two. A deliberate skip is
+    `skipped` rather than `done`: nothing downstream may ever claim the client received an agenda
+    they were never sent.
+  */
+  if (!stepIsSettled(approval.steps.email)) {
+    const outcome = await sendAgendaEmailNow(context, touchId);
+
+    if (outcome.status === "declined") {
+      approval = settle(approval, "email", { status: "skipped", detail: outcome.detail });
       await writeApproval(context, touchId, approval);
-    } else if (view.sent || email.intercomConversationId) {
-      approval = settle(approval, "email", {
-        status: "done",
-        detail: `Already sent${email.sentAt ? ` ${email.sentAt}` : ""}. Nothing was sent again.`,
-      });
+    } else if (outcome.status === "sent" || outcome.status === "already_sent") {
+      approval = settle(approval, "email", { status: "done", detail: outcome.detail });
       await writeApproval(context, touchId, approval);
-    } else if (email.blockingGaps?.length || !agendaEmailHasBody(email.html)) {
-      const reason = email.blockingGaps?.length
-        ? email.blockingGaps[0]
-        : "The agenda email has almost no text in it, so there is nothing worth sending.";
-      approval = settle(approval, "email", { status: "failed", detail: reason });
+    } else {
+      approval = settle(approval, "email", { status: "failed", detail: outcome.detail });
       await writeApproval(context, touchId, approval);
       return {
         approval,
         format,
         complete: false,
-        message: `The brief is approved, but the agenda email was not sent: ${reason} Fix it and approve again, or decline the email to carry on without it.`,
+        message:
+          outcome.status === "blocked"
+            ? `The brief is approved, but the agenda email was not sent: ${outcome.detail} Fix it and approve again, or move forward without the email.`
+            : outcome.sendItYourself
+              ? `The brief is approved. The agenda email did not go out: ${outcome.detail}`
+              : `The brief is approved, but the agenda email failed: ${outcome.detail}`,
       };
-    } else {
-      const sent = await sendAgendaEmailViaIntercom(context, {
-        // Their own preference when they set one, else the address they sign in with.
-        accountManagerEmail: preferences.clientEmailsSendThrough?.trim() || profile.email,
-        recipient: email.recipient || "",
-        cc: view.ccEnabled ? view.availableCc : [],
-        subject: email.subject,
-        html: email.html,
-        ...(email.intercomConversationId ? { existingConversationId: email.intercomConversationId } : {}),
-      });
-
-      if (sent.sent) {
-        await ref.set(
-          {
-            agendaEmail: {
-              ...email,
-              sentAt: getNowIso(),
-              sentVia: sent.sentVia,
-              intercomConversationId: sent.conversationId,
-            },
-          },
-          { mergeFields: ["agendaEmail"] },
-        );
-        approval = settle(approval, "email", { status: "done", detail: sent.detail });
-        await writeApproval(context, touchId, approval);
-      } else {
-        approval = settle(approval, "email", { status: "failed", detail: sent.detail });
-        await writeApproval(context, touchId, approval);
-        return {
-          approval,
-          format,
-          complete: false,
-          message: sent.sendItYourself
-            ? `The brief is approved. The agenda email did not go out: ${sent.detail}`
-            : `The brief is approved, but the agenda email failed: ${sent.detail}`,
-        };
-      }
     }
   }
 

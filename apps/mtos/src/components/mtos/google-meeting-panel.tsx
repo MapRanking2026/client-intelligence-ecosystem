@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { GoogleMeetingOverview, GoogleMeetingState } from "@/src/lib/contracts/google-meet";
 import { readJsonResponse } from "@/src/lib/api/read-json-response";
@@ -55,9 +55,38 @@ export function GoogleMeetingPanel({ touchId, emails = [] }: { touchId: string; 
     finally { setBusy(false); }
   }
 
+  /**
+   * Read the calendar when the screen opens, rather than waiting to be asked.
+   *
+   * This panel used to show nothing at all until somebody pressed "Sync Google meetings", so the
+   * first part of Prep was a button and an empty card -- and the meeting it identifies is what
+   * every later step quotes at the client. On 9 November 2026 the confirmation email offered to
+   * remind a client about a call on the 4th, a date that had passed and that the client had
+   * already rebooked away from, because nothing had asked Google since the week before.
+   *
+   * Read-only and once per mount: this is the overview GET, not the "Retrieve files & analyze"
+   * write, and the manual buttons below are untouched -- an AM who wants it asked again, or who
+   * wants the recording and transcript pulled, still presses for it.
+   *
+   * Failures are silent here on purpose. The panel is the first thing on the Prep screen, and a
+   * red banner about a Google scope on arrival reads as a broken page; pressing the button gives
+   * the same error with the context of having asked for it.
+   */
+  const loadedOnce = useRef(false);
+  useEffect(() => {
+    if (loadedOnce.current) return;
+    loadedOnce.current = true;
+    setBusy(true);
+    refresh()
+      .catch(() => undefined)
+      .finally(() => setBusy(false));
+    // Once, for this touch. `refresh` closes over nothing that changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [touchId]);
+
   return <section className="card mt-4 space-y-3" aria-label="Google meetings">
     <div className="flex flex-wrap items-center justify-between gap-3">
-      <div><h2 className="h4">Google meetings</h2><p className="muted text-sm">Client meetings, recordings, transcripts and automatic follow-up drafts.</p></div>
+      <div><h2 className="h4">Google meetings</h2><p className="muted text-sm">Client meetings, recordings, transcripts and automatic follow-up drafts. Read from your calendar when this screen opens — press Sync to ask again.</p></div>
       <button className="btn btn-ghost" disabled={busy} onClick={() => void run()}>{busy ? "Working…" : "Sync Google meetings"}</button>
     </div>
     {error ? <p role="alert" className="text-sm text-rose-300">{error}</p> : null}

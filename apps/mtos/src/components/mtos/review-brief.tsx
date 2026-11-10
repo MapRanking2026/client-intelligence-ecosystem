@@ -46,6 +46,12 @@ import type { TouchCoachingChoice, TouchReviewState } from "@/src/lib/mtos-data"
  * **A section the preparation could not write says so.** A brief that quietly omits the goal reads
  * as a client with no goal. `missing` keeps the gap visible and declinable like the rest.
  *
+ * **The evidence sits inside the section it supports.** The charts go above the paragraph that
+ * describes them, the lead verification is in section 10 and the recommendations are in section 12.
+ * All three used to be a second run of cards below the approval card, which meant the AM approved
+ * a brief and then met the evidence for it -- the same mistake, one level down, as reviewing a
+ * five-question summary of a preparation and meeting the detail on the call.
+ *
  * Editing uses a `contentEditable` surface with `document.execCommand`, which is formally
  * deprecated and still the only thing every browser implements for this. The alternative is an
  * editor dependency for seven buttons. If it is ever replaced, the stored value is HTML either
@@ -76,8 +82,16 @@ export function ReviewBrief({
   review,
   /** The header block, built on the server from the client and calendar records. */
   header,
-  /** Section 15, the client-facing email, which has its own card and its own approval. */
-  agendaEmail,
+  /**
+   * The evidence that belongs inside a section, keyed by the section it belongs to.
+   *
+   * The business scorecard, the lead verification, the keyword heatmaps, the ads panels, the issue
+   * list and the recommendations used to be a second run of cards below the approval card. So the
+   * AM approved the brief and then met the evidence for it -- the same mistake as reviewing a
+   * five-question summary and meeting the detail on the call, one level down. Each one now renders
+   * in the section whose findings it supports, where it is read before anything is approved.
+   */
+  extras,
   /** The pre-call checklist, rendered after the brief as the prompt's section 16. */
   checklist,
   /**
@@ -91,7 +105,7 @@ export function ReviewBrief({
   brief: PrepBrief;
   review?: TouchReviewState;
   header?: React.ReactNode;
-  agendaEmail?: React.ReactNode;
+  extras?: Partial<Record<BriefSectionId, React.ReactNode>>;
   checklist?: React.ReactNode;
   charts?: BriefChart[];
 }) {
@@ -199,19 +213,16 @@ export function ReviewBrief({
             onRevert={() => revertEdit(section.id)}
             onToggleDecline={() => toggleDecline(section.id)}
             extra={
-              section.id === "h"
-                ? header
-                : section.id === "1"
-                  ? (
-                      <Promises
-                        brief={brief}
-                        coaching={coaching}
-                        onAnswer={answerProposal}
-                      />
-                    )
-                  : section.id === "15"
-                    ? agendaEmail
-                    : undefined
+              section.id === "h" ? (
+                header
+              ) : section.id === "1" ? (
+                <>
+                  <Promises brief={brief} coaching={coaching} onAnswer={answerProposal} />
+                  {extras?.["1"]}
+                </>
+              ) : (
+                extras?.[section.id]
+              )
             }
           />
         ))}
@@ -233,8 +244,8 @@ export function ReviewBrief({
               : " Nothing is declined."}
           </p>
           <p className="muted mt-2 text-[0.8rem]">
-            Nothing is created, written or sent before you press it. The button lives in the agenda card below the
-            brief.
+            Nothing is created, written or sent before you press it. The client email, the call format and the button
+            itself are the three cards below this one, in that order.
           </p>
         </div>
       </div>

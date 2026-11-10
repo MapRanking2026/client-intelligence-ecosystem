@@ -23,7 +23,7 @@ import {
 import { generateQaReview, recordVictorDecision } from "@/src/lib/server/services/qa-review-service";
 import { advanceTouchProgress, saveTouchDraft } from "@/src/lib/server/services/touch-state-service";
 import { agendaEmailPatch } from "@/src/lib/server/services/agenda-email-service";
-import { approveAndPrepareCall } from "@/src/lib/server/services/touch-approval-service";
+import { approveAndPrepareCall, sendAgendaEmailNow } from "@/src/lib/server/services/touch-approval-service";
 import {
   attachTouchTranscript,
   watchTouchTranscript,
@@ -455,6 +455,14 @@ const touchRequestSchema = z.discriminatedUnion("action", [
     decision: z.enum(["approved", "changes_requested"]),
     note: z.string().optional(),
   }),
+  /*
+    Send the client's agenda email on its own, from "Approve and Send" on the review screen.
+
+    The approval sends it too, if it is still waiting. Both go through `sendAgendaEmailNow`, which
+    refuses a second send against the stored Intercom conversation id -- so pressing this and then
+    approving sends one email, and pressing this twice sends one email.
+  */
+  z.object({ action: z.literal("send_agenda_email") }),
   // The one approval at the end of the review step. Everything it does leaves MTOS, so it happens
   // only on this explicit request and never as a side effect of loading a screen.
   z.object({
@@ -698,6 +706,14 @@ export async function POST(
           ...(payload.agendaEmail ? { agendaEmail: agendaEmailPatch(payload.agendaEmail) } : {}),
           ...(payload.live ? { live: payload.live } : {}),
         });
+        break;
+      case "send_agenda_email":
+        /*
+          Every outcome here is a 200 with the outcome in it, including a send that could not
+          happen. A blocked send is the AM having something to fix in the draft, not a bad request,
+          and a 4xx would make the screen throw away the state they were working in.
+        */
+        result = await sendAgendaEmailNow(context, touchId);
         break;
       case "approve_and_go_live":
         result = await approveAndPrepareCall(context, touchId, {

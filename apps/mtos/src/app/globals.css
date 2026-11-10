@@ -143,6 +143,9 @@ a { color: inherit; text-decoration: none; }
 .user-chip .nm { font-size: 0.8rem; font-weight: 600; color: var(--text); }
 .user-chip .rl { font-size: 0.68rem; color: var(--slate-400); }
 
+/* The height the sticky stage rail sits below; see `.stage-rail`. */
+:root { --topbar-h: 65px; }
+@media (max-width: 1080px) { :root { --topbar-h: 61px; } }
 .topbar { position: sticky; top: 0; z-index: 30; display: flex; align-items: center; gap: 14px; padding: 12px clamp(16px,3vw,36px); background: color-mix(in srgb, var(--bg) 86%, transparent); backdrop-filter: blur(12px); border-bottom: 1px solid var(--hair); }
 .topbar > * { min-width: 0; }
 .search { flex: 1 1 auto; min-width: 0; max-width: 460px; display: flex; align-items: center; gap: 9px; padding: 8px 13px; border-radius: var(--r-md); border: 1px solid var(--hair); background: var(--surface); color: var(--slate-400); font-size: 0.85rem; transition: all var(--dur) var(--ease); }
@@ -566,22 +569,26 @@ a { color: inherit; text-decoration: none; }
 .stage-step.is-current .stage-name { color: var(--accent); }
 .stage-step.is-blocked { opacity: 0.68; }
 
-/* ---------- Ordered workflow steps ---------- */
-.wf-step { border: 1px solid var(--hair); border-radius: var(--r-lg); background: var(--surface); padding: 18px 20px; }
-.wf-step + .wf-step { margin-top: 12px; }
-.wf-step.is-blocked { background: var(--surface-2); }
-.wf-step.is-failed { border-color: color-mix(in srgb, var(--risk) 45%, var(--hair)); }
-.wf-step-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
-.wf-num {
-  width: 26px; height: 26px; flex-shrink: 0;
-  border-radius: 50%;
-  display: grid; place-items: center;
-  font-size: 0.76rem; font-weight: 700;
-  background: var(--surface-3); color: var(--slate-300);
+/*
+  The timeline follows the AM down the page.
+
+  The brief is fifteen sections long and the live guide is longer, so by the time anyone is making
+  a decision the top of the screen is far behind them -- which is how the stage indicator came to
+  be duplicated inside the preparation panel in the first place. It sticks under the topbar rather
+  than at the very top, because the topbar is sticky too and the two would sit on top of each
+  other. Opaque, because the brief scrolls underneath it.
+*/
+.stage-rail {
+  position: sticky;
+  top: var(--topbar-h);
+  z-index: 25;
+  background: color-mix(in srgb, var(--surface) 96%, transparent);
+  backdrop-filter: blur(10px);
 }
-.wf-step.is-done .wf-num { background: var(--good-bg); color: var(--good); }
-.wf-step.is-current .wf-num { background: var(--accent); color: var(--on-accent); }
-.wf-step.is-failed .wf-num { background: var(--risk-bg); color: var(--risk); }
+/* Printing a brief should not leave the rail floating in the middle of page two. */
+@media print {
+  .stage-rail { position: static; }
+}
 
 /* ---------- Segmented control ---------- */
 .seg { display: inline-flex; padding: 3px; gap: 3px; background: var(--surface-2); border: 1px solid var(--hair); border-radius: var(--r-md); }

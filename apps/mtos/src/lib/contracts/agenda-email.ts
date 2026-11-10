@@ -421,3 +421,26 @@ export function sanitizeAgendaEmailHtml(html: string): string {
 export function agendaEmailHasBody(html: string): boolean {
   return sanitizeAgendaEmailHtml(html).replace(/<[^>]*>/g, "").replace(/&[a-z]+;|&#\d+;/gi, " ").trim().length > 40;
 }
+
+/**
+ * What one attempt to send the client's agenda email did, as five distinct facts.
+ *
+ * `already_sent` is why this is not a boolean. The agenda can be sent from the review screen with
+ * "Approve and Send" and is also sent by the one approval if it is still waiting, so both callers
+ * have to be able to tell "I sent it" apart from "it was already gone". Intercom takes no
+ * idempotency key on `POST /messages`, so the stored conversation id is the only thing standing
+ * between the second press and a second agenda in a client's inbox.
+ *
+ * Here rather than in the service because the review screen renders `detail` verbatim.
+ */
+export type AgendaSendStatus = "sent" | "already_sent" | "declined" | "blocked" | "failed";
+
+export interface AgendaSendOutcome {
+  status: AgendaSendStatus;
+  /** Plain English, written for the AM: what happened, or what to do about it not happening. */
+  detail: string;
+  sentVia?: string;
+  sentAt?: string;
+  /** True when MTOS cannot send at all and the AM should send it from their own inbox. */
+  sendItYourself?: boolean;
+}

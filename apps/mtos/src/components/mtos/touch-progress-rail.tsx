@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { Clock, History, Lock } from "lucide-react";
 
+import { TOUCH_STAGE_PURPOSE } from "@/src/lib/contracts/touch-stages";
 import {
   TOUCH_STEPS,
   TOUCH_STEP_LABELS,
@@ -15,21 +16,31 @@ import {
 } from "@/src/lib/contracts/touch-progress";
 
 /**
- * The five steps across the top of a touch, plus the two things an AM needs to know on arrival:
- * where they left off, and how long the follow-through has left.
+ * The one progress indicator for a Monthly Touch: five stages, stuck to the top of the screen.
+ *
+ * There used to be three. This rail, a second numbered rail inside the preparation panel ("Four
+ * steps, in this order"), and a card between them that named a stage and an action of its own. The
+ * four steps were not the five stages -- they were the preparation's own sub-steps -- so an AM
+ * asking "where am I" got two different answers from two correct sources, and scrolling past the
+ * brief lost both of them. There is one answer now, it stays on the screen while the AM reads, and
+ * the stage's own action sits inside it rather than in a card that repeats the stage's name.
  *
  * Steps past the furthest one reached are shown and locked rather than hidden. A hidden step reads
  * as a feature that doesn't exist; a locked one says what has to happen first, which is the actual
  * answer -- Live opens when the brief is approved, the follow-through when the call has happened.
  *
- * The countdown re-renders on a timer because it is the one number on the page that goes stale
- * while being looked at: a follow-through sitting at "3h left" when it is in fact overdue is worse
- * than no countdown at all.
+ * Earlier stages stay clickable, and clicking one does not move the touch back: `progress` is the
+ * furthest step reached and only ever moves forward, so an AM re-reading the brief mid-call is
+ * reading rather than rewinding.
+ *
+ * The countdown re-renders on a timer because it is the one number here that goes stale while being
+ * looked at: a follow-through sitting at "3h left" when it is in fact overdue is worse than no
+ * countdown at all.
  */
 
 const STEP_HINTS: Record<TouchStep, string> = {
   prep: "Run the account review first.",
-  review: "The preparation has to finish first.",
+  review: "The preparation has to write all fifteen brief sections first.",
   live: "Approve the brief to open the live call.",
   follow: "Opens once the call has ended.",
   qa: "Opens once the follow-through is processed.",
@@ -42,6 +53,7 @@ export function TouchProgressRail({
   resume,
   followThroughDueAt,
   timeZone,
+  action,
 }: {
   touchId: string;
   /** The furthest step reached. Steps beyond it are locked. */
@@ -51,6 +63,14 @@ export function TouchProgressRail({
   resume?: ResumeNotice;
   followThroughDueAt?: string;
   timeZone?: string;
+  /**
+   * The one action for the stage the touch is actually in.
+   *
+   * It lives here rather than in a card of its own: the card that used to hold it named the stage
+   * again, with its own idea of which stage that was, and the two disagreed whenever the AM was
+   * reading a stage they had already passed.
+   */
+  action?: ReactNode;
 }) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -63,8 +83,8 @@ export function TouchProgressRail({
   const deadline = followThroughDeadline(followThroughDueAt, now);
 
   return (
-    <div className="card mt-4">
-      <nav aria-label="Monthly Touch steps">
+    <div className="card stage-rail mt-4">
+      <nav aria-label="Monthly Touch stages">
         <ol className="stage-track" style={{ listStyle: "none", margin: 0, padding: 0 }}>
           {TOUCH_STEPS.map((step, index) => {
             const done = index < reached;
@@ -84,8 +104,10 @@ export function TouchProgressRail({
                     </span>
                   ) : done ? (
                     "Done"
+                  ) : isCurrent ? (
+                    "You are here"
                   ) : (
-                    "In progress"
+                    "Open"
                   )}
                 </span>
               </>
@@ -95,7 +117,7 @@ export function TouchProgressRail({
                 key={step}
                 className={`stage-step ${cls}`}
                 aria-current={isCurrent ? "step" : undefined}
-                title={locked ? STEP_HINTS[step] : TOUCH_STEP_LABELS[step]}
+                title={locked ? STEP_HINTS[step] : TOUCH_STAGE_PURPOSE[step]}
               >
                 {locked ? (
                   body
@@ -114,22 +136,24 @@ export function TouchProgressRail({
         </ol>
       </nav>
 
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+        <p className="muted max-w-xl text-[0.82rem]">
+          {current === progress
+            ? TOUCH_STAGE_PURPOSE[current]
+            : `You are reading ${TOUCH_STEP_LABELS[current]}; this touch is in ${TOUCH_STEP_LABELS[progress]}. Nothing you look at here moves it back.`}
+        </p>
+        {action ? <div className="flex flex-wrap items-center gap-2.5">{action}</div> : null}
+      </div>
+
       {resume && current === resume.step ? (
         <div
-          className="mt-4 flex flex-wrap items-center gap-2 rounded-[10px] p-3 text-[0.82rem]"
+          className="mt-3 flex flex-wrap items-center gap-2 rounded-[10px] p-3 text-[0.82rem]"
           style={{ background: "var(--info-bg)", color: "var(--info)" }}
         >
           <History style={{ width: 14, height: 14 }} />
           <span style={{ fontWeight: 600 }}>{resume.headline}</span>
           {resume.savedLabel ? <span style={{ opacity: 0.85 }}>{resume.savedLabel}</span> : null}
         </div>
-      ) : null}
-
-      {current !== progress ? (
-        <p className="muted mt-3 text-[0.78rem]">
-          You are reading {TOUCH_STEP_LABELS[current]}; this touch is in {TOUCH_STEP_LABELS[progress]}. Nothing you
-          look at here moves it back.
-        </p>
       ) : null}
 
       {deadline ? (

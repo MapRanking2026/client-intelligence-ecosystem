@@ -1,4 +1,6 @@
 import type { ConfidenceBreakdown, ReadinessBreakdown, ScoreInput } from "@/src/lib/contracts/prep-workflow";
+import { briefCompleteness } from "@/src/lib/contracts/prep-brief";
+import { approvalIsComplete, stepIsSettled } from "@/src/lib/contracts/touch-approval";
 import type { MonthlyTouchRecord } from "@/src/lib/mtos-data";
 
 /**
@@ -56,6 +58,7 @@ export function computeReadiness(touch: MonthlyTouchRecord): ReadinessBreakdown 
   const stages = workflow.stages;
   const document = workflow.document;
   const email = workflow.confirmationEmail;
+  const brief = briefCompleteness(touch.prepBrief, touch.review);
 
   const inputs: ScoreInput[] = [
     {
@@ -97,32 +100,68 @@ export function computeReadiness(touch: MonthlyTouchRecord): ReadinessBreakdown 
               : "Written but not approved yet.",
       weight: 20,
     },
+    /*
+      The notes, from whichever of the two paths this touch took.
+
+      They used to be written and approved as their own step inside Prep. They are now assembled
+      from the approved brief by the one approval at the end of Review, which is where the AM is
+      actually reading the content -- so a touch whose fifteen sections are all written and
+      approved has notes, and scoring it as though nothing had been written would cap every touch
+      on the new path at 60 while it sat in front of a finished brief.
+
+      The older document path is read first, because touches prepared before the change have one
+      and their score must not move underneath them.
+    */
     {
       key: "prep_notes",
       label: "Preparation notes written in full",
       status: (() => {
-        if (!document) return "missing";
-        if (document.missingSections.length) return "failed";
-        if (!document.approvedAt) return "partial";
-        return "ok";
+        if (document) {
+          if (document.missingSections.length) return "failed";
+          if (!document.approvedAt) return "partial";
+          return "ok";
+        }
+        if (!brief.populated) return "missing";
+        if (!brief.ready) return "partial";
+        return touch.review?.approvedAt ? "ok" : "partial";
       })(),
-      detail: !document
-        ? "The preparation notes have not been written."
-        : document.missingSections.length
+      detail: document
+        ? document.missingSections.length
           ? `Sections ${document.missingSections.join(", ")} came back empty, so the notes are incomplete.`
           : document.approvedAt
             ? `Written and approved ${document.approvedAt}.`
-            : "Written, waiting for your approval.",
+            : "Written, waiting for your approval."
+        : !brief.populated
+          ? "The preparation has not written the brief these notes are assembled from."
+          : !brief.ready
+            ? `${brief.populated} of the ${brief.total} brief sections are written; ${brief.missing.join(", ")} are still empty.`
+            : touch.review?.approvedAt
+              ? `All ${brief.total} brief sections written and approved ${touch.review.approvedAt}.`
+              : `All ${brief.total} brief sections written, waiting for your approval.`,
       weight: 25,
     },
+    /*
+      The Client's Book page, whether the preparation step wrote it or the approval did.
+
+      The approval's own `book` step is what writes it now, and it records the page it wrote -- so
+      reading only the preparation stage would tell an AM nothing had been filed while the page was
+      open in the next tab.
+    */
     {
       key: "clickup_filing",
       label: "Filed in the client's ClickUp book",
-      status: statusFor(stages.clickup_filing.status === "complete", stages.clickup_filing.status === "failed"),
+      status: statusFor(
+        stages.clickup_filing.status === "complete" || stepIsSettled(touch.approval?.steps.book),
+        stages.clickup_filing.status === "failed" || touch.approval?.steps.book.status === "failed",
+      ),
       detail:
         workflow.filing?.status === "filed"
           ? `Filed in ${workflow.filing.destination ?? "the Client's Book"}.`
-          : workflow.filing?.errorMessage || "Nothing has been filed in ClickUp for this touch.",
+          : touch.approval?.clientBook
+            ? `Filed as "${touch.approval.clientBook.pageName}" in ${touch.approval.clientBook.destination}.`
+            : touch.approval?.steps.book.detail ||
+              workflow.filing?.errorMessage ||
+              "Nothing has been filed in ClickUp for this touch.",
       weight: 15,
     },
     {
@@ -299,13 +338,26 @@ export function deriveRunSheetStage(touch: MonthlyTouchRecord): RunSheetStage {
   if (touch.status === "Completed") return "follow_through";
   if (touch.status === "Live") return "live";
 
+  /*
+    The one approval at the end of Review is what opens Live now: it approves the brief, files the
+    page, settles the email and builds the call in one go. Read before the preparation stages,
+    because a touch that has been approved is past Review whatever its older per-stage record says.
+  */
+  if (approvalIsComplete(touch.approval)) return "live";
+
   const workflow = touch.prepWorkflow;
   if (!workflow) return "prep";
   const prepDone = workflow.stages.research.status === "complete";
   const notesDone = workflow.stages.prep_notes.status === "complete";
   const filed = workflow.stages.clickup_filing.status === "complete";
+  // The path touches prepared before the approval existed took, kept so their stage does not move.
   if (prepDone && notesDone && filed) return "live";
-  if (prepDone) return "review";
+  /*
+    Prep holds the touch until the brief is whole. A review screen with holes in it is what the AM
+    used to discover after waiting out the preparation, so the gate is the brief itself rather than
+    a stage record that only says the review "completed".
+  */
+  if (prepDone && briefCompleteness(touch.prepBrief, touch.review).ready) return "review";
   return "prep";
 }
 
@@ -336,10 +388,10 @@ export function deriveBoardColumn(touch: MonthlyTouchRecord): TouchBoardColumn {
 
 /** What this stage's single primary action is, so the screen and the rules agree on one answer. */
 export const RUN_SHEET_PRIMARY_ACTION: Record<RunSheetStage, { label: string; hint: string }> = {
-  prep: { label: "Generate Preparation", hint: "Run the account review that everything else is built from." },
+  prep: { label: "Generate Monthly Prep", hint: "Run the account review that everything else is built from." },
   review: {
-    label: "Review Preparation",
-    hint: "Read the findings, approve the client email and the notes, and file them in ClickUp.",
+    label: "Review the Monthly Touch brief",
+    hint: "Read the fifteen sections, approve the client email, choose the format, then approve.",
   },
   live: { label: "Start Live Meeting", hint: "Open the full-screen meeting view with your agenda and notes." },
   follow_through: {

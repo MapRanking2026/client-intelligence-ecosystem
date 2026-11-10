@@ -132,16 +132,30 @@ export function extractTitleCandidate(summary: string) {
 }
 
 /**
- * Does this calendar entry look like the AM's own preparation hold rather than the client call?
+ * Is this the account manager's own preparation hold rather than a client call?
  *
- * The AM keeps a "Prep: <client> Monthly Touch" block, usually a day or two before the call. It
- * names the client and carries a touch marker, so it matches the client exactly as the real
- * meeting does -- and being earlier, it wins any "soonest upcoming" contest. That is how a
- * confirmation email came to tell a client their meeting was on 4 November when the call itself
- * was the 5th: the touch had been pinned to the prep hold.
+ * A prep hold is a private block the AM keeps for their own notes, usually a day or two before
+ * the call. It is NOT a monthly touch and must never be treated as one anywhere: not as the
+ * scheduled meeting, not as "when we last spoke", not as a transcript source. It names the
+ * client and carries a touch marker, so it matches a client exactly as the real meeting does,
+ * and sitting earlier it wins any "soonest upcoming" contest -- which is how a confirmation
+ * email came to offer a client a reminder about 4 November when the call was on the 5th.
+ *
+ * Two shapes, both drawn from the real calendar:
+ *   - a leading label, after any emoji: "🌹 Prep: Trueflow Plumbing LLC Monthly Touch"
+ *   - the label punctuated as one anywhere in the title: "Trueflow Monthly Touch Prep -"
+ *
+ * There is no carve-out for the word "appointment" any more. One used to exist to protect a
+ * client whose name contains "prep", but it also let "Prep: Apointment with ..." through, which
+ * is precisely the block being excluded. The remaining exposure is a client whose business name
+ * BEGINS with the word "prep"; "Prepared", "Preparatory" and the like are already safe, because
+ * the word has to end right there.
  */
 export function looksLikePrepBlock(summary: string): boolean {
-  return /(^|\W)prep(aration)?\b\s*[:\-]?/i.test(summary) && !/\bap+ointment\b/i.test(summary);
+  const trimmed = summary.trim();
+  return (
+    /^[^\p{L}\p{N}]*prep(aration)?\b/iu.test(trimmed) || /\bprep(aration)?\s*[:\-]/i.test(trimmed)
+  );
 }
 
 /** True when a title carries an explicit monthly-touch / appointment marker. */
@@ -259,9 +273,22 @@ function resolveClientForEvent(
 }
 
 /**
- * Matches calendar events to clients. Only events that look like client meetings are considered:
- * they either carry a monthly-touch/appointment marker or have an outside attendee, which keeps
- * internal standups ("Daily Meeting", "AM Consulting") from claiming a client.
+ * Matches calendar events to clients.
+ *
+ * A monthly touch is one of exactly two things on this calendar, and nothing else counts:
+ *
+ *   - "Monthly Touch - <business name>"
+ *   - "Apointment with <client name>"   (the habitual misspelling included)
+ *
+ * The AM's own prep holds are dropped here, before anything downstream can see them, so no
+ * later step has to remember to exclude them. Excluding them only at selection time was not
+ * enough: they were still written into the stored matches, and anything reading those matches
+ * got a prep hold presented as a client meeting.
+ *
+ * An outside attendee no longer qualifies an event on its own. It used to, which let any meeting
+ * with a client's address on it become that client's monthly touch. Attendee addresses are still
+ * read, but only to work out WHICH client a qualifying title belongs to -- which is what rescues
+ * "Apointment with Gonzalo Garcia", where the title names a person and not the business.
  */
 export function matchCalendarEventsToClients(
   events: CalendarEventLike[],
@@ -274,8 +301,8 @@ export function matchCalendarEventsToClients(
   for (const event of events) {
     if (!event.id || !event.summary || !event.startIso) continue;
 
-    const hasExternalAttendee = (event.attendeeEmails || []).some((email) => isExternalEmail(email, agencyDomains));
-    if (!hasTouchMarker(event.summary) && !hasExternalAttendee) continue;
+    if (looksLikePrepBlock(event.summary)) continue;
+    if (!hasTouchMarker(event.summary)) continue;
 
     const resolved = resolveClientForEvent(event, clients, agencyDomains);
     if (!resolved) continue;

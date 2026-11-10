@@ -14,7 +14,10 @@ import { getFirebaseAdminDb } from "@/src/lib/server/firebase/admin";
 import { monthlyTouchPath } from "@/src/lib/server/firebase/collections";
 import {
   refreshGbpInsightsForClient,
+  refreshGhlLeadsForClient,
+  refreshSnapshotsForPrep,
   refreshTouchScheduleForClient,
+  type PrepSnapshotRefresh,
   type TouchScheduleRefreshResult,
 } from "@/src/lib/server/integration-sync";
 import { getIntegrationConnection } from "@/src/lib/server/integrations";
@@ -160,7 +163,16 @@ async function recordSourceChecks(
    * repeated back to the client in writing.
    */
   scheduleRefresh?: TouchScheduleRefreshResult,
+  /**
+   * What the re-pull of every other platform achieved. Each provider says here whether the
+   * figures below it were pulled for this run or are older, and how much older -- the one thing
+   * this panel could not previously tell anybody.
+   */
+  snapshotRefreshes: PrepSnapshotRefresh[] = [],
+  /** What the per-client GoHighLevel read achieved, which outranks the tenant pull on that line. */
+  ghlRefresh?: { status: string; detail: string },
 ): Promise<{ sourceChecks: PrepSourceCheck[]; commsVerification: PrepCommsVerification }> {
+  const refreshedByProvider = new Map(snapshotRefreshes.map((entry) => [entry.providerId, entry]));
   // Needed only for the client's email address, which is what turns the Intercom read from a weak
   // name match into real evidence. A client that can't be loaded degrades the Intercom check; it
   // never fails the stage.
@@ -199,6 +211,15 @@ async function recordSourceChecks(
     }
     if (provider.id === "google-calendar" && scheduleRefresh) {
       freshness = ` ${scheduleRefresh.detail}`;
+    }
+    const refreshed = refreshedByProvider.get(provider.id);
+    if (refreshed) {
+      freshness = ` ${refreshed.detail}`;
+    }
+    // The per-client read is the one the brief's lead numbers actually come from, so it has the
+    // last word on this line over the tenant-wide pull above it.
+    if (provider.id === "gohighlevel" && ghlRefresh) {
+      freshness = ` ${ghlRefresh.detail}`;
     }
     checks.push({
       key: provider.id,
@@ -297,12 +318,35 @@ export async function runResearchStage(context: TenantContext, touchId: string):
    * Scoped to this client's locations and non-fatal: a refused API or a missing connection leaves
    * the older snapshot in place and the preparation carries on, as it always did.
    */
-  const gbpRefresh = await refreshGbpInsightsForClient(context, client.id).catch((error) => ({
-    status: "failed" as const,
-    locations: 0,
-    detail: error instanceof Error ? error.message : "The Business Profile refresh failed.",
-  }));
+  const [gbpRefresh, snapshotRefreshes] = await Promise.all([
+    refreshGbpInsightsForClient(context, client.id).catch((error) => ({
+      status: "failed" as const,
+      locations: 0,
+      detail: error instanceof Error ? error.message : "The Business Profile refresh failed.",
+    })),
+    // Everything else the preparation reads, pulled again now. Runs alongside the Business
+    // Profile re-read because they touch different APIs and nothing here depends on anything
+    // there.
+    refreshSnapshotsForPrep(context).catch(() => [] as PrepSnapshotRefresh[]),
+  ]);
   console.info(`[prep] ${client.id}: gbp refresh ${gbpRefresh.status} -- ${gbpRefresh.detail}`);
+  for (const entry of snapshotRefreshes) {
+    console.info(`[prep] ${client.id}: ${entry.providerId} ${entry.status} -- ${entry.detail}`);
+  }
+
+  /**
+   * Then this client's own GoHighLevel sub-account, after the tenant sync above rather than
+   * beside it, so the broad pull cannot overwrite the narrow one.
+   *
+   * The agency sync reads a bounded slice of sub-accounts per run, so re-syncing the provider is
+   * not enough on its own to guarantee numbers for the client in front of you. Asking for that
+   * one sub-account is.
+   */
+  const ghlRefresh = await refreshGhlLeadsForClient(context, client.id, client.name).catch((error) => ({
+    status: "failed" as const,
+    detail: error instanceof Error ? error.message : "The GoHighLevel refresh failed.",
+  }));
+  console.info(`[prep] ${client.id}: ghl refresh ${ghlRefresh.status} -- ${ghlRefresh.detail}`);
 
   /**
    * And ask the calendar when the meeting actually is, before anything quotes a time at a client.
@@ -361,6 +405,8 @@ export async function runResearchStage(context: TenantContext, touchId: string):
     prepared,
     gbpRefresh,
     scheduleRefresh,
+    snapshotRefreshes,
+    ghlRefresh,
   );
 
   const workflow: PrepWorkflowState = {

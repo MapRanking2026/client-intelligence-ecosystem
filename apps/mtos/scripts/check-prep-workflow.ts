@@ -38,7 +38,7 @@ import {
   deriveTouchStatus,
 } from "@/src/lib/server/services/prep-readiness-service";
 import { isStageOpen, recomputeGates } from "@/src/lib/server/services/prep-workflow-rules";
-import { selectMeetingForTouch } from "@/src/lib/server/calendar-touch-matching";
+import { matchCalendarEventsToClients, selectMeetingForTouch } from "@/src/lib/server/calendar-touch-matching";
 import { buildGbpCompleteness } from "@/src/lib/server/gbp-listing-completeness";
 
 let failures = 0;
@@ -941,6 +941,56 @@ scenario("The meeting time a client is told comes from the calendar, not from a 
   );
 
   check("an empty calendar yields no meeting at all", selectMeetingForTouch([], "2026-11-09T20:00:00.000Z") === null);
+}
+
+scenario("A monthly touch is one of two titles, and a prep hold is never one of them");
+{
+  const clients = [{ id: "c1", name: "Trueflow Plumbing LLC" }];
+  const event = (id: string, summary: string, attendeeEmails: string[] = []) => ({
+    id,
+    summary,
+    startIso: "2026-11-05T22:00:00.000Z",
+    attendeeEmails,
+  });
+
+  const matched = matchCalendarEventsToClients(
+    [
+      event("call", "Monthly Touch- Trueflow Plumbing LLC"),
+      event("prep", "🌹 Prep: Trueflow Plumbing LLC Monthly Touch"),
+    ],
+    clients,
+  );
+  check("the prep hold is dropped at the matcher, not merely at selection", matched.length === 1);
+  check("and what survives is the call", matched[0]?.eventId === "call");
+
+  check(
+    'a trailing "Prep -" label is a hold too',
+    matchCalendarEventsToClients([event("p", "Trueflow Plumbing LLC Monthly Touch Prep - notes")], clients).length === 0,
+  );
+  check(
+    'a hold titled as an appointment is still a hold',
+    matchCalendarEventsToClients([event("p", "Prep: Apointment with Trueflow Plumbing LLC")], clients).length === 0,
+  );
+
+  check(
+    '"Apointment with <person>" still matches through the attendee address',
+    matchCalendarEventsToClients([event("a", "Apointment with  Gonzalo Garcia", ["gonzalo@trueflowplumbingdfw.com"])], [
+      { id: "c1", name: "Trueflow Plumbing" },
+    ]).length === 1,
+  );
+
+  check(
+    "an outside attendee alone no longer makes a meeting a monthly touch",
+    matchCalendarEventsToClients([event("x", "Quick sync", ["gonzalo@trueflowplumbingdfw.com"])], clients).length === 0,
+  );
+
+  check(
+    "a business whose name merely contains a prep-like word is untouched",
+    matchCalendarEventsToClients(
+      [event("ok", "Monthly Touch- Prepared Foods Co")],
+      [{ id: "c2", name: "Prepared Foods Co" }],
+    ).length === 1,
+  );
 }
 
 scenario("A listing is never reported incomplete because nobody loaded its fields");

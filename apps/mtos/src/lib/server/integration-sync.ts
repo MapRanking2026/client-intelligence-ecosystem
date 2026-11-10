@@ -3590,6 +3590,272 @@ export interface GbpClientRefreshResult {
  * a Google outage -- each returns a `skipped`/`failed` status with a reason. The preparation then
  * runs on the older snapshot, exactly as it did before, rather than failing over listing data.
  */
+/**
+ * The tenant-wide snapshots a monthly touch reads, that have no cheaper per-client path.
+ *
+ * Google Business Profile and Google Calendar are deliberately absent: both have a targeted
+ * per-client re-read that runs unconditionally on every preparation, which is far cheaper than
+ * their tenant syncs (Business Profile alone walks 15 accounts, 230 locations and ~28,700
+ * reviews) and cannot be made to fit inside a request somebody is waiting on. Meta Ads has no
+ * sync implemented at all, so there is nothing here to refresh.
+ */
+const PREP_REFRESHABLE_PROVIDERS: IntegrationProviderId[] = [
+  "clickup",
+  "gohighlevel",
+  "google-ads",
+  "google-lsa",
+  "google-search-console",
+  "rank-tracker",
+  "map-checkins",
+];
+
+/** Snapshots newer than this are left alone, so a double-click does not re-run a two-minute sync. */
+const PREP_SNAPSHOT_FRESH_WITHIN_MS = 10 * 60 * 1000;
+
+/** No single provider may hold up a preparation for longer than this. */
+const PREP_PROVIDER_TIMEOUT_MS = 60_000;
+
+/**
+ * All of them together. The research stage also has to run the preparation itself, whose model
+ * call needs most of the route's 300 seconds, so the refresh gets a bounded slice and no more.
+ */
+const PREP_REFRESH_BUDGET_MS = 75_000;
+
+export interface PrepSnapshotRefresh {
+  providerId: IntegrationProviderId;
+  status: "refreshed" | "already-fresh" | "not-connected" | "failed" | "timed-out";
+  /** When the data the preparation will actually read was pulled. */
+  syncedAt: string | null;
+  detail: string;
+}
+
+/**
+ * Re-pulls every platform the preparation reads, before it reads them.
+ *
+ * The preparation used to read whatever the last nightly sync happened to leave behind, and
+ * nothing in the workflow refreshed any of it. Pressing "Run the account review again" re-ran
+ * the ANALYSIS over the same frozen facts and produced the same sentences, so a figure that was
+ * wrong stayed wrong however many times it was run. On 9 November 2026 the Business Profile
+ * snapshot was fifteen hours old and the calendar snapshot was six DAYS old -- old enough that a
+ * confirmation email offered a client a reminder about a meeting that had already passed and
+ * been rebooked.
+ *
+ * Every provider runs in parallel, each against a different API, each with its own ceiling, all
+ * inside one budget. A provider that cannot finish is reported as such with the age of what the
+ * preparation will use instead -- never silently substituted, because stale data presented as
+ * current is the whole fault being fixed here.
+ *
+ * This deliberately does NOT go through `syncIntegrationProvider`: that re-prepares up to 25
+ * touches afterwards for any sync reporting touched touches, and calling it from inside a
+ * preparation would set the preparation re-preparing itself.
+ */
+export async function refreshSnapshotsForPrep(
+  context: TenantContext,
+  options: { freshWithinMs?: number; budgetMs?: number } = {},
+): Promise<PrepSnapshotRefresh[]> {
+  const db = getFirebaseAdminDb();
+  if (!db) {
+    return [];
+  }
+
+  const freshWithinMs = options.freshWithinMs ?? PREP_SNAPSHOT_FRESH_WITHIN_MS;
+  const deadline = Date.now() + (options.budgetMs ?? PREP_REFRESH_BUDGET_MS);
+
+  const refreshOne = async (providerId: IntegrationProviderId): Promise<PrepSnapshotRefresh> => {
+    const snapshot = (
+      await db.doc(integrationSnapshotPath(context.tenantId, providerId)).get()
+    ).data() as IntegrationSnapshotRecord | undefined;
+    const storedAt = typeof snapshot?.syncedAt === "string" ? snapshot.syncedAt : null;
+    const age = storedAt ? Date.now() - new Date(storedAt).getTime() : Number.POSITIVE_INFINITY;
+
+    if (storedAt && age < freshWithinMs) {
+      return {
+        providerId,
+        status: "already-fresh",
+        syncedAt: storedAt,
+        detail: `Pulled ${describeAge(storedAt)}, so it was not pulled again for this run.`,
+      };
+    }
+
+    let record: IntegrationConnectionRecord;
+    try {
+      record = await getConnectedRecord(context, providerId);
+    } catch {
+      return {
+        providerId,
+        status: "not-connected",
+        syncedAt: storedAt,
+        detail: "Not connected in MTOS, so there was nothing to pull.",
+      };
+    }
+    void record;
+
+    const remaining = Math.min(PREP_PROVIDER_TIMEOUT_MS, deadline - Date.now());
+    if (remaining <= 1_000) {
+      return {
+        providerId,
+        status: "timed-out",
+        syncedAt: storedAt,
+        detail: `The refresh ran out of time before reaching this one, so the preparation used data pulled ${describeAge(storedAt)}.`,
+      };
+    }
+
+    const job = await createSyncJob(context, providerId);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const result = await Promise.race([
+        runProviderSync(context, providerId),
+        new Promise<never>((_resolve, reject) => {
+          timer = setTimeout(() => reject(new Error(`timed out after ${Math.round(remaining / 1000)}s`)), remaining);
+        }),
+      ]);
+      await saveIntegrationSnapshot(context, providerId, result);
+      await finishSyncJob(context, job.id, providerId, result);
+      return {
+        providerId,
+        status: "refreshed",
+        syncedAt: getNowIso(),
+        detail: `Pulled fresh at the start of this run: ${result.summary}`,
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "unknown error";
+      await failSyncJob(context, job.id, providerId, message).catch(() => undefined);
+      const timedOut = /timed out after/.test(message);
+      return {
+        providerId,
+        status: timedOut ? "timed-out" : "failed",
+        syncedAt: storedAt,
+        detail: `${timedOut ? "Took too long to pull for this run" : `Could not be pulled: ${message}`}, so the preparation used data pulled ${describeAge(storedAt)}.`,
+      };
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  };
+
+  return Promise.all(
+    PREP_REFRESHABLE_PROVIDERS.map((providerId) =>
+      refreshOne(providerId).catch((error) => ({
+        providerId,
+        status: "failed" as const,
+        syncedAt: null,
+        detail: `Could not be pulled: ${error instanceof Error ? error.message : "unknown error"}.`,
+      })),
+    ),
+  );
+}
+
+/** "11 minutes ago", "6 days ago" -- so an age is never left for the reader to work out. */
+function describeAge(iso: string | null): string {
+  if (!iso) return "never";
+  const then = Date.parse(iso);
+  if (Number.isNaN(then)) return "at an unknown time";
+  const minutes = Math.round((Date.now() - then) / 60_000);
+  if (minutes < 1) return "moments ago";
+  if (minutes < 60) return `${minutes} minute${minutes === 1 ? "" : "s"} ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 48) return `${hours} hour${hours === 1 ? "" : "s"} ago`;
+  const days = Math.round(hours / 24);
+  return `${days} day${days === 1 ? "" : "s"} ago`;
+}
+
+export interface GhlClientRefreshResult {
+  status: "refreshed" | "skipped" | "failed";
+  detail: string;
+}
+
+/**
+ * Pulls ONE client's GoHighLevel lead numbers, for the client being prepared.
+ *
+ * A full agency sync reads a bounded number of sub-accounts per run, so on a book of 53 matched
+ * locations the client in front of you may simply not be in today's window -- and then the brief
+ * has no lead numbers for them and blames the connection. Re-syncing the whole provider does not
+ * reliably fix that, because the window moves by the day, not by who is being prepared. This
+ * does: it asks for exactly the one sub-account that matters and splices the answer in.
+ *
+ * Non-fatal throughout; the preparation carries on with whatever the snapshot already held.
+ */
+export async function refreshGhlLeadsForClient(
+  context: TenantContext,
+  clientId: string,
+  clientName: string,
+): Promise<GhlClientRefreshResult> {
+  const db = getFirebaseAdminDb();
+  if (!db) {
+    return { status: "skipped", detail: "Firestore is not configured." };
+  }
+
+  const reference = db.doc(integrationSnapshotPath(context.tenantId, "gohighlevel"));
+  const stored = (await reference.get()).data() as IntegrationSnapshotRecord | undefined;
+  const payload = (stored?.payload || {}) as JsonRecord;
+  if (payload.mode !== "agency") {
+    return {
+      status: "skipped",
+      detail: "The stored GoHighLevel sync is not agency-wide, so one client's sub-account cannot be singled out.",
+    };
+  }
+
+  const leadsByClient = (payload.leadsByClient || {}) as JsonRecord;
+  const existing = (leadsByClient[clientId] || null) as JsonRecord | null;
+  const locationIndex = Array.isArray(payload.locationIndex) ? (payload.locationIndex as JsonRecord[]) : [];
+  const byName = locationIndex.find((entry) => namesLikelyMatch(clientName, String(entry.name || "")));
+  const locationId = String(existing?.locationId || byName?.id || "");
+  if (!locationId) {
+    return {
+      status: "skipped",
+      detail: `No GoHighLevel sub-account matches "${clientName}", so there were no leads to pull. Pin one on this client's integration mapping.`,
+    };
+  }
+
+  try {
+    const token = await getGhlLocationToken(context, locationId);
+    if (!token) {
+      return { status: "failed", detail: "GoHighLevel would not issue a token for this client's sub-account." };
+    }
+
+    const counts = await fetchGhlLeadCountsWithToken(token, locationId);
+    if (counts.errorMessage) {
+      return { status: "failed", detail: `GoHighLevel refused this client's leads: ${counts.errorMessage}` };
+    }
+
+    const locationName = String(existing?.locationName || byName?.name || clientName);
+    await reference.set(
+      {
+        payload: dropUndefinedDeep({
+          ...payload,
+          leadsByClient: {
+            ...leadsByClient,
+            [clientId]: {
+              locationId,
+              locationName,
+              totalLeads: counts.newLeads30d,
+              totalLeadsAllTime: counts.totalContacts,
+              qualifiedLeads: counts.pipelineOpportunities,
+              bookedJobs: counts.bookedJobsWon,
+              sampleContacts: counts.sampleContacts.map((contact) => ({
+                id: contact.id,
+                source: contact.source || "unknown",
+                dateAdded: contact.dateAdded,
+              })),
+              leads: counts.leads,
+              leadsDiagnostic: counts.leadsDiagnostic,
+              refreshedAt: getNowIso(),
+            },
+          },
+        }),
+      },
+      { merge: true },
+    );
+
+    return {
+      status: "refreshed",
+      detail: `This client's GoHighLevel sub-account ("${locationName}") was read at the start of this run, so the lead numbers are current.`,
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "unknown error";
+    return { status: "failed", detail: `This client's GoHighLevel leads could not be re-read: ${message}` };
+  }
+}
+
 export interface TouchScheduleRefreshResult {
   status: "updated" | "unchanged" | "missing" | "skipped" | "failed";
   /** The meeting time now on the touch, as the calendar gives it. */

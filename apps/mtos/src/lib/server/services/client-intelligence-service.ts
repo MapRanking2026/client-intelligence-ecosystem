@@ -275,7 +275,6 @@ async function generateClientHealthSuggestion(
         // little to read, the score is still the AM's to set from everything else they know.
         ? "The transcript doesn't show enough to read a score from the call -- set it from what you know about the account."
         : ""),
-    npsStatedByClient: data.npsStatedByClient === true ? true : undefined,
     npsReasonsByScore: ladder,
     riskReason: str(data.riskReason) || undefined,
     riskReasonsByTier: riskReasonLadder(data.riskReasonsByTier),

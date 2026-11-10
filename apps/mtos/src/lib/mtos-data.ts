@@ -895,8 +895,6 @@ export interface ClientHealthSuggestion {
   suggestedNps: number | null;
   /** Why that score, in one sentence, grounded in the transcript. */
   suggestedNpsReason: string;
-  /** True when the client said a number out loud (rather than it being inferred). */
-  npsStatedByClient?: boolean;
   /**
    * A ready reason for each score the AM might pick instead, keyed "0".."10", so
    * changing the score still arrives with a grounded starting sentence.

@@ -828,9 +828,7 @@ export function PostMeetingWorkflow({ touchId, postMeeting, qaReview, hasQc }: P
                     <p className="text-sm font-semibold text-white">Client health — NPS &amp; risk status</p>
                     <p className="mt-0.5 text-xs text-slate-400">
                       {healthSuggestion
-                        ? healthSuggestion.npsStatedByClient
-                          ? "A number came up on the call — the score is still your judgment. Confirm or change it."
-                          : "Suggested from the transcript. Change either value and the reason updates to match."
+                        ? "Suggested from the transcript. Change either value and the reason updates to match."
                         : "No suggestion was generated — set the score from how the call actually went."}
                     </p>
                   </div>

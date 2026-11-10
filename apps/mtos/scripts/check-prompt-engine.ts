@@ -244,6 +244,58 @@ for (const file of CONSUMERS) {
 }
 
 // ---------------------------------------------------------------------------
+// 2b. Nobody asks the client for a score
+// ---------------------------------------------------------------------------
+
+/**
+ * The NPS is the account manager's own read of the account.
+ *
+ * Claude proposes it from the transcript, the AM confirms or changes it on the post-meeting screen,
+ * and `reviewBlockers` will not let the review through without one. The client is never asked for a
+ * number -- it is not a client survey and never has been (owner, 9 November 2026).
+ *
+ * This is pinned here because two rows got it wrong in opposite halves of the library and neither
+ * failed anything: the Client Health row told the model to copy a number the client said out loud,
+ * and the live call guide told the AM to ask for one on the call and put the question in the
+ * client's prompts. A prompt is the only place this rule can be broken silently.
+ */
+const ASKS_THE_CLIENT = [
+  /asks the client (?:directly )?for (?:a |their )?(?:NPS )?score/i,
+  /ask the client for (?:a |their )?(?:NPS )?score/i,
+  /the client said a number/i,
+  /number the client gave/i,
+  /stated by the client/i,
+  /npsStatedByClient/,
+  /how likely they are to recommend/i,
+];
+
+for (const row of ROWS) {
+  const text = `${row.prompt}\n${row.runtimeContract || ""}`;
+  for (const pattern of ASKS_THE_CLIENT) {
+    const hit = pattern.exec(text);
+    // A prohibition is allowed to name the thing it prohibits.
+    const line = hit ? text.slice(0, hit.index).split("\n").pop() + hit[0] : "";
+    const prohibits = /\b(never|not|no)\b/i.test(
+      text.slice(Math.max(0, (hit?.index ?? 0) - 160), (hit?.index ?? 0) + (hit?.[0].length ?? 0)),
+    );
+    check(
+      `${row.key} does not ask the client for a score`,
+      hit === null || prohibits,
+      line.trim().slice(0, 90),
+    );
+  }
+}
+
+check(
+  "the review cannot be submitted without the AM's score",
+  read("src/lib/contracts/post-meeting-review.ts").includes("if (!submission.npsChosen) {"),
+);
+check(
+  "and the screen offers Claude's suggestion as one option beside the numbers",
+  read("src/components/mtos/post-meeting-workflow.tsx").includes("Suggested {healthSuggestion.suggestedNps}"),
+);
+
+// ---------------------------------------------------------------------------
 // 3. An edit takes effect immediately
 // ---------------------------------------------------------------------------
 

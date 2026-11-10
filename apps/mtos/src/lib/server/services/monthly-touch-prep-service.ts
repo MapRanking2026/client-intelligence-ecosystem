@@ -1117,18 +1117,55 @@ function buildRecapQuestions() {
   return RECAP_QUESTIONS.map((question) => ({ question, answer: "" }));
 }
 
+/**
+ * Why this client has no lead numbers -- the true reason, read off the stored snapshot.
+ *
+ * This used to be a single fixed sentence blaming the connection: "the current GHL connection is
+ * scoped to a single sub-account. Add GOHIGHLEVEL_AGENCY_API_KEY and re-sync." That sentence was
+ * printed whenever the scorecard came up empty, whatever the actual cause, and on a tenant whose
+ * connection is agency-wide (verified: authClass Company, 131 sub-accounts reachable, the env key
+ * also set) it sent the owner chasing a connection that was never broken. Far more often the real
+ * cause is this one client: their sub-account was never matched, or it was matched and the sync
+ * stopped before reaching it. Each of those needs a different action, so each gets its own
+ * sentence.
+ */
+function describeGhlLeadGap(rawSnapshots: Map<string, JsonRecord>, clientId: string, clientName: string): string {
+  const snapshot = rawSnapshots.get("gohighlevel");
+  if (!snapshot) {
+    return "No GoHighLevel lead data: the integration has never completed a sync. Connect it (or run a sync) on the Integrations screen, then re-run this preparation.";
+  }
+
+  if (snapshot.mode !== "agency") {
+    return "No per-client GoHighLevel lead data: the stored sync ran against a single sub-account rather than the agency, so only Map Ranking's own numbers were pulled. Reconnect GoHighLevel choosing the AGENCY (Company) option, or set GOHIGHLEVEL_AGENCY_API_KEY, then re-sync.";
+  }
+
+  const leadsByClient = (snapshot.leadsByClient || {}) as JsonRecord;
+  if (leadsByClient[clientId]) {
+    return `GoHighLevel is connected agency-wide and this client's sub-account was read, but it returned no lead count for the window. Check the sub-account actually has contacts in it before treating this as a reporting fault; assess lead volume live using the lead-quality questions below.`;
+  }
+
+  const locationIndex = Array.isArray(snapshot.locationIndex) ? (snapshot.locationIndex as JsonRecord[]) : [];
+  const nameMatch = locationIndex.find((entry) => namesLikelyMatch(clientName, String(entry.name || "")));
+  const pulled = Object.keys(leadsByClient).length;
+
+  if (nameMatch) {
+    return `No GoHighLevel lead numbers for this client. The connection is agency-wide and the sub-account "${String(nameMatch.name || "")}" exists, but the last sync pulled lead data for only ${pulled} client${pulled === 1 ? "" : "s"} and stopped before this one. Re-run the GoHighLevel sync; assess lead volume live on the call meanwhile.`;
+  }
+
+  return `No GoHighLevel lead numbers for this client: the connection is agency-wide and reaches ${locationIndex.length} sub-account${locationIndex.length === 1 ? "" : "s"}, but none of them matches "${clientName}" by name. Pin the right sub-account on this client's integration mapping, then re-sync.`;
+}
+
 function buildDataGaps(
   seoPerformance: SeoPerformancePack,
   scorecard: BusinessScorecard,
   strategicAction: StrategicActionStatus,
   participation: ClientParticipation,
+  ghlLeadGap: string,
 ) {
   const gaps = [...seoPerformance.notes];
 
   if (scorecard.totalLeads.availability === "unavailable") {
-    gaps.push(
-      "No per-client GoHighLevel lead data is available -- the current GHL connection is scoped to a single sub-account. Add GOHIGHLEVEL_AGENCY_API_KEY (agency API key or agency private-integration token) and re-sync to pull each client's leads automatically; until then, assess lead volume live using the lead-quality questions below.",
-    );
+    gaps.push(ghlLeadGap);
   }
   if (scorecard.costPerLead.availability === "unavailable") {
     gaps.push("No Google Ads / Meta Ads sync is connected -- cost per lead and ROI cannot be shown yet.");
@@ -1864,7 +1901,13 @@ async function buildPrepPack(
   const clientParticipation = buildClientParticipation(client);
   const issuesAndSolutions = buildIssuesWithSolutions(client, openCommitments);
 
-  const dataGaps = buildDataGaps(seoPerformance, businessScorecard, strategicAction, clientParticipation);
+  const dataGaps = buildDataGaps(
+    seoPerformance,
+    businessScorecard,
+    strategicAction,
+    clientParticipation,
+    describeGhlLeadGap(rawSnapshots, client.id, client.name),
+  );
   if (clickupContext?.notes.length) {
     dataGaps.push(...clickupContext.notes);
   }

@@ -38,6 +38,8 @@ import {
   deriveTouchStatus,
 } from "@/src/lib/server/services/prep-readiness-service";
 import { isStageOpen, recomputeGates } from "@/src/lib/server/services/prep-workflow-rules";
+import { selectMeetingForTouch } from "@/src/lib/server/calendar-touch-matching";
+import { buildGbpCompleteness } from "@/src/lib/server/gbp-listing-completeness";
 
 let failures = 0;
 let checks = 0;
@@ -876,6 +878,117 @@ scenario("The run-sheet stage and the board column read the work, not a button")
     deriveBoardColumn(touch({ status: "Completed", postMeeting: { status: "draft_ready" } })) === "follow_through",
   );
   check("QA once it has been reviewed", deriveBoardColumn(touch({ qaReview: { status: "approved" } })) === "qa");
+}
+
+// ---------------------------------------------------------------------------
+
+scenario("The meeting time a client is told comes from the calendar, not from a stale record");
+{
+  const at = (id: string, summary: string, startIso: string) => ({
+    eventId: id,
+    clientId: "c1",
+    clientName: "Trueflow Plumbing LLC",
+    startIso,
+    summary,
+    reason: "title" as const,
+  });
+
+  // The real 9 November 2026 case: the touch had been pinned to the prep hold on the 4th while
+  // the call itself was the 5th, and the confirmation email offered to remind the client about
+  // the 4th. Standing on the 3rd, the call -- not the hold -- has to win.
+  const asOfThird = selectMeetingForTouch(
+    [
+      at("prep", "🌹 Prep: Trueflow Plumbing LLC Monthly Touch", "2026-11-04T21:00:00.000Z"),
+      at("call", "Monthly Touch- Trueflow Plumbing LLC", "2026-11-05T22:00:00.000Z"),
+    ],
+    "2026-11-03T09:00:00.000Z",
+  );
+  check("the client call wins over the AM's prep hold", asOfThird?.match.eventId === "call");
+  check("and it is reported as still ahead", asOfThird?.timing === "upcoming");
+
+  check(
+    "a prep hold is never the touch's meeting, even alone",
+    selectMeetingForTouch(
+      [at("prep", "Prep: Trueflow Plumbing LLC Monthly Touch", "2026-11-10T21:00:00.000Z")],
+      "2026-11-09T09:00:00.000Z",
+    ) === null,
+  );
+
+  const justHeld = selectMeetingForTouch(
+    [at("today", "Monthly Touch- Trueflow Plumbing LLC", "2026-11-09T17:00:00.000Z")],
+    "2026-11-09T20:00:00.000Z",
+  );
+  check("the call held three hours ago is still this touch's meeting", justHeld?.match.eventId === "today");
+  check("and it is reported as already held", justHeld?.timing === "just-held");
+
+  check(
+    "a call three weeks gone is history, not this touch",
+    selectMeetingForTouch(
+      [at("old", "Monthly Touch- Trueflow Plumbing LLC", "2026-10-05T21:00:00.000Z")],
+      "2026-11-09T20:00:00.000Z",
+    ) === null,
+  );
+
+  check(
+    "the next call beats one held an hour ago",
+    selectMeetingForTouch(
+      [
+        at("past", "Monthly Touch- Trueflow Plumbing LLC", "2026-11-09T19:00:00.000Z"),
+        at("next", "Monthly Touch- Trueflow Plumbing LLC", "2026-11-12T19:00:00.000Z"),
+      ],
+      "2026-11-09T20:00:00.000Z",
+    )?.match.eventId === "next",
+  );
+
+  check("an empty calendar yields no meeting at all", selectMeetingForTouch([], "2026-11-09T20:00:00.000Z") === null);
+}
+
+scenario("A listing is never reported incomplete because nobody loaded its fields");
+{
+  // The snapshot keeps a slim projection of each location. Scoring that projection is what told
+  // the owner a fully filled-in profile was "13% complete".
+  const slim = {
+    name: "locations/3182199253430599876",
+    title: "Trueflow Plumbing LLC",
+    storeCode: "17333865329060791887",
+    websiteUri: "https://trueflowplumbingdfw.com/",
+    accountName: "Map Ranking (Onboarding)",
+  };
+  check("a record with no detail fields is not scored at all", buildGbpCompleteness(slim) === null);
+
+  const full = {
+    ...slim,
+    phoneNumbers: { primaryPhone: "(214) 555-0132" },
+    categories: {
+      primaryCategory: { displayName: "Plumber" },
+      additionalCategories: [{ displayName: "Drainage service" }],
+    },
+    regularHours: { periods: [{ openDay: "MONDAY" }] },
+    profile: { description: "Family-run plumbing across DFW." },
+    storefrontAddress: { locality: "Dallas" },
+    serviceItems: [{ structuredServiceItem: {} }],
+    openInfo: { status: "OPEN" },
+  };
+  const scored = buildGbpCompleteness(full);
+  check("a fully filled-in listing scores 100%", scored?.percent === 100, JSON.stringify(scored?.missing));
+  check("and nothing is reported missing", scored?.missing.length === 0);
+
+  // An empty listing still has to be reported as empty: the guard keys off the fields being
+  // ABSENT, not off their being blank, or a genuinely bare profile would go unmentioned.
+  const emptyButLoaded = {
+    name: "locations/1",
+    title: "Blank Co",
+    phoneNumbers: {},
+    categories: {},
+    regularHours: {},
+    profile: {},
+    serviceArea: {},
+    openInfo: {},
+    serviceItems: [],
+  };
+  const bare = buildGbpCompleteness(emptyButLoaded);
+  check("a genuinely bare listing is still reported", bare?.percent === 0);
+  check("with every field named", bare?.missing.length === 8);
 }
 
 // ---------------------------------------------------------------------------

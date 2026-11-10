@@ -43,7 +43,10 @@ import {
   matchCalendarEventsToClients,
   selectLastTouchPerClient,
   selectNextTouchPerClient,
+  RECENT_MEETING_WINDOW_MS,
+  selectMeetingForTouch,
 } from "@/src/lib/server/calendar-touch-matching";
+import { buildGbpCompleteness } from "@/src/lib/server/gbp-listing-completeness";
 import { namesLikelyMatch, normalizeText } from "@/src/lib/server/name-matching";
 import { parseCheckinPostDate } from "@/src/lib/server/services/mapranking-dashboard";
 
@@ -960,6 +963,32 @@ function matchBusinessesToClients(clients: ClientRecord[], businesses: Array<Rec
   return byClient;
 }
 
+/**
+ * Every field the touch judges a listing on, in one place.
+ *
+ * The listing-completeness check is only as honest as this mask: a field left out here comes back
+ * absent from Google and is then indistinguishable from a field the client never filled in, so the
+ * brief reports a complete listing as missing half its details. Both the account-wide list and the
+ * single-location re-read use this same constant so the two can never drift apart.
+ */
+const GBP_LOCATION_READ_MASK = [
+  "name",
+  "title",
+  "storeCode",
+  "websiteUri",
+  "metadata",
+  "phoneNumbers",
+  "categories",
+  "storefrontAddress",
+  "regularHours",
+  "specialHours",
+  "serviceArea",
+  "profile",
+  "latlng",
+  "openInfo",
+  "serviceItems",
+].join(",");
+
 async function syncGoogleBusinessProfile(context: TenantContext, record: IntegrationConnectionRecord) {
   const refreshedRecord = await maybeRefreshConnection(context, record);
   const credentials = getIntegrationCredentials(refreshedRecord);
@@ -986,28 +1015,7 @@ async function syncGoogleBusinessProfile(context: TenantContext, record: Integra
     do {
       const url = new URL(`https://mybusinessbusinessinformation.googleapis.com/v1/${account.name}/locations`);
       url.searchParams.set("pageSize", "100");
-      // Wide enough to judge listing completeness on the touch (categories, hours, description,
-      // service items, open state), not just identify the location.
-      url.searchParams.set(
-        "readMask",
-        [
-          "name",
-          "title",
-          "storeCode",
-          "websiteUri",
-          "metadata",
-          "phoneNumbers",
-          "categories",
-          "storefrontAddress",
-          "regularHours",
-          "specialHours",
-          "serviceArea",
-          "profile",
-          "latlng",
-          "openInfo",
-          "serviceItems",
-        ].join(","),
-      );
+      url.searchParams.set("readMask", GBP_LOCATION_READ_MASK);
       if (pageToken) {
         url.searchParams.set("pageToken", pageToken);
       }
@@ -1402,50 +1410,6 @@ async function fetchGbpSearchKeywords(accessToken: string, locationId: string) {
     .filter((row) => row.term)
     .sort((left, right) => (right.impressions ?? 0) - (left.impressions ?? 0))
     .slice(0, 10);
-}
-
-/**
- * Listing completeness, derived from the location record itself -- no extra API call. These are the
- * fields Map Ranking asks clients to fill in, so `missing` doubles as the client ask list.
- */
-function buildGbpCompleteness(location: JsonRecord) {
-  const categories = (location.categories || {}) as JsonRecord;
-  const phoneNumbers = (location.phoneNumbers || {}) as JsonRecord;
-  const regularHours = (location.regularHours || {}) as JsonRecord;
-  const profile = (location.profile || {}) as JsonRecord;
-  const openInfo = (location.openInfo || {}) as JsonRecord;
-  const serviceArea = (location.serviceArea || {}) as JsonRecord;
-  const primaryCategory = (categories.primaryCategory || {}) as JsonRecord;
-  const additionalCategories = Array.isArray(categories.additionalCategories)
-    ? (categories.additionalCategories as JsonRecord[])
-    : [];
-  const serviceItems = Array.isArray(location.serviceItems) ? (location.serviceItems as JsonRecord[]) : [];
-  const primaryCategoryName = String(primaryCategory.displayName || primaryCategory.name || "").trim();
-
-  const checks: Array<{ label: string; filled: boolean }> = [
-    { label: "Website link", filled: Boolean(String(location.websiteUri || "").trim()) },
-    { label: "Primary phone number", filled: Boolean(String(phoneNumbers.primaryPhone || "").trim()) },
-    { label: "Primary category", filled: Boolean(primaryCategoryName) },
-    { label: "Additional categories", filled: additionalCategories.length > 0 },
-    { label: "Business hours", filled: Array.isArray(regularHours.periods) && regularHours.periods.length > 0 },
-    { label: "Business description", filled: Boolean(String(profile.description || "").trim()) },
-    {
-      label: "Address or service area",
-      filled: Boolean(location.storefrontAddress) || Boolean(serviceArea.businessType || serviceArea.places),
-    },
-    { label: "Services list", filled: serviceItems.length > 0 },
-  ];
-
-  const filled = checks.filter((check) => check.filled).length;
-
-  return {
-    percent: Math.round((filled / checks.length) * 100),
-    missing: checks.filter((check) => !check.filled).map((check) => check.label),
-    primaryCategory: primaryCategoryName,
-    additionalCategoryCount: additionalCategories.length,
-    serviceItemCount: serviceItems.length,
-    openState: String(openInfo.status || ""),
-  };
 }
 
 /**
@@ -2885,6 +2849,26 @@ async function fetchGhlLocationLeadCounts(
   }
 }
 
+/** How many sub-accounts one GoHighLevel sync reads lead data for. */
+const GHL_LEAD_PAIRS_PER_SYNC = 40;
+
+/**
+ * The next `size` items, starting from a point that moves one window per day.
+ *
+ * A fixed cap over an ordered list means everything past the cap is never read at all. Advancing
+ * the window daily means every entry is reached within `ceil(total / size)` days, and the order
+ * stays stable within a single run.
+ */
+function rotateForToday<T>(items: T[], size: number): T[] {
+  if (items.length <= size) {
+    return items;
+  }
+  const windows = Math.ceil(items.length / size);
+  const day = Math.floor(Date.now() / 86_400_000);
+  const start = (day % windows) * size;
+  return [...items.slice(start), ...items.slice(0, start)].slice(0, size);
+}
+
 async function syncGoHighLevelAgency(
   context: TenantContext,
   agencyKey: string,
@@ -2911,8 +2895,12 @@ async function syncGoHighLevelAgency(
 
   const leadsByClient: Record<string, JsonRecord> = {};
   const fetchErrors: string[] = [];
-  // Cap per-sync work; a nightly sync cycles through the rest.
-  const pairsToFetch = matchedPairs.slice(0, 40);
+  // Cap per-sync work, then ROTATE the starting point by the day so the rest are actually
+  // reached. This used to be a plain `slice(0, 40)` under a comment claiming a nightly sync
+  // cycled through the remainder -- it never did. With 53 sub-accounts matched, the same 40 were
+  // read every night and the last 13 clients had no lead numbers on any brief, ever, while the
+  // gap note blamed the connection for it.
+  const pairsToFetch = rotateForToday(matchedPairs, GHL_LEAD_PAIRS_PER_SYNC);
   for (const { client, location } of pairsToFetch) {
     const counts = await fetchGhlLocationLeadCounts(agencyKey, location, mode);
     if (counts.errorMessage) {
@@ -3602,6 +3590,147 @@ export interface GbpClientRefreshResult {
  * a Google outage -- each returns a `skipped`/`failed` status with a reason. The preparation then
  * runs on the older snapshot, exactly as it did before, rather than failing over listing data.
  */
+export interface TouchScheduleRefreshResult {
+  status: "updated" | "unchanged" | "missing" | "skipped" | "failed";
+  /** The meeting time now on the touch, as the calendar gives it. */
+  scheduledAt: string | null;
+  timing: "upcoming" | "just-held" | null;
+  detail: string;
+}
+
+/**
+ * Re-reads the account manager's calendar for ONE client and pins the touch to the meeting that is
+ * actually there.
+ *
+ * The touch's `scheduledAt` is written by the nightly calendar sync and then believed forever
+ * after. Two things go wrong with that, and both were reproduced on this tenant:
+ *
+ *  - The sync does not always run. The stored calendar snapshot was six days old while the client
+ *    had rebooked in between, so the confirmation email offered to remind the client about a call
+ *    on 4 November -- five days in the past, and not the call that was going to happen.
+ *  - When a call passes with nothing after it, `syncGoogleCalendar` clears the client's own
+ *    `nextTouchStartAt` but leaves the touch's `scheduledAt` where it was, so the stale time
+ *    outlives the event it came from.
+ *
+ * A confirmation email states a date and time to a client, so it has to come from the calendar as
+ * the AM sees it at that moment -- the next call if there is one, otherwise the call just held --
+ * and never from a prep hold. Reporting `missing` is a real outcome and better than a confident
+ * wrong date: it means the call is not on the calendar at all.
+ *
+ * Non-fatal throughout: every failure returns a reason and leaves the stored time alone.
+ */
+export async function refreshTouchScheduleForClient(
+  context: TenantContext,
+  clientId: string,
+  touchId: string,
+): Promise<TouchScheduleRefreshResult> {
+  const db = getFirebaseAdminDb();
+  if (!db) {
+    return { status: "skipped", scheduledAt: null, timing: null, detail: "Firestore is not configured." };
+  }
+
+  try {
+    const record = await getConnectedRecord(context, "google-calendar");
+    const refreshedRecord = await maybeRefreshConnection(context, record);
+    const credentials = getIntegrationCredentials(refreshedRecord);
+    const accessToken = credentials.accessToken;
+    if (!accessToken) {
+      return {
+        status: "failed",
+        scheduledAt: null,
+        timing: null,
+        detail: "The Google Calendar connection holds no access token.",
+      };
+    }
+
+    const apiBaseUrl =
+      credentials.apiBaseUrl || refreshedRecord.apiBaseUrl || "https://www.googleapis.com/calendar/v3";
+    const now = new Date();
+    // Narrow on purpose: a week back covers the call just held, and a quarter forward covers the
+    // next one. This runs inside a preparation the AM is waiting on, not a nightly sync.
+    const url = new URL(`${apiBaseUrl}/calendars/primary/events`);
+    url.searchParams.set("timeMin", new Date(now.getTime() - 1000 * 60 * 60 * 24 * 7).toISOString());
+    url.searchParams.set("timeMax", new Date(now.getTime() + 1000 * 60 * 60 * 24 * 90).toISOString());
+    url.searchParams.set("singleEvents", "true");
+    url.searchParams.set("orderBy", "startTime");
+    url.searchParams.set("maxResults", "2500");
+
+    const payload = await fetchJson(url.toString(), { headers: getBearerHeaders(accessToken) });
+    const items = Array.isArray(payload.items) ? (payload.items as GoogleCalendarEvent[]) : [];
+    const events = items
+      .filter((event) => event.status !== "cancelled")
+      .map((event) => ({
+        id: event.id || "",
+        summary: event.summary || "",
+        startIso: getEventStartIso(event),
+        attendeeEmails: (event.attendees || []).map((attendee) => attendee.email || "").filter(Boolean),
+      }))
+      .filter((event) => event.id && event.startIso && event.summary);
+
+    // Matched against the WHOLE roster, then filtered: the matcher gives the most specific client
+    // name the event, and scoring one client in isolation would hand it every loose name hit.
+    const clients = await listFirestoreClients(context.tenantId);
+    const mine = matchCalendarEventsToClients(events, clients).filter((match) => match.clientId === clientId);
+    const choice = selectMeetingForTouch(mine, now.toISOString());
+
+    if (!choice) {
+      // Drop a meeting time the calendar no longer backs, provided it is genuinely spent. An
+      // empty slot makes the confirmation email say it cannot tell the client when the call is,
+      // which is true; leaving the old time there makes it state a date that has already passed,
+      // which is how a client came to be offered a reminder about 4 November on the 9th.
+      const touchReference = db.doc(monthlyTouchPath(context.tenantId, touchId));
+      const existing = (await touchReference.get()).data() as { scheduledAt?: string } | undefined;
+      const stale =
+        Boolean(existing?.scheduledAt) &&
+        new Date(existing!.scheduledAt as string).getTime() < Date.now() - RECENT_MEETING_WINDOW_MS;
+      if (stale) {
+        await touchReference.set({ scheduledAt: null, calendarEventId: null, updatedAt: getNowIso() }, { merge: true });
+      }
+
+      return {
+        status: "missing",
+        scheduledAt: null,
+        timing: null,
+        detail: stale
+          ? "No meeting for this client is on the calendar -- none ahead, and none held recently. The time previously on this touch had already passed and nothing on the calendar backs it, so it has been cleared rather than quoted at the client. Book the call, or set the time by hand."
+          : "No meeting for this client is on the calendar -- none ahead, and none held recently. Book the call, or set the time by hand, before anything goes to the client.",
+      };
+    }
+
+    const touchReference = db.doc(monthlyTouchPath(context.tenantId, touchId));
+    const existing = (await touchReference.get()).data() as { scheduledAt?: string } | undefined;
+    const unchanged = existing?.scheduledAt === choice.match.startIso;
+    if (!unchanged) {
+      await touchReference.set(
+        {
+          scheduledAt: choice.match.startIso,
+          calendarEventId: choice.match.eventId,
+          updatedAt: getNowIso(),
+        },
+        { merge: true },
+      );
+    }
+
+    const when = choice.timing === "upcoming" ? "the next call on the calendar" : "the call just held";
+    return {
+      status: unchanged ? "unchanged" : "updated",
+      scheduledAt: choice.match.startIso,
+      timing: choice.timing,
+      detail: `Meeting time read from the calendar at the start of this run: ${when}, "${choice.match.summary}".${
+        unchanged ? "" : " It did not match the time stored on this touch, which has been corrected."
+      }`,
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "unknown error";
+    return {
+      status: "failed",
+      scheduledAt: null,
+      timing: null,
+      detail: `The calendar could not be re-read: ${message}. Any meeting time shown came from the last sync, so confirm it before sending anything to the client.`,
+    };
+  }
+}
+
 export async function refreshGbpInsightsForClient(
   context: TenantContext,
   clientId: string,
@@ -3663,10 +3792,32 @@ export async function refreshGbpInsightsForClient(
       if (!locationId) {
         continue;
       }
+
+      // The snapshot only keeps the slim projection, which carries none of the fields the
+      // completeness check reads, so the full record has to be re-read before the listing can be
+      // judged. Without this the refresh scored a complete listing as 13% and told the AM to go
+      // and ask the client for details the client had already filled in.
+      const detail = await fetchGbpLocationDetail(accessToken, locationId);
+      const subject: JsonRecord = detail
+        ? { ...detail, accountName: location.accountName, accountResourceName: location.accountResourceName }
+        : location;
+
       const [locationPerformance, locationInsights] = await Promise.all([
         fetchGbpLocationPerformance(accessToken, String(location.name || "")),
-        fetchGbpProfileInsights(accessToken, location),
+        fetchGbpProfileInsights(accessToken, subject),
       ]);
+
+      // A failed detail read must not wipe a completeness figure the full sync got right: keep
+      // the stored one and say why it is not from this minute.
+      if (!detail) {
+        const previous = profileInsights.find((row) => String(row.locationId || "") === locationId);
+        if (previous?.completeness) {
+          locationInsights.completeness = previous.completeness as GbpProfileInsight["completeness"];
+        }
+        locationInsights.notes.push(
+          "The listing's own fields could not be re-read just now, so the completeness figure is the one from the last full sync.",
+        );
+      }
 
       // Replace this location's rows in place; every other client's rows are left untouched, so a
       // targeted refresh never disturbs data it did not re-read.
@@ -3705,6 +3856,25 @@ export async function refreshGbpInsightsForClient(
       locations: 0,
       detail: `Business Profile could not be re-read: ${message}. The preparation used the stored snapshot instead.`,
     };
+  }
+}
+
+/**
+ * One location's full record, straight from Google, with every field the completeness check reads.
+ *
+ * The account-wide list is the only other place these fields arrive, and a preparation must not
+ * trigger one of those: this is a single call against a single location. Returns null rather than
+ * throwing, because a listing whose details cannot be re-read is a reason to keep the stored
+ * figure, not a reason to fail the preparation.
+ */
+async function fetchGbpLocationDetail(accessToken: string, locationId: string): Promise<JsonRecord | null> {
+  try {
+    const url = new URL(`https://mybusinessbusinessinformation.googleapis.com/v1/locations/${locationId}`);
+    url.searchParams.set("readMask", GBP_LOCATION_READ_MASK);
+    const payload = await fetchJson(url.toString(), { headers: getBearerHeaders(accessToken) });
+    return payload && typeof payload === "object" ? (payload as JsonRecord) : null;
+  } catch {
+    return null;
   }
 }
 

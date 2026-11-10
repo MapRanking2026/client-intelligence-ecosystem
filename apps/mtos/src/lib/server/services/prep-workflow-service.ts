@@ -12,7 +12,11 @@ import type { MonthlyTouchRecord } from "@/src/lib/mtos-data";
 import { getMtosDataSource } from "@/src/lib/server/data/seed-mtos-data-source";
 import { getFirebaseAdminDb } from "@/src/lib/server/firebase/admin";
 import { monthlyTouchPath } from "@/src/lib/server/firebase/collections";
-import { refreshGbpInsightsForClient } from "@/src/lib/server/integration-sync";
+import {
+  refreshGbpInsightsForClient,
+  refreshTouchScheduleForClient,
+  type TouchScheduleRefreshResult,
+} from "@/src/lib/server/integration-sync";
 import { getIntegrationConnection } from "@/src/lib/server/integrations";
 import { filePrepNotesToClientBook } from "@/src/lib/server/services/client-book-service";
 import {
@@ -150,6 +154,12 @@ async function recordSourceChecks(
    * the review count in front of them was read a minute ago or at nine this morning.
    */
   gbpRefresh?: { status: "refreshed" | "skipped" | "failed"; locations: number; detail: string },
+  /**
+   * What the calendar re-read concluded about when this meeting actually is. Shown on the Calendar
+   * line for the same reason: a stale meeting time is the one piece of stale data that gets
+   * repeated back to the client in writing.
+   */
+  scheduleRefresh?: TouchScheduleRefreshResult,
 ): Promise<{ sourceChecks: PrepSourceCheck[]; commsVerification: PrepCommsVerification }> {
   // Needed only for the client's email address, which is what turns the Intercom read from a weak
   // name match into real evidence. A client that can't be loaded degrades the Intercom check; it
@@ -180,12 +190,16 @@ async function recordSourceChecks(
     const connection = await getIntegrationConnection(context, provider.id).catch(() => undefined);
     const connected = Boolean(connection && connection.status === "connected");
     const source = answered.get(provider.id);
-    const freshness =
-      provider.id === "google-business-profile" && gbpRefresh
-        ? gbpRefresh.status === "refreshed"
+    let freshness = "";
+    if (provider.id === "google-business-profile" && gbpRefresh) {
+      freshness =
+        gbpRefresh.status === "refreshed"
           ? ` Re-read for this client at the start of this run, so the listing figures are current (${gbpRefresh.locations} location${gbpRefresh.locations === 1 ? "" : "s"}).`
-          : ` ${gbpRefresh.detail}`
-        : "";
+          : ` ${gbpRefresh.detail}`;
+    }
+    if (provider.id === "google-calendar" && scheduleRefresh) {
+      freshness = ` ${scheduleRefresh.detail}`;
+    }
     checks.push({
       key: provider.id,
       label: provider.label,
@@ -290,6 +304,22 @@ export async function runResearchStage(context: TenantContext, touchId: string):
   }));
   console.info(`[prep] ${client.id}: gbp refresh ${gbpRefresh.status} -- ${gbpRefresh.detail}`);
 
+  /**
+   * And ask the calendar when the meeting actually is, before anything quotes a time at a client.
+   *
+   * Same failure, worse consequence: the time on the touch is whatever the last calendar sync
+   * wrote, and the confirmation email states it to the client as fact. On 9 November 2026 that
+   * sync was six days old, so the draft offered to remind a client about a call on the 4th -- a
+   * date that had passed and that the client had already rebooked away from.
+   */
+  const scheduleRefresh = await refreshTouchScheduleForClient(context, client.id, touchId).catch((error) => ({
+    status: "failed" as const,
+    scheduledAt: null,
+    timing: null,
+    detail: error instanceof Error ? error.message : "The calendar refresh failed.",
+  }));
+  console.info(`[prep] ${client.id}: schedule refresh ${scheduleRefresh.status} -- ${scheduleRefresh.detail}`);
+
   let prepared: MonthlyTouchRecord;
   try {
     const result = await prepareMonthlyTouch(context, touchId, { includeClaude: true });
@@ -326,7 +356,12 @@ export async function runResearchStage(context: TenantContext, touchId: string):
           ? "The account review produced no agenda, so there is nothing to tell the client."
           : "";
 
-  const { sourceChecks, commsVerification } = await recordSourceChecks(context, prepared, gbpRefresh);
+  const { sourceChecks, commsVerification } = await recordSourceChecks(
+    context,
+    prepared,
+    gbpRefresh,
+    scheduleRefresh,
+  );
 
   const workflow: PrepWorkflowState = {
     ...before,

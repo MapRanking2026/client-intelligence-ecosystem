@@ -131,6 +131,19 @@ export function extractTitleCandidate(summary: string) {
     .trim();
 }
 
+/**
+ * Does this calendar entry look like the AM's own preparation hold rather than the client call?
+ *
+ * The AM keeps a "Prep: <client> Monthly Touch" block, usually a day or two before the call. It
+ * names the client and carries a touch marker, so it matches the client exactly as the real
+ * meeting does -- and being earlier, it wins any "soonest upcoming" contest. That is how a
+ * confirmation email came to tell a client their meeting was on 4 November when the call itself
+ * was the 5th: the touch had been pinned to the prep hold.
+ */
+export function looksLikePrepBlock(summary: string): boolean {
+  return /(^|\W)prep(aration)?\b\s*[:\-]?/i.test(summary) && !/\bap+ointment\b/i.test(summary);
+}
+
 /** True when a title carries an explicit monthly-touch / appointment marker. */
 export function hasTouchMarker(summary: string) {
   return /\bap+ointment\b|\bmonthly\s*touch(es)?\b/i.test(summary);
@@ -288,6 +301,7 @@ export function selectNextTouchPerClient(matches: CalendarMatch[], nowIso: strin
   const byClient = new Map<string, CalendarMatch>();
   for (const match of matches) {
     if (match.startIso < nowIso) continue;
+    if (looksLikePrepBlock(match.summary)) continue;
     const current = byClient.get(match.clientId);
     if (!current || match.startIso < current.startIso) {
       byClient.set(match.clientId, match);
@@ -301,10 +315,59 @@ export function selectLastTouchPerClient(matches: CalendarMatch[], nowIso: strin
   const byClient = new Map<string, CalendarMatch>();
   for (const match of matches) {
     if (match.startIso >= nowIso) continue;
+    if (looksLikePrepBlock(match.summary)) continue;
     const current = byClient.get(match.clientId);
     if (!current || match.startIso > current.startIso) {
       byClient.set(match.clientId, match);
     }
   }
   return byClient;
+}
+
+/**
+ * How long after a call it still counts as "the meeting this touch is about".
+ *
+ * A touch is routinely prepared on the morning of the call and written up the same evening, so
+ * the meeting a brief refers to is just as often a few hours behind as a few days ahead.
+ */
+export const RECENT_MEETING_WINDOW_MS = 1000 * 60 * 60 * 36;
+
+export interface MeetingChoice {
+  match: CalendarMatch;
+  /** "upcoming" when the call has not happened yet, "just-held" when it is within the window. */
+  timing: "upcoming" | "just-held";
+}
+
+/**
+ * The meeting a touch should quote to the client, chosen from the calendar rather than from
+ * whatever was stored the last time a sync ran.
+ *
+ * The soonest call still ahead wins, because that is the one a confirmation email is about. Only
+ * when there is none does the most recently held call qualify, and only inside
+ * `RECENT_MEETING_WINDOW_MS` -- a meeting from three weeks ago is history, not this touch, and
+ * quoting it to a client reads as though nobody checked. Prep holds never qualify as either.
+ *
+ * Returns null when the calendar offers nothing that fits, which is a real answer: it means the
+ * call is not on the calendar and the AM has to put it there or set the time by hand. That beats
+ * presenting a date from a stale record as though it were confirmed.
+ */
+export function selectMeetingForTouch(
+  matches: CalendarMatch[],
+  nowIso: string,
+  windowMs: number = RECENT_MEETING_WINDOW_MS,
+): MeetingChoice | null {
+  const callable = matches.filter((match) => match.startIso && !looksLikePrepBlock(match.summary));
+
+  const upcoming = callable
+    .filter((match) => match.startIso >= nowIso)
+    .sort((left, right) => left.startIso.localeCompare(right.startIso))[0];
+  if (upcoming) {
+    return { match: upcoming, timing: "upcoming" };
+  }
+
+  const floor = new Date(new Date(nowIso).getTime() - windowMs).toISOString();
+  const justHeld = callable
+    .filter((match) => match.startIso < nowIso && match.startIso >= floor)
+    .sort((left, right) => right.startIso.localeCompare(left.startIso))[0];
+  return justHeld ? { match: justHeld, timing: "just-held" } : null;
 }

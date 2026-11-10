@@ -4,6 +4,7 @@ import {
   MATCH_STRENGTH,
   extractTitleCandidate,
   hasTouchMarker,
+  looksLikePrepBlock,
   scoreCandidateAgainstClient,
 } from "@/src/lib/server/calendar-touch-matching";
 import type { MonthlyTouchRecord } from "@/src/lib/mtos-data";
@@ -289,19 +290,6 @@ function searchAnchors(scheduledAtIso: string): number[] {
 /** Distance to whichever anchor this candidate sits nearest. */
 function distanceToNearestAnchor(instantMs: number, anchors: number[]): number {
   return Math.min(...anchors.map((anchor) => Math.abs(instantMs - anchor)));
-}
-
-/**
- * Does this calendar entry look like the AM's own preparation hold rather than the client call?
- *
- * This is the single biggest reason the lookup used to come back empty. `syncGoogleCalendar`
- * frequently links a touch to the "Prep: <client> Monthly Touch" block the AM keeps for
- * themselves -- verified against live data, where 8 of 12 recent touches pointed at a prep hold.
- * A solo hold has no Meet conference and so no Gemini artifacts, which means resolving from it
- * can only ever fail -- and that failure used to be reported as "Gemini hasn't published yet".
- */
-export function looksLikePrepBlock(summary: string): boolean {
-  return /(^|\W)prep(aration)?\b\s*[:\-]?/i.test(summary) && !/\bap+ointment\b/i.test(summary);
 }
 
 /**

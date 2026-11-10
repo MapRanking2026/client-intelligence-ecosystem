@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { requirePromptEngineAdmin } from "@/src/lib/server/prompt-engine-guard";
 import {
   getPromptRecord,
   savePromptRecord,
@@ -10,6 +11,9 @@ import {
 interface RouteContext {
   params: Promise<{ key: string }>;
 }
+
+/** Never cached. See the note on `src/app/api/prompts/route.ts`. */
+export const dynamic = "force-dynamic";
 
 const EDITABLE_FIELDS = [
   "title",
@@ -32,7 +36,10 @@ function pickPatch(body: Record<string, unknown>): PromptPatch {
   return patch as PromptPatch;
 }
 
-export async function GET(_request: Request, { params }: RouteContext) {
+export async function GET(request: Request, { params }: RouteContext) {
+  const gate = await requirePromptEngineAdmin(request);
+  if (!gate.ok) return gate.response;
+
   const { key } = await params;
   const record = await getPromptRecord(key);
 
@@ -45,6 +52,9 @@ export async function GET(_request: Request, { params }: RouteContext) {
 
 /** Save one prompt without touching the rest of the library. */
 export async function PATCH(request: Request, { params }: RouteContext) {
+  const gate = await requirePromptEngineAdmin(request);
+  if (!gate.ok) return gate.response;
+
   const { key } = await params;
   const body = (await request.json()) as Record<string, unknown>;
   const patch = pickPatch(body);

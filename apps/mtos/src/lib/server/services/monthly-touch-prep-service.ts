@@ -50,7 +50,7 @@ import { runLeadVerification } from "@/src/lib/server/services/lead-verification
 import { listPrepAdditions } from "@/src/lib/server/services/section-notes-service";
 import { resolveMeetingFormat, buildDecisionsTogether, buildVarietyContext, recordTouchHistory, type VarietyContext } from "@/src/lib/server/services/meeting-variety-service";
 import { retrieveKnowledge } from "@/src/lib/server/services/knowledge-service";
-import { getPromptText } from "@/src/lib/server/prompt-store";
+import { getPromptRecord, getPromptText } from "@/src/lib/server/prompt-store";
 import {
   computeConfidence,
   computeReadiness,
@@ -1536,6 +1536,14 @@ async function generateClaudeTouchOutput(
       ].join("\n")
     : "";
 
+  // The reminder that closes the request. It is a Prompt Engine row of its own rather than part
+  // of the preparation prompt's contract precisely because it has to come AFTER the evidence
+  // bundle, which is where the old hardcoded copy sat. Resolved per request, so an edit to it is
+  // in force on the next preparation; empty if the row is missing, which leaves the contract in
+  // the system prompt to stand on its own rather than failing the stage.
+  const outputReminder =
+    (await getPromptRecord("monthly_touch_preparation_output_reminder_prompt"))?.prompt?.trim() || "";
+
   const llmResult = await callLlmForJson({
         env,
         system,
@@ -1554,26 +1562,9 @@ async function generateClaudeTouchOutput(
           // came after it. This now RESTATES that contract instead of replacing it. The six legacy
           // fields keep their shapes spelled out, because they are validated strictly and the
           // exact types are worth repeating; the rest is named and pointed back at the contract,
-          // which carries the full JSON shape and the source-chip rules.
-          "Return ONE JSON object following the output contract in the instructions above.",
-          "It must carry the fourteen written sections and the fields around them -- `sections`,",
-          "`missing`, `retention`, `qcPromises`, `qcFocus`, `qcProposals`, `agendaReadAloud`,",
-          "`clientAgendaEmail`, `unreportedSeoWins` -- and ALSO these six, whose shapes are exact:",
-          '  executiveBrief: a single string (use "\\n\\n" between paragraphs -- NOT an object)',
-          "  agenda: array of 4-6 strings (each a plain string, not an object)",
-          "  talkingPoints: array of 3-6 strings",
-          "  wins: array of 3-8 strings",
-          "  risks: array of 2-8 strings",
-          "  recommendations: array of 2-4 objects, each exactly:",
-          "    { title: string, summary: string, rationale: string,",
-          '      confidence: exactly "High" | "Medium" | "Low",',
-          "      evidence: array of 1-3 objects, each { label: string, source: string, freshness: string } }",
-          "",
-          "In those six, every list entry must be a plain string except recommendations and",
-          "evidence, which are the objects described above. Respect the item limits -- extra items",
-          "are discarded. The sections are the document the account manager actually reads: writing",
-          "the six fields well and leaving `sections` out is not a usable answer.",
-          "Use only the preparation bundle below. Do not invent sources.",
+          // which carries the full JSON shape and the source-chip rules. Its text now lives in the
+          // Prompt Engine, under `monthly_touch_preparation_output_reminder_prompt`.
+          outputReminder,
           "",
         JSON.stringify(
           {

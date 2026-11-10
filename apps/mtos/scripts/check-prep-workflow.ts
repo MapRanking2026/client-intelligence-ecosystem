@@ -23,7 +23,12 @@
  */
 import { emptyPrepWorkflowState, type PrepWorkflowState } from "@/src/lib/contracts/prep-workflow";
 import type { ClientRecord, MonthlyTouchRecord } from "@/src/lib/mtos-data";
-import { PREP_DOCUMENT_SECTIONS, REQUIRED_PREP_SECTION_IDS } from "@/src/lib/server/prompts/prep-document-prompt";
+import {
+  bundledPrepDocumentSections,
+  bundledPrepDocumentSectionsText,
+  renderSectionBrief,
+  requiredPrepSectionIds,
+} from "@/src/lib/server/prompts/prep-document-prompt";
 import {
   assembleMarkdown,
   buildSections,
@@ -40,6 +45,14 @@ import {
 import { isStageOpen, recomputeGates } from "@/src/lib/server/services/prep-workflow-rules";
 import { matchCalendarEventsToClients, selectMeetingForTouch } from "@/src/lib/server/calendar-touch-matching";
 import { buildGbpCompleteness } from "@/src/lib/server/gbp-listing-completeness";
+
+/**
+ * The document's section catalogue, read from the bundled Prompt Engine library rather than from a
+ * module constant -- which is where it used to live. Reading the bundled seed keeps these checks
+ * pure (no Firestore) while exercising the same parser the runtime uses.
+ */
+const PREP_DOCUMENT_SECTIONS = bundledPrepDocumentSections();
+const REQUIRED_PREP_SECTION_IDS = requiredPrepSectionIds(PREP_DOCUMENT_SECTIONS);
 
 let failures = 0;
 let checks = 0;
@@ -453,13 +466,24 @@ scenario("The document keeps every required section, in the original order");
     "every section carries guidance for the model",
     PREP_DOCUMENT_SECTIONS.every((spec) => spec.guidance.trim().length > 40),
   );
+  // Round trip: what the engine row holds is exactly what the model is sent. If these ever drift,
+  // an operator's edit would mean something different from what they read on the screen.
+  check(
+    "the catalogue renders back to the text the engine row holds",
+    PREP_DOCUMENT_SECTIONS.map(renderSectionBrief).join("\n\n") === bundledPrepDocumentSectionsText(),
+  );
+  check(
+    "the two conditional sections keep their 'include when' line",
+    PREP_DOCUMENT_SECTIONS.filter((spec) => spec.appliesWhen).map((spec) => spec.id).join(",") === "R,9,10",
+    PREP_DOCUMENT_SECTIONS.filter((spec) => spec.appliesWhen).map((spec) => spec.id).join(","),
+  );
 
   const applicability = resolveApplicability(client(), touch({ prepPack: prepPack({ adsChannels: ["Google Ads"] }) }));
   const everySection: ModelSection[] = PREP_DOCUMENT_SECTIONS.map((spec) => ({
     id: spec.id,
     markdown: `Body for section ${spec.id}.`,
   }));
-  const { sections, missingSections } = buildSections(everySection, applicability);
+  const { sections, missingSections } = buildSections(PREP_DOCUMENT_SECTIONS, everySection, applicability);
   check("a complete answer leaves nothing missing", missingSections.length === 0);
   check(
     "Meta is marked not applicable when it is not connected",
@@ -472,7 +496,7 @@ scenario("The document keeps every required section, in the original order");
 
   // The failure that matters: the model returns the first half and stops.
   const halfAnswer = everySection.filter((entry) => ["0", "1", "2", "3", "4", "5", "6", "7", "8"].includes(entry.id));
-  const half = buildSections(halfAnswer, applicability);
+  const half = buildSections(PREP_DOCUMENT_SECTIONS, halfAnswer, applicability);
   check(
     "a skipped required section is reported, not dropped",
     half.missingSections.includes("14") && half.missingSections.includes("16"),
@@ -614,6 +638,7 @@ scenario("A client with active retention risks");
   const applicability = resolveApplicability(atRisk, touch({ prepPack: prepPack() }));
   check("the retention section is included", applicability.retention === true);
   const { sections } = buildSections(
+    PREP_DOCUMENT_SECTIONS,
     PREP_DOCUMENT_SECTIONS.filter((spec) => spec.id !== "10").map((spec) => ({ id: spec.id, markdown: "Body." })),
     applicability,
   );

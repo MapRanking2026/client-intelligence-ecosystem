@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { getServerEnv } from "@/src/lib/server/env";
+import { requirePromptEngineAdmin } from "@/src/lib/server/prompt-engine-guard";
 import {
   collectPromptVariables,
   composePromptText,
@@ -13,6 +14,9 @@ import { callLlmForText, hasAnyLlmProvider } from "@/src/lib/server/services/mto
 interface RouteContext {
   params: Promise<{ key: string }>;
 }
+
+/** Never cached. See the note on `src/app/api/prompts/route.ts`. */
+export const dynamic = "force-dynamic";
 
 interface TestRequestBody {
   /** Draft prompt text, so an operator can test before saving. */
@@ -30,6 +34,9 @@ interface TestRequestBody {
  * This is the "test before you ship" step of the Prompt Engine.
  */
 export async function POST(request: Request, { params }: RouteContext) {
+  const gate = await requirePromptEngineAdmin(request);
+  if (!gate.ok) return gate.response;
+
   const { key } = await params;
   const body = (await request.json()) as TestRequestBody;
 

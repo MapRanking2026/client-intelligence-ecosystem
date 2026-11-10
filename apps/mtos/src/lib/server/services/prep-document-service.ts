@@ -5,9 +5,10 @@ import { getServerEnv } from "@/src/lib/server/env";
 import { getPromptText } from "@/src/lib/server/prompt-store";
 import {
   PREP_DOCUMENT_PROMPT_KEY,
-  PREP_DOCUMENT_SECTIONS,
-  PREP_DOCUMENT_SYSTEM_PROMPT,
-  REQUIRED_PREP_SECTION_IDS,
+  PREP_DOCUMENT_SECTIONS_PROMPT_KEY,
+  loadPrepDocumentSections,
+  renderSectionBrief,
+  requiredPrepSectionIds,
   type PrepSectionSpec,
 } from "@/src/lib/server/prompts/prep-document-prompt";
 import {
@@ -39,13 +40,6 @@ import { retrieveKnowledge } from "@/src/lib/server/services/knowledge-service";
 /** Where the document splits. Section 8 ends the look-back and the SEO review; 9 opens the channels. */
 const FIRST_PASS_IDS = ["0", "R", "1", "2", "3", "4", "5", "6", "7", "8"];
 const SECOND_PASS_IDS = ["9", "10", "11", "12", "13", "14", "15", "16"];
-
-/** The section brief the model receives: its number, its title, and what it must contain. */
-function renderSectionBrief(spec: PrepSectionSpec): string {
-  const header = `SECTION ${spec.id} — ${spec.title}${spec.required ? " (required)" : " (conditional)"}`;
-  const when = spec.appliesWhen ? `Include when: ${spec.appliesWhen}.` : "";
-  return [header, when, spec.guidance].filter(Boolean).join("\n");
-}
 
 /**
  * The confirmation email as section 15 must reproduce it.
@@ -164,13 +158,35 @@ export async function generatePrepDocument(
   const generatedAt = getNowIso();
   const env = getServerEnv();
 
+  // The document's instructions and its section catalogue both come from the Prompt Engine, read
+  // here rather than captured at module load, so an edit in that screen is in force on the very
+  // next document. A catalogue that cannot be read is reported as a failure of the stage: writing
+  // a document without knowing which sections it should have would file a short preparation that
+  // looks finished.
+  let specs: PrepSectionSpec[];
+  try {
+    specs = await loadPrepDocumentSections();
+  } catch (error) {
+    return {
+      markdown: "",
+      sections: [],
+      generatedAt,
+      missing: [],
+      missingSections: [],
+      errorMessage: `The preparation document's section list could not be read from the Prompt Engine (${
+        error instanceof Error ? error.message : "unknown error"
+      }). Check "${PREP_DOCUMENT_SECTIONS_PROMPT_KEY}" under Settings → Prompt Engine.`,
+    };
+  }
+  const requiredSectionIds = requiredPrepSectionIds(specs);
+
   if (!touch.prepPack) {
     return {
       markdown: "",
       sections: [],
       generatedAt,
       missing: [],
-      missingSections: REQUIRED_PREP_SECTION_IDS,
+      missingSections: requiredSectionIds,
       errorMessage:
         "The account review has not produced a preparation pack for this touch, so there are no findings to write the document from.",
     };
@@ -182,15 +198,30 @@ export async function generatePrepDocument(
       sections: [],
       generatedAt,
       missing: [],
-      missingSections: REQUIRED_PREP_SECTION_IDS,
+      missingSections: requiredSectionIds,
       errorMessage: "No AI provider is configured, so the preparation notes can't be written.",
     };
   }
 
-  // The editable Prompt Engine row is layered on top of the built-in contract, never instead of it:
-  // the section catalogue is structural, and a settings edit must not be able to remove it.
-  const editable = await getPromptText(PREP_DOCUMENT_PROMPT_KEY).catch(() => "");
-  const system = editable ? `${PREP_DOCUMENT_SYSTEM_PROMPT}\n\n---\n\n${editable}` : PREP_DOCUMENT_SYSTEM_PROMPT;
+  // The whole system prompt, from the engine. There is deliberately no fallback to a copy in
+  // code -- a fallback in exactly this place is how the engine stopped matching what the platform
+  // ran -- but a library the store cannot resolve is reported as a failure of the stage rather
+  // than thrown, because the stage above records its outcome from what this returns.
+  let system: string;
+  try {
+    system = await getPromptText(PREP_DOCUMENT_PROMPT_KEY);
+  } catch (error) {
+    return {
+      markdown: "",
+      sections: [],
+      generatedAt,
+      missing: [],
+      missingSections: requiredSectionIds,
+      errorMessage: `The preparation document's instructions could not be read from the Prompt Engine (${
+        error instanceof Error ? error.message : "unknown error"
+      }). Check "${PREP_DOCUMENT_PROMPT_KEY}" under Settings → Prompt Engine.`,
+    };
+  }
 
   const applicability = resolveApplicability(client, touch);
   const evidence = buildTouchEvidence(touch);
@@ -263,7 +294,7 @@ export async function generatePrepDocument(
   ].join("\n");
 
   const specsFor = (ids: string[]) =>
-    PREP_DOCUMENT_SECTIONS.filter((spec) => ids.includes(spec.id) && appliesToThisTouch(spec, applicability));
+    specs.filter((spec) => ids.includes(spec.id) && appliesToThisTouch(spec, applicability));
 
   const firstSpecs = specsFor(FIRST_PASS_IDS);
   const secondSpecs = specsFor(SECOND_PASS_IDS);
@@ -294,7 +325,7 @@ export async function generatePrepDocument(
 
   // Every section the document should contain, in the original order, whether or not the model
   // returned it. A required section the model skipped is reported, never quietly dropped.
-  const { sections, missingSections } = buildSections([...collected.values()], applicability);
+  const { sections, missingSections } = buildSections(specs, [...collected.values()], applicability);
 
   const errorParts: string[] = [];
   if (failures.length) errorParts.push(`Part of the document could not be generated — ${failures.join("; ")}.`);

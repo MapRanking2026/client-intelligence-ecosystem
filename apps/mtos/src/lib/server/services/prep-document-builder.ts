@@ -1,9 +1,6 @@
 import type { PrepDocumentSection } from "@/src/lib/contracts/prep-workflow";
 import type { ClientRecord, MonthlyTouchRecord } from "@/src/lib/mtos-data";
-import {
-  PREP_DOCUMENT_SECTIONS,
-  type PrepSectionSpec,
-} from "@/src/lib/server/prompts/prep-document-prompt";
+import type { PrepSectionSpec } from "@/src/lib/server/prompts/prep-document-prompt";
 
 /**
  * Deciding which sections this touch gets, and assembling them into the document.
@@ -85,8 +82,12 @@ export interface ModelSection {
  * A required section the model skipped is marked failed and reported -- it is not allowed to
  * vanish, because a document missing section 14 is not a usable preparation, and a short document
  * that looks finished is worse than one that says what is wrong with it.
+ *
+ * `specs` is the catalogue the Prompt Engine holds, passed in rather than imported: this function
+ * decides the document's shape and must stay exercisable without reading the library.
  */
 export function buildSections(
+  specs: PrepSectionSpec[],
   returned: ModelSection[],
   applicability: SectionApplicability,
 ): { sections: PrepDocumentSection[]; missingSections: string[] } {
@@ -94,7 +95,7 @@ export function buildSections(
   const sections: PrepDocumentSection[] = [];
   const missingSections: string[] = [];
 
-  for (const spec of PREP_DOCUMENT_SECTIONS) {
+  for (const spec of specs) {
     if (!appliesToThisTouch(spec, applicability)) {
       sections.push({
         id: spec.id,

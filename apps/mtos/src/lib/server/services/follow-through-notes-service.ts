@@ -16,6 +16,7 @@ import { redFlagRule, type RedFlagFinding } from "@/src/lib/contracts/follow-thr
 import { riskRegisterRequired } from "@/src/lib/contracts/post-meeting-review";
 import { getMtosDataSource } from "@/src/lib/server/data/seed-mtos-data-source";
 import { getServerEnv } from "@/src/lib/server/env";
+import { getPromptText } from "@/src/lib/server/prompt-store";
 import { getFirebaseAdminDb } from "@/src/lib/server/firebase/admin";
 import { monthlyTouchPath } from "@/src/lib/server/firebase/collections";
 import { callLlmForJson, getNowIso, hasAnyLlmProvider } from "@/src/lib/server/services/mtos-ai";
@@ -208,38 +209,17 @@ export async function draftFollowThroughNotes(
 
   const openCommitments = await dataSource.getCommitments(client.id);
 
-  const system = [
-    "You write the Post Monthly Touch Notes for an account manager at a local-SEO agency, from",
-    "the transcript of the call that just happened.",
-    "",
-    "Hard rules, in order of importance:",
-    "- Invent nothing. Every number, date, name, quote and commitment must come from the",
-    "  transcript. If an action has no owner or no date in the call, leave those blank. A",
-    "  plausible guess becomes a real ticket with a deadline nobody agreed to.",
-    "- Write for an account manager, many of whom read English as a second language. Short",
-    "  sentences, plain words, no internal codes and no jargon.",
-    "- The summary is at most four sentences. It is the only part most people read.",
-    "- An action's `what` is at most twenty words: the deliverable, not a paragraph about it.",
-    "- Only list departments that actually came up on the call.",
-    "- `dependsOn` is for a real dependency only. Never restate the due date as one.",
-  ].join("\n");
+  // The bullet set and the goal statuses stay in code because the parser that validates the
+  // answer is built from them; the engine's prompt receives them as variables rather than
+  // restating them, so a rubric change cannot leave the prompt describing the old one.
+  const system = await getPromptText("post_touch_notes_draft_prompt", {
+    summary_bullet_keys: SUMMARY_BULLETS.map((bullet) => bullet.key).join(", "),
+    goal_statuses: GOAL_STATUSES.join(" / "),
+  });
 
   const userText = [
-    "Return a JSON object with exactly these keys:",
-    "  summary: at most four sentences on what happened.",
-    `  bullets: an object with any of ${SUMMARY_BULLETS.map((bullet) => bullet.key).join(", ")} —`,
-    "    one short line each, left out where the call said nothing.",
-    "  goalText: the client's quarterly goal as discussed, or \"\" if it did not come up.",
-    `  goalStatus: one of ${GOAL_STATUSES.join(" / ")}.`,
-    "  goalEvidence: what in the call supports that status.",
-    "  departments: array of { department, clientFeedback, actions: [{ what, team, due,",
-    "    carryOver, crossDepartment, dependsOn }] }. Only departments that came up.",
-    "  clientActions: array of { what, due, tentative, blocks } — things the CLIENT is doing.",
-    '  pending: array of { waitingOn: "Client" | "AM review", missing, from, team, owner,',
-    "    reminderDate } — work we cannot start until something arrives.",
-    "",
-    "Mark an action carryOver: true ONLY when it matches one of the open commitments below.",
-    "",
+    // Evidence only. What to answer -- the keys, the bullet set, the goal statuses and the
+    // carry-over rule -- is the engine row's contract, resolved above.
     JSON.stringify(
       {
         client: { name: client.name, industry: client.industry, contact: client.contact, goals: client.goals },

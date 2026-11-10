@@ -13,6 +13,7 @@ import { renderNotesMarkdown } from "@/src/lib/contracts/follow-through-notes";
 import type { MonthlyTouchRecord } from "@/src/lib/mtos-data";
 import { getMtosDataSource } from "@/src/lib/server/data/seed-mtos-data-source";
 import { getServerEnv } from "@/src/lib/server/env";
+import { getPromptText } from "@/src/lib/server/prompt-store";
 import { getFirebaseAdminDb } from "@/src/lib/server/firebase/admin";
 import { monthlyTouchPath, qcItemPath } from "@/src/lib/server/firebase/collections";
 import { callLlmForJson, getNowIso, hasAnyLlmProvider } from "@/src/lib/server/services/mtos-ai";
@@ -154,40 +155,17 @@ export async function generateQcPreread(
 
   const client = await source.getClientById(touch.clientId);
 
-  const system = [
-    "You pre-read a recorded client call for a QC specialist at a local-SEO agency, who will then",
-    "score it against a 17-point rubric. You are preparing their work, not doing it.",
-    "",
-    "Hard rules, in order of importance:",
-    "- Invent nothing. Every timestamp, quote, number and name must come from the transcript or",
-    "  the follow-through evidence you are given. A plausible timestamp is worse than none: the",
-    "  reviewer will click it, find nothing there, and stop trusting every other line.",
-    "- One evidence line per criterion, formatted `hh:mm:ss — what happened`, or a plain fact from",
-    "  the follow-through evidence for the criteria about prep and post-touch actions.",
-    "- If the transcript does not show you enough to judge a criterion, return null for its score",
-    "  AND an empty string for its evidence. Do not guess, and do not pad the line.",
-    "- Score 5 model, 4 solid, 3 acceptable, 2 below standard, 1 missing. Use null for a criterion",
-    "  that genuinely did not apply to this call, not for one you could not assess.",
-    "- Write in plain English, short sentences, for a reader who was not on the call. Many readers",
-    "  read English as a second language. No internal codes, no rubric jargon, no criterion numbers",
-    "  inside the prose.",
-    "- Coaching items are proposals the account manager may decline. Each one needs a reason that",
-    "  names the moment and what it cost, and a situation where it should be skipped.",
-  ].join("\n");
+  // The rubric stays in code because the parser that validates the answer counts on its order
+  // and length; the engine's prompt receives the criteria as a variable rather than restating
+  // them, so replacing the rubric cannot leave the prompt describing the old one.
+  const system = await getPromptText("qc_preread_prompt", {
+    criteria_count: String(QC_RUBRIC.length),
+    qc_criteria: QC_RUBRIC.map((criterion) => `  ${criterion.n}. ${criterion.name} — ${criterion.description}`).join("\n"),
+  });
 
   const userText = [
-    "Return a JSON object with exactly these keys:",
-    `  crit: an array of ${QC_RUBRIC.length} values, in criterion order, each 1-5 or null.`,
-    `  evidence: an array of ${QC_RUBRIC.length} strings, in the same order. "" where you have none.`,
-    "  goal: one of Yes / Partial / No / N/A — whether a numeric goal was agreed AND documented.",
-    "    Yes needs a number and a time frame. Mentioned without a number is Partial.",
-    "  strengths: two or three sentences on what the account manager did well.",
-    "  focus: one or two sentences on what to work on, naming the moments.",
-    "  coaching: at most 3 items { idea, why, how, skip }, drawn from the lowest scores.",
-    "",
-    "The criteria, in order:",
-    ...QC_RUBRIC.map((criterion) => `  ${criterion.n}. ${criterion.name} — ${criterion.description}`),
-    "",
+    // Evidence only. The answer's keys, the scale and the criterion list are the engine row's
+    // contract, resolved above.
     "Follow-through evidence, gathered when the account manager finished their post-call work:",
     ...(touch.qc.evidence || []).map(
       (row: QcEvidenceRow) => `  ${row.ok ? "done" : "NOT DONE"} · ${row.label}: ${row.detail}`,

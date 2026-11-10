@@ -395,23 +395,14 @@ async function generateClaudeSections(
     return null;
   }
 
-  const system = await getPromptText("meeting_structure_run_sheet_prompt");
+  const system = await getPromptText("meeting_structure_run_sheet_prompt", {
+    brief_section_ids: BRIEF_SECTION_IDS.join(", "),
+  });
 
   const userText = [
-    "Return a JSON object with a single key: sections.",
-    "Each section needs: title, minutes (integer), talkingPoints (array of strings), clientPrompts (array of strings).",
-    "Each section SHOULD also carry, when the preparation supports it:",
-    `  sectionId: which brief section this part presents, one of ${BRIEF_SECTION_IDS.join(", ")}.`,
-    "  goal: one line on what this part of the call must achieve.",
-    "  say: the opening line for the account manager to say, close to verbatim.",
-    "  points: the talking points again, each { text, chips }, where chips are the source chips",
-    "    copied from the brief line the point came from ({ kind, label, url }). Copy chips; never invent one.",
-    "  ifSays: up to three { says, response } pairs — what the client may push back with, and the answer.",
-    "  qaChips: up to three QC behaviours this part is judged on.",
-    "  next: the bridge sentence into the following part.",
-    "Order the parts in the order they are spoken. One part per brief section at most.",
-    "Use only the preparation bundle below. Do not invent metrics or sources.",
-    "",
+    // Evidence only. The shape of `sections`, the optional per-part fields and the source-chip
+    // rules are the engine row's contract, resolved above. BRIEF_SECTION_IDS reaches it as a
+    // variable, because the brief's section ids are code the renderer shares.
     JSON.stringify(
       buildTouchEvidence(touch),
       null,
@@ -498,11 +489,8 @@ async function generatePresentationAids(
 
   try {
     const system = await getPromptText("objection_handling_prompt");
+    // Evidence only; the answer's shape is the engine row's contract, resolved above.
     const userText = [
-      "Return a JSON object with a single key: objections.",
-      "Each item needs: objection (string), response (string), and optionally evidence (string).",
-      "Anticipate the objections THIS client is most likely to raise, grounded only in the evidence below. Do not invent metrics or sources.",
-      "",
       evidence,
       toneDirective,
     ].join("\n");
@@ -514,11 +502,8 @@ async function generatePresentationAids(
 
   try {
     const system = await getPromptText("value_performance_translation_prompt");
+    // Evidence only; the answer's shape is the engine row's contract, resolved above.
     const userText = [
-      "Return a JSON object with a single key: translations.",
-      "Each item needs: metric (string, the raw number/deliverable) and meaning (string, what it means for the client's business in plain language).",
-      "Translate only the metrics present in the evidence below. Do not invent numbers.",
-      "",
       evidence,
       toneDirective,
     ].join("\n");

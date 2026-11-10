@@ -46,9 +46,7 @@ async function evaluateWithClaude(
   });
 
   const userText = [
-    "Return a JSON object with keys: scorecard (array of {category, score, notes} for every category",
-    "above, in the same order), overallGrade (A-F), summary.",
-    "",
+    // Evidence only; the answer's shape is the engine row's contract, resolved above.
     JSON.stringify(
       {
         touchExecutiveBrief: touch.executiveBrief,

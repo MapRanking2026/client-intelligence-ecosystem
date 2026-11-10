@@ -303,22 +303,10 @@ async function analyzeWithClaude(
       ]
     : [];
 
+  // The answer's shape -- the keys, the ticket fields, the departments and the billing rules --
+  // is the engine row's contract, resolved above. What stays here is assembled per request: who
+  // the AM is, which client this is, which sources exist for this call.
   const userText = [
-    "Return a JSON object with keys: recapSummary, extractedCommitments, draftTickets,",
-    "clientEmailSubject, clientEmailBody.",
-    "recapSummary: a single string. clientEmailSubject/clientEmailBody: single strings.",
-    "extractedCommitments: an array of AT MOST 10 plain strings (each one sentence -- NOT objects).",
-    "draftTickets: an array of AT MOST 8 objects, each { title, description, department },",
-    'where department is one of "SEO", "Web Design", "Ads", "Account Manager", "Other".',
-    "Each ticket SHOULD also include priority (one of \"urgent\", \"high\", \"normal\", \"low\" based on how",
-    "time-sensitive the work is from the conversation) and timeEstimateHours (a realistic number of",
-    "hours of effort, e.g. 0.5, 2, 5).",
-    "TICKET TYPE: set ticketType to \"billing\" for ANYTHING that changes what the client pays -- a",
-    "discount, coupon, pricing agreement, upsell, downsell, new sale, an added or removed GBP/service,",
-    "a pause, a cancellation, or a payment/charge issue. For those, also set billingChangeType to one",
-    'of "Upsell", "Downsell", "New Sale", "Pause", "Cancel", "Payment Failed". Everything else (the',
-    'actual optimization/implementation work) is ticketType "regular". When in doubt about billing, make',
-    "a SEPARATE billing ticket for the money part in addition to any regular work ticket.",
     ...assigneeDirective,
     `VOICE: You ARE ${amName}, the account manager, writing these tickets yourself. Write every`,
     "ticket title and description in the FIRST PERSON (\"I need\", \"Please\", \"Can you\") addressed",

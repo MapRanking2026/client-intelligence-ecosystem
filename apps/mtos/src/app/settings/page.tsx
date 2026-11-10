@@ -2,8 +2,10 @@ import Link from "next/link";
 import { Settings, Plug, Sparkles, BookOpen, Users, Flag, FileText, Shield, ArrowUpRight, Palette, UserCog } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
+import type { Role } from "@/src/lib/contracts/mtos";
 import { AppShell } from "@/src/components/mtos/app-shell";
 import { resolveTenantContext } from "@/src/lib/auth/resolve-tenant-context";
+import { canUsePromptEngine } from "@/src/lib/contracts/prompt-engine-access";
 import { permissionAttentionCount } from "@/src/lib/server/services/integration-permissions-service";
 
 /**
@@ -22,6 +24,8 @@ interface AdminCard {
   href?: string;
   icon: LucideIcon;
   live?: boolean;
+  /** When set, the card is only listed for a role this returns true for. */
+  visibleTo?: (role: Role) => boolean;
 }
 
 const ADMIN_CARDS: AdminCard[] = [
@@ -46,6 +50,9 @@ const ADMIN_CARDS: AdminCard[] = [
     href: "/settings/prompt-engine",
     icon: Sparkles,
     live: true,
+    // Admins only, so the card is not offered to an AM or a QC specialist who would only land on
+    // the screen's own refusal. The screen and the API enforce it; this keeps the menu honest.
+    visibleTo: canUsePromptEngine,
   },
   {
     title: "Knowledge base",
@@ -85,7 +92,7 @@ export default async function SettingsPage() {
       </div>
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {ADMIN_CARDS.map((c) => {
+        {ADMIN_CARDS.filter((c) => !c.visibleTo || c.visibleTo(context.role)).map((c) => {
           const Icon = c.icon;
           const inner = (
             <>

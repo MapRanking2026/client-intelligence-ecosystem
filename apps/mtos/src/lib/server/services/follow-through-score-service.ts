@@ -15,6 +15,7 @@ import {
 } from "@/src/lib/contracts/follow-through-score";
 import { getMtosDataSource } from "@/src/lib/server/data/seed-mtos-data-source";
 import { getServerEnv } from "@/src/lib/server/env";
+import { getPromptText } from "@/src/lib/server/prompt-store";
 import { getFirebaseAdminDb } from "@/src/lib/server/firebase/admin";
 import { monthlyTouchPath } from "@/src/lib/server/firebase/collections";
 import { callLlmForJson, getNowIso, hasAnyLlmProvider } from "@/src/lib/server/services/mtos-ai";
@@ -158,42 +159,19 @@ export async function analyzeScoreGate(
     return { findings, justifications: {}, note };
   }
 
-  const system = [
-    "You read one monthly check-in transcript for an account manager at a local-SEO agency and",
-    "report which of six retention red flags came up, with the evidence for each.",
-    "",
-    "Hard rules:",
-    "- Never invent a quote, a number or a date. Every evidence line must be traceable to the",
-    "  transcript; if you cannot point at something that was said, the flag was not found.",
-    "- A flag is about what the CLIENT said or did, not about how the call felt.",
-    "- Write the evidence in plain English for an account manager, many of whom read English as a",
-    "  second language. Short sentences. No jargon, no internal codes.",
-    "- The score is the account manager's judgement of the account. The client never gives a",
-    "  number, so never describe the score as the client's or say they did not give one.",
-  ].join("\n");
-
-  const userText = [
-    "Return a JSON object with exactly these keys:",
-    '  findings: an array with one entry per flag you found. Each: { id, found: true, evidence,',
-    "    timestamps, severe }. `evidence` is one or two short sentences saying what was said.",
-    '    `timestamps` are the transcript\'s own marks for those moments ("12:04"), only where the',
-    "    transcript shows them. `severe` is true only when the harsher case below is met.",
-    "    Leave out any flag you did not find.",
-    "  suggestedScore: integer 1-10, or null only when the transcript has no client speech at all.",
-    '  justificationsByScore: an object keyed "1" through "10". For EVERY score, one or two',
-    "    sentences the AM could use if they pick that score, grounded in THIS call. Where the call",
-    "    does not support a score, say what would have to be true instead of inventing agreement.",
-    "",
-    "The six flags, with the ceiling each puts on the score (lowest ceiling wins):",
-    ...RED_FLAGS.map((rule) => {
+  // The flag list and the ceiling each flag puts on the score stay in code because the parser and
+  // the score cap are built from them; the engine's prompt receives them as a variable rather than
+  // restating them, so changing a flag cannot leave the prompt describing the old one.
+  const system = await getPromptText("retention_red_flags_prompt", {
+    red_flags: RED_FLAGS.map((rule) => {
       const severe = rule.severe ? ` Harsher case -- ${rule.severe.label} -- ceiling ${rule.severe.cap}.` : "";
       return `  ${rule.id} (${rule.label}): ${rule.hint} Ceiling ${rule.cap}.${severe}`;
-    }),
-    "",
-    "Bands: 9-10 healthy · 7-8 stable with friction · 5-6 at risk · 3-4 critical · 1-2 churn imminent.",
-    "A ceiling is a maximum, not the score. Place the account in a band from the whole call, then",
-    "apply the lowest ceiling among the flags you found.",
-    "",
+    }).join("\n"),
+  });
+
+  const userText = [
+    // Evidence only. The answer's keys, the six flags with their ceilings and the bands are the
+    // engine row's contract, resolved above.
     `Client: ${clientName}.`,
     "",
     "Transcript:",

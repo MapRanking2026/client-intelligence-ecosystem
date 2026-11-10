@@ -231,41 +231,8 @@ async function generateClientHealthSuggestion(
 
   const system = await getPromptText("nps_client_health_prompt");
   const userText = [
-    "Return a JSON object with exactly these keys:",
-    "  suggestedNps: integer 0-10, or null when the transcript gives nothing to read it from.",
-    "  npsStatedByClient: true only if the client said a number out loud; false if you inferred it.",
-    "  suggestedNpsReason: a short line in the AM's voice, grounded in what the client actually said.",
-    '  npsReasonsByScore: an object keyed "0" through "10". For EVERY score, one sentence the AM',
-    "    could use if they pick that score. Ground each one in this call's evidence; where the",
-    "    evidence does not support a score, say plainly what would have to be true for it instead",
-    "    of inventing agreement.",
-    "  riskReason: ONE sentence on why the risk tier below fits this client right now.",
-    '  riskReasonsByTier: an object keyed "Healthy","Low","Medium","High","Critical" -- one sentence',
-    "    per tier the AM could use if they set that tier instead, grounded the same way.",
-    "",
-    "The score is the account manager's judgment of the account, NOT a client survey. The client",
-    "never gives a number, so never write that the client did not state one, and never describe the",
-    "score as the client's. Work out a suggestion every time: read the call for the six red-flag",
-    "signals, place the account in a band, apply the lowest cap, and land on one number.",
-    "",
-    "Bands: 9-10 healthy · 7-8 stable with friction · 5-6 at risk · 3-4 critical · 1-2 churn imminent.",
-    "",
-    "A red flag CAPS the score -- a cap is a ceiling, not the score itself. Money or cash flow -> 8.",
-    "Responsiveness -> 5, or 3 for full ghosting. Life change -> 7. Technical challenge -> 4-7.",
-    "Another agency or advisor -> 7, or 5 once they start asking audit-style technical questions.",
-    "Performance -> 4, or 2-3 if they mention competitors or canceling. With several flags, the",
-    "LOWEST cap is the ceiling.",
-    "",
-    "Return null for suggestedNps only when the transcript is unusable (no client speech at all).",
-    "A hard call is still a call: pick the number the evidence supports and say what drove it.",
-    "Never invent a quote.",
-    "",
-    "Keep suggestedNpsReason short and in the AM's own voice -- a few words, no full sentence needed",
-    '(e.g. "replies slowed to weekly, still warm"). Name the band, and the flag and cap if one applied.',
-    "",
-    "A suggestion of 6 or below means this client MUST be logged in the Risk Register, so say in",
-    "suggestedNpsReason which red flag drove the cap -- the AM needs it to fill the entry.",
-    "",
+    // Evidence only. Every instruction the model is given -- what to answer, the bands, the caps,
+    // the wording rules -- is the engine row's own text, resolved above.
     JSON.stringify(
       {
         client: {
@@ -333,35 +300,10 @@ export async function generateClientIntelligence(
   const amName = accountManagerName.trim() || client.accountManager?.trim() || "";
   const touchDate = toDate(touch.scheduledAt) || todayDate();
 
-  const system = [
-    "You are a client-success analyst for the agency Map Ranking. From a monthly-touch transcript",
-    "and the client context, produce a concise internal Client Intelligence report AND decide whether",
-    "the client shows ANY retention risk (money, responsiveness, expectations, performance, a life",
-    "event, a technical change, or another agency circling). Use ONLY the evidence provided; never invent.",
-  ].join(" ");
+  const system = await getPromptText("client_intelligence_dashboard_updater_prompt");
 
   const userText = [
-    "Return a JSON object with exactly these keys:",
-    "  report: string -- a tight narrative (2-4 short paragraphs) on where this client stands after the touch.",
-    "  factors: the six retention warning signs -- money, responsiveness, lifeChange, technical,",
-    '           otherAgency, performance. Mark each "Yes" ONLY if this touch shows it as a real warning',
-    "           sign for this client, otherwise \"No\". (The risk score is simply how many are Yes, so be",
-    '           accurate.) money/responsiveness/technical/performance are "Yes"/"No"; lifeChange is',
-    '           "Yes"/"No"/"maybe"; otherAgency is "Yes"/"No"/"kind of".',
-    '  caseStatus: one of "Watching","Working","Requested Cancellation","Resolved-Healthy" (or null).',
-    '  primaryCategory: one of "Communication","Expectations","Gen. Business","Product","Onboarding".',
-    "  nextAction: 2-4 words max, imperative (e.g. \"Schedule check-in call\", \"Send updated report\").",
-    "  latestComments: ONE short sentence of notable context (this is the only field allowed a sentence).",
-    "  stakeholder: an object with role, communicationPreference (Phone/Email/Face-to-Face/Text/Chat),",
-    "           marketingLiteracy (Low/Medium/High), personality, whatTheyCareAbout, knownHistory,",
-    "           and services (array of service names they have).",
-    "",
-    "FIELD STYLE (critical): the table columns are single-word cells. Fill role, personality,",
-    "whatTheyCareAbout, and knownHistory with ONE word each (e.g. role \"Owner\"; personality \"Analytical\";",
-    "whatTheyCareAbout \"Leads\"; knownHistory \"Longtime\"). Do NOT write sentences in any field. The ONLY",
-    "field that may be a short sentence is latestComments. Keep report as prose; keep every table field terse.",
-    "Always return report and stakeholder. When no warning signs apply, mark all six factors \"No\".",
-    "",
+    // Evidence only; the answer's shape and the field-style rules are the engine row's contract.
     JSON.stringify(
       {
         client: {

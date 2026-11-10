@@ -10,6 +10,7 @@ import {
   getMissingIntegrationScopes,
 } from "@/src/lib/server/integrations";
 import { encodeRfc822 } from "@/src/lib/server/gmail";
+import { getPromptText } from "@/src/lib/server/prompt-store";
 import { callLlmForJson, getNowIso, hasAnyLlmProvider } from "@/src/lib/server/services/mtos-ai";
 
 /**
@@ -231,22 +232,6 @@ export async function generateConfirmationEmail(
     };
   }
 
-  const system = [
-    "You write the client-facing agenda email an Account Manager at Map Ranking sends 24 to 48 hours before a Monthly Touch call.",
-    "",
-    "RULES",
-    "It is client-facing. No internal notes, no scores, no ticket identifiers, no coaching or retention wording, nothing sensitive, and never any password or login code.",
-    "Short, warm, plainly written. Three to five outcome-focused items the client cares about: results, what we are working on, what we need from them, the next 30 days.",
-    "State the meeting date and time exactly as given to you. Do not reword, recalculate or convert it, and never invent a meeting link, a duration or a phone number.",
-    "Include one ask: their number of calls, booked jobs and approximate revenue this month, because it sets the goal for next quarter.",
-    "Only promise what the agenda you were given actually covers. Do not add agenda items.",
-    "If a detail is missing, leave it out rather than inventing it. Do not write a placeholder like [link] into send-ready wording.",
-    "",
-    "OUTPUT",
-    'Return a single JSON object and nothing else: {"subject": "...", "body": "..."}',
-    "The body is plain text with line breaks, ready to paste into an email. No markdown, no asterisks, no headings.",
-  ].join("\n");
-
   const userText = [
     `Client business: ${client.name}`,
     `Client contact: ${client.contact || "unknown — open with a neutral greeting"}`,
@@ -268,6 +253,11 @@ export async function generateConfirmationEmail(
   ].join("\n");
 
   try {
+    // Resolved per request from the Prompt Engine, so an edit there is in force on the very next
+    // email. Resolved inside the try, alongside the model call: a library the store cannot
+    // resolve degrades to the plain agenda draft below, the same way a model failure does,
+    // rather than failing the whole preparation stage.
+    const system = await getPromptText("client_confirmation_email_prompt");
     const { data, model, provider } = await callLlmForJson({
       env,
       system,

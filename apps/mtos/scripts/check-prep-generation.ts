@@ -31,6 +31,7 @@ import {
   salvageTouchOutput,
 } from "@/src/lib/server/services/monthly-touch-prep-service";
 import { normalizePrepBrief } from "@/src/lib/contracts/prep-brief";
+import bundledLibrary from "@/src/prompts/mtos-prompts.json";
 
 let passed = 0;
 let failed = 0;
@@ -59,6 +60,20 @@ const SOURCE = readFileSync(
 )
   .replace(/\/\*[\s\S]*?\*\//g, "")
   .replace(/^[ \t]*\/\/.*$/gm, "");
+
+/**
+ * The reminder the request closes with, which is what defect 1 was about.
+ *
+ * It used to be a string literal in the service, which is why the checks below used to read the
+ * source. Since 9 November 2026 it is a Prompt Engine row -- every instruction MTOS sends now is
+ * -- so the wording is read from the bundled library, the seed Firestore boots from, and the
+ * service is checked only for still sending it. Same defect, pinned where the words now live.
+ */
+const REMINDER_KEY = "monthly_touch_preparation_output_reminder_prompt";
+const REMINDER =
+  (bundledLibrary as { prompts: { key: string; prompt: string }[] }[])
+    .flatMap((phase) => phase.prompts)
+    .find((row) => row.key === REMINDER_KEY)?.prompt ?? "";
 
 function good() {
   return {
@@ -90,11 +105,18 @@ console.log("the message must not countermand the contract");
 {
   check(
     'the old "exactly these keys" framing is gone',
-    !SOURCE.includes("Return a JSON object with exactly these keys and types:"),
+    !SOURCE.includes("Return a JSON object with exactly these keys and types:") &&
+      !REMINDER.includes("Return a JSON object with exactly these keys and types:"),
+  );
+  check("the reminder is in the Prompt Engine, not in the service", Boolean(REMINDER));
+  check(
+    "the service still sends it, last, after the evidence bundle",
+    SOURCE.includes(`getPromptRecord("${REMINDER_KEY}")`) &&
+      SOURCE.indexOf("outputReminder,") > SOURCE.indexOf("varietyDirective,"),
   );
   check(
     "the message asks for the sections by name",
-    SOURCE.includes("It must carry the fourteen written sections"),
+    REMINDER.includes("It must carry the fourteen written sections"),
   );
   for (const key of [
     "sections",
@@ -107,16 +129,16 @@ console.log("the message must not countermand the contract");
     "clientAgendaEmail",
     "unreportedSeoWins",
   ]) {
-    check(`and names \`${key}\``, SOURCE.includes("`" + key + "`"));
+    check(`and names \`${key}\``, REMINDER.includes("`" + key + "`"));
   }
   check(
     "and says that writing only the six is not a usable answer",
-    SOURCE.includes("leaving `sections` out is not a usable answer"),
+    REMINDER.includes("leaving `sections` out is not a usable answer"),
   );
   check(
     "the six strict shapes are still spelled out, since those are validated hard",
-    SOURCE.includes("recommendations: array of 2-4 objects, each exactly:") &&
-      SOURCE.includes("wins: array of 3-8 strings"),
+    REMINDER.includes("recommendations: array of 2-4 objects, each exactly:") &&
+      REMINDER.includes("wins: array of 3-8 strings"),
   );
 }
 

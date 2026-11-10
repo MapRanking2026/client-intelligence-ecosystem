@@ -1,5 +1,7 @@
 import { AppShell } from "@/src/components/mtos/app-shell";
 import { SectionCard } from "@/src/components/mtos/section-card";
+import { resolveTenantContext } from "@/src/lib/auth/resolve-tenant-context";
+import { PROMPT_ENGINE_ADMIN_ONLY, canUsePromptEngine } from "@/src/lib/contracts/prompt-engine-access";
 import { getPrompts } from "@/src/lib/server/prompt-store";
 
 import { PromptEngineClient } from "./prompt-engine-client";
@@ -17,6 +19,20 @@ import { PromptEngineClient } from "./prompt-engine-client";
 export const dynamic = "force-dynamic";
 
 export default async function PromptEnginePage() {
+  // Admins only -- and the library is not read at all for anyone else, so a non-admin who types the
+  // URL cannot see prompt text in the page source either. The `/api/prompts/*` routes carry the
+  // same check; this one only decides what is rendered. See `prompt-engine-access.ts`.
+  const context = await resolveTenantContext();
+  if (!canUsePromptEngine(context.role)) {
+    return (
+      <AppShell title="Prompt Engine">
+        <div className="card">
+          <p className="muted text-[0.86rem]">{PROMPT_ENGINE_ADMIN_ONLY}</p>
+        </div>
+      </AppShell>
+    );
+  }
+
   const prompts = await getPrompts();
   const promptCount = prompts.reduce((total, phase) => total + phase.prompts.length, 0);
 

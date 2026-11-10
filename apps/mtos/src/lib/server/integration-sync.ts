@@ -48,6 +48,13 @@ import {
 } from "@/src/lib/server/calendar-touch-matching";
 import { buildGbpCompleteness } from "@/src/lib/server/gbp-listing-completeness";
 import { namesLikelyMatch, normalizeText } from "@/src/lib/server/name-matching";
+import {
+  gbpLocationId,
+  resolveAccountIds,
+  resolveGbpMapping,
+  resolveGhlLocationId,
+  unresolvedPinNote,
+} from "@/src/lib/contracts/client-mappings";
 import { parseCheckinPostDate } from "@/src/lib/server/services/mapranking-dashboard";
 
 type JsonRecord = Record<string, unknown>;
@@ -686,46 +693,35 @@ async function readClientPins(
   return client?.integrationMappings || {};
 }
 
-/** Whether a pinned id names this location, by its id or its full `accounts/x/locations/y` name. */
-function pinMatchesLocation(pins: Set<string>, location: JsonRecord): boolean {
-  const fullName = String(location.name || "");
-  const locationId = fullName.split("/").filter(Boolean).pop() || "";
-  return (Boolean(locationId) && pins.has(locationId)) || (Boolean(fullName) && pins.has(fullName));
-}
-
 /**
  * The Business Profile listings an AM pinned that the automatic match did not already find.
  *
- * Pure, and exported, so the rule can be checked without a database, a Google token or a sync:
- * see `scripts/check-prep-workflow.ts`. A pin naming a listing the snapshot has never seen is
- * dropped here and reported by the caller -- it cannot be read, and inventing a location record
- * for it would put an empty listing on the brief.
+ * Kept as a thin wrapper over `resolveGbpMapping` so the one resolution rule lives in
+ * `contracts/client-mappings` with every other reader, and `check-prep-workflow` keeps covering
+ * this signature.
  */
 export function selectPinnedGbpLocations(
   pinnedIds: string[],
   discovered: JsonRecord[],
   alreadyMatched: JsonRecord[],
 ): JsonRecord[] {
-  const pins = new Set(pinnedIds.filter(Boolean));
-  if (!pins.size) return [];
-  const idOf = (location: JsonRecord) => String(location.name || "").split("/").filter(Boolean).pop() || "";
-  const already = new Set(alreadyMatched.map(idOf));
-  return discovered.filter((location) => pinMatchesLocation(pins, location) && !already.has(idOf(location)));
+  return resolveGbpMapping({ discovered, stored: alreadyMatched, pinnedIds }).pinned.filter(
+    (location) => !alreadyMatched.some((already) => gbpLocationId(already) === gbpLocationId(location)),
+  );
 }
 
 /**
  * The GoHighLevel sub-account an AM pinned, when the agency connection can actually see it.
  *
- * Pure and exported for the same reason. Returns undefined for a pin this connection cannot
- * reach, which leaves the caller on its stored match or its name match rather than on nothing.
+ * Also a wrapper, for the same reason. Returns undefined for a pin this connection cannot reach,
+ * which leaves the caller on its stored match or its name match rather than on nothing.
  */
 export function selectPinnedGhlLocationId(
   pinnedIds: string[],
   locationIndex: JsonRecord[],
 ): string | undefined {
-  return pinnedIds
-    .filter(Boolean)
-    .find((id) => locationIndex.some((entry) => String(entry.id || "") === id));
+  const resolved = resolveGhlLocationId({ pinnedIds, locationIndex });
+  return resolved.source === "pinned" ? resolved.locationId : undefined;
 }
 
 function pickClickUpOwner(task: ClickUpTask) {
@@ -3126,6 +3122,199 @@ async function syncGoHighLevel(context: TenantContext, record: IntegrationConnec
   } satisfies SyncExecutionResult;
 }
 
+/**
+ * Meta Ads: the ad accounts this token can see, and last month's numbers for the matched ones.
+ *
+ * ## Why this did not exist until now
+ *
+ * Meta Ads had an OAuth flow, a long-lived token exchange, a token refresh, a tile on the
+ * Integrations screen that went green, a row in the preparation's source list, and a channel in the
+ * brief's paid-media panel. What it did not have was a sync. `runProviderSync` fell through to its
+ * default and threw "Meta Ads sync is not implemented in this slice", and the brief's Meta channel
+ * was a hard-coded `connected: false` with the words "Connect Meta Ads to review creative
+ * performance". So the application said connected in one place and not-connected in another, and
+ * the owner's report was exactly that: "it's saying that it's connected, but it can't pull anything
+ * for the account."
+ *
+ * ## What it reads
+ *
+ * `/me/adaccounts` for the account list, then one account-level `/insights` call per matched
+ * account over the last 30 days. The same two-step shape as Google Ads above, and the same limits:
+ * accounts are matched by name or by what the AM pinned, the per-account pull is capped so one
+ * tenant cannot turn a sync into an afternoon, and an account whose insights are refused stores the
+ * refusal rather than a zero -- a client who spent nothing and a client Meta would not answer for
+ * are different facts, and only one of them is worth raising on a call.
+ *
+ * Leads come from the `actions` breakdown rather than a single field, because Meta reports a lead
+ * under whichever mechanism produced it: an on-Facebook lead form, a pixel event on the client's
+ * site, or a grouped on-site conversion. Counting only one of those reported zero leads for clients
+ * who were getting them.
+ */
+const META_LEAD_ACTION_TYPES = new Set([
+  "lead",
+  "leadgen_grouped",
+  "offsite_conversion.fb_pixel_lead",
+  "onsite_conversion.lead_grouped",
+]);
+
+/** Accounts pulled per sync. Beyond this the sync is doing a tenant's reporting, not a refresh. */
+const META_MAX_ACCOUNT_PULLS = 40;
+/** Pages of the ad-account list. 100 per page, so this is 1,000 accounts. */
+const META_MAX_ACCOUNT_PAGES = 10;
+
+function metaLeadsFromActions(actions: unknown): number {
+  if (!Array.isArray(actions)) return 0;
+  return (actions as JsonRecord[]).reduce((total, action) => {
+    const type = String(action.action_type || "");
+    if (!META_LEAD_ACTION_TYPES.has(type)) return total;
+    return total + (Number(action.value) || 0);
+  }, 0);
+}
+
+interface MetaAdAccount {
+  accountId: string;
+  name: string;
+  currencyCode: string;
+  status: string;
+}
+
+async function fetchMetaAdAccounts(baseUrl: string, accessToken: string): Promise<MetaAdAccount[]> {
+  const accounts: MetaAdAccount[] = [];
+  let url: string | undefined = `${baseUrl}/me/adaccounts?fields=account_id,name,currency,account_status&limit=100`;
+
+  for (let page = 0; url && page < META_MAX_ACCOUNT_PAGES; page += 1) {
+    const payload = await fetchJson(url, { headers: getBearerHeaders(accessToken) });
+    const rows = Array.isArray(payload.data) ? (payload.data as JsonRecord[]) : [];
+    for (const row of rows) {
+      const accountId = String(row.account_id || "").trim();
+      if (!accountId) continue;
+      accounts.push({
+        accountId,
+        name: String(row.name || "Unnamed ad account"),
+        currencyCode: String(row.currency || ""),
+        // 1 is ACTIVE; everything else (disabled, closed, pending) is worth keeping and saying,
+        // because "the account is closed" is the answer to "why is there no spend".
+        status: String(row.account_status ?? ""),
+      });
+    }
+    const paging = (payload.paging || {}) as JsonRecord;
+    url = typeof paging.next === "string" ? paging.next : undefined;
+  }
+
+  return accounts;
+}
+
+async function syncMetaAds(context: TenantContext, record: IntegrationConnectionRecord) {
+  const refreshedRecord = await maybeRefreshConnection(context, record);
+  const credentials = getIntegrationCredentials(refreshedRecord);
+  const accessToken = credentials.accessToken;
+  if (!accessToken) {
+    throw new Error("Meta Ads access token is missing -- reconnect Meta Ads on the Integrations screen.");
+  }
+
+  const baseUrl = (
+    credentials.apiBaseUrl ||
+    refreshedRecord.apiBaseUrl ||
+    getIntegrationDefinition("meta-ads").defaultApiBaseUrl ||
+    "https://graph.facebook.com/v20.0"
+  ).replace(/\/$/, "");
+
+  const accounts = await fetchMetaAdAccounts(baseUrl, accessToken);
+
+  /*
+    Matched by name, or by what the AM pinned on the client's mapping screen -- the pin leading, and
+    additive, through the same resolver every other provider now uses. A painting company whose ad
+    account is named after its owner is the ordinary case, not the exception, which is why pinning
+    had to exist for Meta at all.
+  */
+  const clients = await listFirestoreClients(context.tenantId);
+  const availableIds = accounts.map((account) => account.accountId);
+  const matchedPairs = clients
+    .map((client) => {
+      const resolved = resolveAccountIds({
+        availableIds,
+        autoMatchedIds: accounts
+          .filter((account) => namesLikelyMatch(client.name, account.name))
+          .map((account) => account.accountId),
+        pinnedIds: client.integrationMappings?.metaAds || [],
+      });
+      const accountId = resolved.ids[0];
+      const account = accountId ? accounts.find((entry) => entry.accountId === accountId) : undefined;
+      return account ? { client, account, unresolvedPins: resolved.unresolvedPins } : null;
+    })
+    .filter(
+      (value): value is { client: ClientRecord; account: MetaAdAccount; unresolvedPins: string[] } =>
+        Boolean(value),
+    );
+
+  const metaByClient: Record<string, JsonRecord> = {};
+  for (const { client, account } of matchedPairs.slice(0, META_MAX_ACCOUNT_PULLS)) {
+    const identity = {
+      accountId: account.accountId,
+      accountName: account.name,
+      currencyCode: account.currencyCode,
+    };
+    try {
+      const url = new URL(`${baseUrl}/act_${account.accountId}/insights`);
+      url.searchParams.set("fields", "spend,impressions,clicks,ctr,actions");
+      url.searchParams.set("date_preset", "last_30d");
+      url.searchParams.set("level", "account");
+      const payload = await fetchJson(url.toString(), { headers: getBearerHeaders(accessToken) });
+      const row = (Array.isArray(payload.data) ? (payload.data as JsonRecord[])[0] : undefined) || {};
+
+      const spend = Math.round((Number(row.spend) || 0) * 100) / 100;
+      const impressions = Number(row.impressions) || 0;
+      const clicks = Number(row.clicks) || 0;
+      const leads = metaLeadsFromActions(row.actions);
+
+      metaByClient[client.id] = {
+        ...identity,
+        spend,
+        impressions,
+        clicks,
+        // Meta reports ctr as a percentage string already; recomputed so the unit matches Google
+        // Ads above rather than depending on which field happened to be present.
+        ctr: impressions ? Math.round((clicks / impressions) * 10000) / 100 : null,
+        leads,
+        costPerLead: leads ? Math.round((spend / leads) * 100) / 100 : null,
+        conversionRate: clicks ? Math.round((leads / clicks) * 10000) / 100 : null,
+        accountStatus: account.status,
+        periodLabel: "Last 30 days",
+      };
+    } catch (error) {
+      /*
+        The refusal, stored as the refusal. An empty insights response for a paused account is a
+        real zero and reads as one above; a token without ads_read on this account, or an account
+        the business has not granted, is a thing somebody has to go and fix, and writing it as zero
+        spend would put "no paid social activity" on a client's brief instead.
+      */
+      metaByClient[client.id] = {
+        ...identity,
+        error: error instanceof Error ? error.message : "Meta Ads insights unavailable",
+      };
+    }
+  }
+
+  const unresolved = matchedPairs.flatMap((pair) => pair.unresolvedPins);
+  const counts = createEmptyCounts();
+  counts.fetched = accounts.length;
+  counts.created = Object.keys(metaByClient).length;
+
+  return {
+    summary: [
+      `${formatSummaryCount("Meta ad account", accounts.length)} listed`,
+      `${formatSummaryCount("account", matchedPairs.length)} matched to MTOS clients`,
+      `metrics captured for ${Object.keys(metaByClient).length}`,
+      ...(unresolved.length ? [`${unresolved.length} pinned account(s) not visible to this token`] : []),
+    ].join(", "),
+    counts,
+    snapshotPayload: {
+      accountIndex: accounts,
+      metaByClient,
+    },
+  } satisfies SyncExecutionResult;
+}
+
 async function runProviderSync(
   context: TenantContext,
   providerId: IntegrationProviderId,
@@ -3152,6 +3341,8 @@ async function runProviderSync(
       return syncGoHighLevel(context, record, origin);
     case "google-lsa":
       return syncGoogleLsa(context, record, origin);
+    case "meta-ads":
+      return syncMetaAds(context, record);
     default:
       throw new Error(`${getIntegrationDefinition(providerId).name} sync is not implemented in this slice`);
   }
@@ -3883,15 +4074,24 @@ export async function refreshGhlLeadsForClient(
   const pins = (await readClientPins(context.tenantId, clientId).catch(
     () => ({}) as NonNullable<ClientRecord["integrationMappings"]>,
   )).gohighlevel || [];
-  const pinned = selectPinnedGhlLocationId(pins, locationIndex);
+  const resolvedGhl = resolveGhlLocationId({
+    pinnedIds: pins,
+    locationIndex,
+    ...(existing?.locationId ? { storedLocationId: String(existing.locationId) } : {}),
+    ...(byName?.id ? { nameMatchedId: String(byName.id) } : {}),
+  });
 
-  const locationId = String(pinned || existing?.locationId || byName?.id || "");
+  const locationId = resolvedGhl.locationId;
   if (!locationId) {
     return {
       status: "skipped",
-      detail: pins.length
-        ? `The GoHighLevel sub-account pinned to "${clientName}" is not one this agency connection can see, so there were no leads to pull. Re-pin it from the list on the mapping screen.`
-        : `No GoHighLevel sub-account matches "${clientName}", so there were no leads to pull. Pin one on this client's integration mapping.`,
+      detail:
+        unresolvedPinNote({
+          thing: "GoHighLevel sub-account",
+          unresolvedPins: resolvedGhl.unresolvedPins,
+          syncLabel: "GoHighLevel",
+        }) ||
+        `No GoHighLevel sub-account matches "${clientName}", so there were no leads to pull. Pin one on this client's integration mapping.`,
     };
   }
 
@@ -4132,21 +4332,50 @@ export async function refreshGbpInsightsForClient(
   const allPins = await readClientPins(context.tenantId, clientId).catch(
     () => ({}) as NonNullable<ClientRecord["integrationMappings"]>,
   );
-  const pins = new Set<string>(allPins.googleBusinessProfile || []);
+  const pinnedIds = allPins.googleBusinessProfile || [];
   const discovered = Array.isArray(payload.locations) ? (payload.locations as JsonRecord[]) : [];
-  const pinnedLocations = selectPinnedGbpLocations([...pins], discovered, autoMatched);
+  const mapping = resolveGbpMapping({ discovered, stored: autoMatched, pinnedIds });
   // Pins lead: `targets` below is capped, and the one location an AM asked for by hand must never
   // be the one that falls off the end of it.
-  const matched = [...pinnedLocations, ...autoMatched];
+  const matched = mapping.locations;
 
   if (!matched.length) {
     return {
       status: "skipped",
       locations: 0,
-      detail: pins.size
-        ? "The listing pinned to this client is not in the stored Business Profile snapshot, so there is nothing to re-read. Run a Business Profile sync."
-        : "No Business Profile location is mapped to this client, so there is nothing to re-read.",
+      detail:
+        unresolvedPinNote({
+          thing: "Business Profile listing",
+          unresolvedPins: mapping.unresolvedPins,
+          syncLabel: "Business Profile",
+        }) || "No Business Profile location is mapped to this client, so there is nothing to re-read.",
     };
+  }
+
+  /*
+    Write the mapping before asking Google anything.
+
+    This is the fix for the second report of the same bug on 10 November 2026. The pin was being
+    honoured here, correctly, and then applied to the snapshot only by the write at the END of the
+    live re-read -- so an expired token, a refused scope or a quota ceiling anywhere in the block
+    below returned `failed`, wrote nothing, and left `locationsByClient[clientId]` exactly as
+    empty as it was. Every screen and service reads that map, so the pin vanished and the brief
+    went back to telling the AM to pin the listing they had pinned.
+
+    The mapping is a fact about this client that the AM stated; the performance numbers are
+    something Google may or may not hand over. They are no longer stored or lost together.
+  */
+  if (mapping.pinned.length) {
+    await reference
+      .set(
+        {
+          payload: dropUndefinedDeep({
+            locationsByClient: { ...locationsByClient, [clientId]: matched.map(toSlimGbpLocation) },
+          }),
+        },
+        { merge: true },
+      )
+      .catch(() => undefined);
   }
 
   try {

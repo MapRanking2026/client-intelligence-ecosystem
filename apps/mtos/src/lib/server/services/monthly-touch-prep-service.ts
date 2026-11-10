@@ -4,6 +4,7 @@ import { z } from "zod";
 import type { IntegrationSnapshotRecord } from "@/src/lib/contracts/integration-sync";
 import type { TenantContext } from "@/src/lib/contracts/mtos";
 import { normalizePrepBrief, type PrepBrief } from "@/src/lib/contracts/prep-brief";
+import { gbpLocationId, resolveGbpMapping } from "@/src/lib/contracts/client-mappings";
 import type {
   AdsPerformancePack,
   BusinessScorecard,
@@ -273,6 +274,7 @@ const providerLabels: Record<string, string> = {
   gohighlevel: "GoHighLevel",
   "google-ads": "Google Ads",
   "google-lsa": "Google Local Services Ads",
+  "meta-ads": "Meta Ads",
 };
 
 const LEAD_QUALITY_QUESTIONS = [
@@ -482,17 +484,32 @@ function extractCheckinBusinesses(payload: JsonRecord | undefined, clientId: str
   }));
 }
 
-function extractGbpPerformanceRows(payload: JsonRecord | undefined, clientId: string) {
+function extractGbpPerformanceRows(
+  payload: JsonRecord | undefined,
+  clientId: string,
+  /*
+    The listings this AM pinned to the client by hand.
+
+    Resolved here rather than taken from `locationsByClient`, which is only ever as good as the
+    last successful sync or refresh. A pin used to reach this function solely by having been
+    written into that map, so a Google call that failed on the way in -- an expired token, a quota
+    ceiling, a refused scope -- threw the pin away and the brief told the AM to go and pin the
+    listing they had already pinned. See `contracts/client-mappings`.
+  */
+  pinnedIds: string[] = [],
+) {
   if (!payload) {
     return [];
   }
 
-  const locationsByClient = (payload.locationsByClient || {}) as JsonRecord;
-  const matchedLocations = Array.isArray(locationsByClient[clientId])
-    ? (locationsByClient[clientId] as JsonRecord[])
-    : [];
   const matchedLocationIds = new Set(
-    matchedLocations.map((location) => String(location.name || "").split("/").filter(Boolean).pop()),
+    resolveGbpMapping({
+      discovered: Array.isArray(payload.locations) ? (payload.locations as JsonRecord[]) : [],
+      stored: Array.isArray((payload.locationsByClient as JsonRecord)?.[clientId])
+        ? ((payload.locationsByClient as JsonRecord)[clientId] as JsonRecord[])
+        : [],
+      pinnedIds,
+    }).locations.map(gbpLocationId),
   );
 
   const rows = Array.isArray(payload.performance) ? (payload.performance as JsonRecord[]) : [];
@@ -525,17 +542,24 @@ function extractGbpPerformanceRows(payload: JsonRecord | undefined, clientId: st
  * client. Shape-checked field by field because the snapshot is whatever the last sync wrote --
  * a sync from before listing data was pulled simply yields nothing here.
  */
-function extractGbpProfileInsights(payload: JsonRecord | undefined, clientId: string): GbpProfileInsight[] {
+function extractGbpProfileInsights(
+  payload: JsonRecord | undefined,
+  clientId: string,
+  /** The pinned listings, for the same reason as `extractGbpPerformanceRows` above. */
+  pinnedIds: string[] = [],
+): GbpProfileInsight[] {
   if (!payload) {
     return [];
   }
 
-  const locationsByClient = (payload.locationsByClient || {}) as JsonRecord;
-  const matchedLocations = Array.isArray(locationsByClient[clientId])
-    ? (locationsByClient[clientId] as JsonRecord[])
-    : [];
   const matchedLocationIds = new Set(
-    matchedLocations.map((location) => String(location.name || "").split("/").filter(Boolean).pop()),
+    resolveGbpMapping({
+      discovered: Array.isArray(payload.locations) ? (payload.locations as JsonRecord[]) : [],
+      stored: Array.isArray((payload.locationsByClient as JsonRecord)?.[clientId])
+        ? ((payload.locationsByClient as JsonRecord)[clientId] as JsonRecord[])
+        : [],
+      pinnedIds,
+    }).locations.map(gbpLocationId),
   );
 
   const rows = Array.isArray(payload.profileInsights) ? (payload.profileInsights as JsonRecord[]) : [];
@@ -1007,6 +1031,10 @@ function buildAdsPerformanceFromSnapshots(rawSnapshots: Map<string, JsonRecord>,
   const adsByClient = (googleAdsSnapshot?.adsByClient || {}) as JsonRecord;
   const googleAds = (adsByClient[clientId] || null) as JsonRecord | null;
 
+  const metaAdsSnapshot = rawSnapshots.get("meta-ads");
+  const metaByClient = (metaAdsSnapshot?.metaByClient || {}) as JsonRecord;
+  const meta = (metaByClient[clientId] || null) as JsonRecord | null;
+
   const lsaSnapshot = rawSnapshots.get("google-lsa");
   const lsaByClient = (lsaSnapshot?.lsaByClient || {}) as JsonRecord;
   const lsaRaw = (lsaByClient[clientId] || null) as JsonRecord | null;
@@ -1046,15 +1074,32 @@ function buildAdsPerformanceFromSnapshots(rawSnapshots: Map<string, JsonRecord>,
             : "Connect Google Local Services Ads and link this client's LSA account to the agency manager account to pull charged leads and cost per lead.",
       lsa: lsaDetail,
     },
+    /*
+      Meta, read from its snapshot like the other two.
+
+      This was a hard-coded `connected: false` with the words "Connect Meta Ads to review creative
+      performance" -- on a tenant where Meta Ads was connected, had a long-lived token and showed
+      green on the Integrations screen. It read as not-connected because nothing had ever synced
+      it: `runProviderSync` had no Meta branch and threw "not implemented in this slice". The
+      owner's report, 10 November 2026: "it's saying that it's connected, but it can't pull
+      anything for the account."
+    */
     {
       channel: "Meta Ads",
-      connected: false,
-      spend: null,
-      leads: null,
-      costPerLead: null,
-      ctr: null,
-      conversionRate: null,
-      benchmarkNote: "Connect Meta Ads to review creative performance and CPL once campaigns are active for this client.",
+      connected: Boolean(meta && !meta.error),
+      spend: meta ? coerceOptionalNumber(meta.spend) : null,
+      leads: meta ? coerceOptionalNumber(meta.leads) : null,
+      costPerLead: meta ? coerceOptionalNumber(meta.costPerLead) : null,
+      ctr: meta ? coerceOptionalNumber(meta.ctr) : null,
+      conversionRate: meta ? coerceOptionalNumber(meta.conversionRate) : null,
+      benchmarkNote:
+        meta && typeof meta.error === "string"
+          ? meta.error
+          : meta
+            ? `${String(meta.accountName || "This Meta ad account")} over the last 30 days. Read Meta's cost per lead against Google Ads and LSA before moving budget — paid social usually buys cheaper leads that take longer to close.`
+            : metaAdsSnapshot
+              ? "Meta Ads is connected and synced, but no ad account matches this client. Pin the right ad account on this client's integration mapping, then re-sync."
+              : "Connect Meta Ads and run a Meta Ads sync to review creative performance and CPL for this client.",
     },
   ];
 }
@@ -1166,6 +1211,14 @@ export function describeGbpPerformanceGap(
   rawSnapshots: Map<string, JsonRecord>,
   clientId: string,
   clientName: string,
+  /*
+    The pins, so this sentence can never again tell an AM to pin a listing they have pinned.
+
+    That is what it did, twice in one day, for Belza Painting and Resurfacing: the pin was in force
+    only if a write had carried it into `locationsByClient`, and when the live refresh behind that
+    write failed the explainer fell back to "none of them matches this client by name".
+  */
+  pinnedIds: string[] = [],
 ): string {
   const snapshot = rawSnapshots.get("google-business-profile");
   if (!snapshot) {
@@ -1173,10 +1226,29 @@ export function describeGbpPerformanceGap(
   }
 
   const locationsByClient = (snapshot.locationsByClient || {}) as JsonRecord;
-  const matched = Array.isArray(locationsByClient[clientId]) ? (locationsByClient[clientId] as JsonRecord[]) : [];
   const discovered = Array.isArray(snapshot.locations) ? (snapshot.locations as JsonRecord[]) : [];
+  const mapping = resolveGbpMapping({
+    discovered,
+    stored: Array.isArray(locationsByClient[clientId]) ? (locationsByClient[clientId] as JsonRecord[]) : [],
+    pinnedIds,
+  });
+  const matched = mapping.locations;
 
   if (!matched.length) {
+    // A pin that names a listing no sync has seen is a different problem with a different fix, and
+    // telling this AM to "pin the right listing" when they already did is what made the old
+    // sentence useless.
+    if (mapping.unresolvedPins.length) {
+      return `No Google Business Profile numbers for this client: the ${
+        mapping.unresolvedPins.length === 1 ? "listing" : "listings"
+      } pinned to it (${mapping.unresolvedPins.join(", ")}) ${
+        mapping.unresolvedPins.length === 1 ? "is" : "are"
+      } not among the ${discovered.length} location${
+        discovered.length === 1 ? "" : "s"
+      } the last Business Profile sync discovered, so ${
+        mapping.unresolvedPins.length === 1 ? "it" : "they"
+      } could not be read. Run a Business Profile sync on the Integrations screen, then re-pin from the list on this client's mapping screen.`;
+    }
     return `No Google Business Profile numbers for this client: the sync reached ${discovered.length} location${
       discovered.length === 1 ? "" : "s"
     }, but none of them matches "${clientName}" by name. Pin the right listing on this client's integration mapping, or correct the listing title, then re-sync.`;
@@ -1935,8 +2007,19 @@ async function buildPrepPack(
   rawSnapshots: Map<string, JsonRecord>,
 ) {
   const snapshotMatches = extractMatchedBusinesses(rawSnapshots.get("rank-tracker"), client.id);
-  const gbpPerformance = extractGbpPerformanceRows(rawSnapshots.get("google-business-profile"), client.id);
-  const gbpProfiles = extractGbpProfileInsights(rawSnapshots.get("google-business-profile"), client.id);
+  // The pins travel with every Business Profile read below, so a listing pinned on the mapping
+  // screen is in force for this preparation whether or not any sync or refresh has run since.
+  const gbpPins = client.integrationMappings?.googleBusinessProfile || [];
+  const gbpPerformance = extractGbpPerformanceRows(
+    rawSnapshots.get("google-business-profile"),
+    client.id,
+    gbpPins,
+  );
+  const gbpProfiles = extractGbpProfileInsights(
+    rawSnapshots.get("google-business-profile"),
+    client.id,
+    gbpPins,
+  );
   const snapshotCheckins = extractCheckinBusinesses(rawSnapshots.get("map-checkins"), client.id);
   // Two different vendors, no shared data: running them back to back cost the sum of the slower
   // one and ClickUp for no reason. Live pull of the client's ClickUp business folder (Client's
@@ -1964,7 +2047,7 @@ async function buildPrepPack(
     heatmapGrids,
     checkinBusinesses,
     client.name,
-    describeGbpPerformanceGap(rawSnapshots, client.id, client.name),
+    describeGbpPerformanceGap(rawSnapshots, client.id, client.name, gbpPins),
   );
   const adsPerformance = buildAdsPerformanceFromSnapshots(rawSnapshots, client.id);
   const strategicAction = buildStrategicActionStatus(client);

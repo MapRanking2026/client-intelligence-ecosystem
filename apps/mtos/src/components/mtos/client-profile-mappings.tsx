@@ -16,7 +16,8 @@ interface ProviderMappingView {
     | "googleBusinessProfile"
     | "gohighlevel"
     | "googleAds"
-    | "googleLsa";
+    | "googleLsa"
+    | "metaAds";
   label: string;
   note?: string;
   candidates: MappingCandidate[];
@@ -219,10 +220,21 @@ export function ClientProfileMappings({ clientId, providers }: ClientProfileMapp
           {isPending ? <LoaderCircle className="h-4 w-4 animate-spin" /> : saved ? <Check className="h-4 w-4" /> : null}
           {saved && !isDirty ? "Saved" : "Save mappings"}
         </button>
+{/*
+          What a pin does, now that it is read rather than inherited.
+
+          This footer used to say Business Profile pins "apply on the next prep refresh", which was
+          true and was the bug: the refresh applied a pin by writing it into the shared snapshot, so
+          a Google call that failed on the way in threw the pin away and the brief went back to
+          telling the AM to pin a listing they had pinned. Every reader resolves pins for itself
+          now, so a saved pin is in force for the next read of any screen -- which is what this
+          footer can finally say without a caveat.
+        */}
         <p className="text-xs text-slate-500">
-          Automatic matches stay in place -- manual pins are added on top. Rank Tracker, Map Check-Ins, Google Business
-          Profile and GoHighLevel pins apply on the next prep refresh, which reads the pinned profile live. Google Ads
-          and Local Services Ads pins apply after their next sync.
+          Automatic matches stay in place -- manual pins are added on top, and a pin always leads. Rank Tracker, Map
+          Check-Ins, Google Business Profile and GoHighLevel pins are in force as soon as you save: the next
+          preparation reads them whether or not a sync has run since. Google Ads, Local Services and Meta Ads pins are
+          read by their own next sync, because those three pull their numbers per account rather than per client.
         </p>
       </div>
       {error ? <p className="text-sm text-rose-300">{error}</p> : null}

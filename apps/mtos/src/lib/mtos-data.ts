@@ -521,6 +521,7 @@ export interface ClientRecord {
     gohighlevel?: string[];
     googleAds?: string[];
     googleLsa?: string[];
+    metaAds?: string[];
   };
   participationChecklist?: {
     offersProvided: boolean;

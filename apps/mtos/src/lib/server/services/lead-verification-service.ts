@@ -17,6 +17,7 @@ import type {
 } from "@/src/lib/mtos-data";
 import { LEAD_CHANNEL_LABEL } from "@/src/lib/mtos-data";
 import { CALL_LABEL_LABEL, automaticCallLabel } from "@/src/lib/contracts/call-labels";
+import { gbpLocationId, resolveGbpMapping } from "@/src/lib/contracts/client-mappings";
 import { getMtosDataSource } from "@/src/lib/server/data/seed-mtos-data-source";
 import { getFirebaseAdminDb } from "@/src/lib/server/firebase/admin";
 import { withQuotaFallback } from "@/src/lib/server/firebase/quota";
@@ -477,10 +478,11 @@ export async function runLeadVerification(
   // fetchGhlClientLeadsAndCalls, so a refresh is inherently fresh.
   void options.forceRefresh;
 
-  const [crmPayload, googleAdsPayload, gbpPayload] = await Promise.all([
+  const [crmPayload, googleAdsPayload, gbpPayload, metaAdsPayload] = await Promise.all([
     loadSnapshotPayload(db, context.tenantId, "gohighlevel"),
     loadSnapshotPayload(db, context.tenantId, "google-ads"),
     loadSnapshotPayload(db, context.tenantId, "google-business-profile"),
+    loadSnapshotPayload(db, context.tenantId, "meta-ads"),
   ]);
 
   const leadsByClient = (crmPayload?.leadsByClient || {}) as JsonRecord;
@@ -697,8 +699,14 @@ export async function runLeadVerification(
 
   const platformCounts: Partial<Record<LeadChannel, { count: number | null; label: string }>> = {
     google_ads: { count: googleAdsConversions(googleAdsPayload, clientId), label: "Google Ads conversions" },
-    gbp_call: { count: sumGbpCalls(gbpPayload, clientId), label: "GBP calls" },
-    meta_ads: { count: null, label: "Meta Ads (not connected)" },
+    // The pins travel with the read, so a listing pinned minutes ago reconciles now.
+    gbp_call: {
+      count: sumGbpCalls(gbpPayload, clientId, client.integrationMappings?.googleBusinessProfile || []),
+      label: "GBP calls",
+    },
+    // Meta's own lead count for the period, from its snapshot, so paid social reconciles against
+    // GoHighLevel like the other two channels instead of sitting permanently at "not connected".
+    meta_ads: metaLeadCount(metaAdsPayload, clientId),
   };
 
   /*
@@ -970,6 +978,30 @@ function emptyReadyReview(clientId: string): LeadVerificationReview {
   };
 }
 
+/**
+ * Meta's own lead count for this client, and what to call the row when there isn't one.
+ *
+ * Three states rather than two, because they mean different things to an AM reconciling leads: no
+ * Meta snapshot at all, a snapshot with no ad account for this client, and an account Meta refused
+ * to report on. All three used to be the single hard-coded label "Meta Ads (not connected)", on a
+ * tenant where Meta was connected.
+ */
+function metaLeadCount(
+  payload: JsonRecord | null,
+  clientId: string,
+): { count: number | null; label: string } {
+  if (!payload) return { count: null, label: "Meta Ads (never synced)" };
+  const byClient = (payload.metaByClient || {}) as JsonRecord;
+  const meta = (byClient[clientId] || null) as JsonRecord | null;
+  if (!meta) return { count: null, label: "Meta Ads (no ad account mapped to this client)" };
+  if (typeof meta.error === "string") return { count: null, label: "Meta Ads (Meta refused this account)" };
+  const leads = Number(meta.leads);
+  return {
+    count: Number.isFinite(leads) ? Math.round(leads) : null,
+    label: "Meta Ads leads",
+  };
+}
+
 function googleAdsConversions(payload: JsonRecord | null, clientId: string): number | null {
   const adsByClient = (payload?.adsByClient || {}) as JsonRecord;
   const ads = (adsByClient[clientId] || null) as JsonRecord | null;
@@ -980,13 +1012,29 @@ function googleAdsConversions(payload: JsonRecord | null, clientId: string): num
   return Number.isFinite(conversions) ? Math.round(conversions) : null;
 }
 
-function sumGbpCalls(payload: JsonRecord | null, clientId: string): number | null {
+function sumGbpCalls(
+  payload: JsonRecord | null,
+  clientId: string,
+  /*
+    The listings pinned to this client.
+
+    Resolved here rather than read out of `locationsByClient`, which only holds what the last
+    successful sync or refresh wrote. Reconciling a client's calls against a Business Profile the
+    AM pinned half an hour ago is exactly the case that used to come back "no data matched".
+  */
+  pinnedIds: string[] = [],
+): number | null {
   if (!payload) {
     return null;
   }
   const locationsByClient = (payload.locationsByClient || {}) as JsonRecord;
-  const matched = Array.isArray(locationsByClient[clientId]) ? (locationsByClient[clientId] as JsonRecord[]) : [];
-  const ids = new Set(matched.map((location) => str(location.name).split("/").filter(Boolean).pop()));
+  const ids = new Set(
+    resolveGbpMapping({
+      discovered: Array.isArray(payload.locations) ? (payload.locations as JsonRecord[]) : [],
+      stored: Array.isArray(locationsByClient[clientId]) ? (locationsByClient[clientId] as JsonRecord[]) : [],
+      pinnedIds,
+    }).locations.map(gbpLocationId),
+  );
   const rows = Array.isArray(payload.performance) ? (payload.performance as JsonRecord[]) : [];
   const matchedRows = rows.filter((row) => !row.error && ids.has(str(row.locationId)));
   if (!matchedRows.length) {

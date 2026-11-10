@@ -129,7 +129,7 @@ export async function getClientMappingView(
     providerId: "googleBusinessProfile",
     label: "Google Business Profile",
     note: gbpLocations.length
-      ? "Performance data for newly pinned locations appears after the next GBP sync."
+      ? "A pinned listing is read on the next preparation -- its performance and listing health are pulled live for this client."
       : "No GBP snapshot yet -- run a GBP sync in Settings > Integrations to load candidates.",
     candidates: gbpLocations.map((location) => ({
       id: String(location.name || "").split("/").filter(Boolean).pop() || "",
@@ -148,7 +148,7 @@ export async function getClientMappingView(
     providerId: "gohighlevel",
     label: "GoHighLevel",
     note: ghlLocations.length
-      ? "Lead data for newly pinned locations appears after the next GoHighLevel sync."
+      ? "A pinned sub-account is read on the next preparation, ahead of any automatic match -- its leads are pulled live for this client."
       : "No GoHighLevel location list yet -- run a GoHighLevel sync in Settings > Integrations to load candidates.",
     candidates: ghlLocations.map((location) => ({
       id: String(location.id || ""),

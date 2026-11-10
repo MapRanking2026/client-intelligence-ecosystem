@@ -661,6 +661,73 @@ async function listFirestoreClients(tenantId: string) {
   return snapshot.docs.map((doc) => doc.data() as ClientRecord);
 }
 
+/**
+ * The listings, sub-accounts and ad accounts an account manager has pinned to one client by hand,
+ * read straight from the client record.
+ *
+ * One document, because the per-client refreshes below run on every preparation and a
+ * tenant-wide read to find one client's pins would be the most expensive line in them.
+ *
+ * These pins exist because automatic name matching cannot win every time: "Belza Painting and
+ * Resurfacing" in MTOS against "Belza Painting & Resurfacing" in a vendor's account, a listing
+ * whose title carries a city the client's name does not, a sub-account named after the owner. The
+ * mapping screen is how the AM settles it, and until 10 November 2026 pinning a Business Profile
+ * location or a GoHighLevel sub-account there did nothing until the next tenant-wide sync happened
+ * to run -- which, for 227 locations and 132 sub-accounts, is not something an AM can wait for
+ * half an hour before a call. The refreshes now read the pin themselves.
+ */
+async function readClientPins(
+  tenantId: string,
+  clientId: string,
+): Promise<NonNullable<ClientRecord["integrationMappings"]>> {
+  const db = ensureFirestore();
+  const document = await db.doc(clientPath(tenantId, clientId)).get();
+  const client = document.data() as ClientRecord | undefined;
+  return client?.integrationMappings || {};
+}
+
+/** Whether a pinned id names this location, by its id or its full `accounts/x/locations/y` name. */
+function pinMatchesLocation(pins: Set<string>, location: JsonRecord): boolean {
+  const fullName = String(location.name || "");
+  const locationId = fullName.split("/").filter(Boolean).pop() || "";
+  return (Boolean(locationId) && pins.has(locationId)) || (Boolean(fullName) && pins.has(fullName));
+}
+
+/**
+ * The Business Profile listings an AM pinned that the automatic match did not already find.
+ *
+ * Pure, and exported, so the rule can be checked without a database, a Google token or a sync:
+ * see `scripts/check-prep-workflow.ts`. A pin naming a listing the snapshot has never seen is
+ * dropped here and reported by the caller -- it cannot be read, and inventing a location record
+ * for it would put an empty listing on the brief.
+ */
+export function selectPinnedGbpLocations(
+  pinnedIds: string[],
+  discovered: JsonRecord[],
+  alreadyMatched: JsonRecord[],
+): JsonRecord[] {
+  const pins = new Set(pinnedIds.filter(Boolean));
+  if (!pins.size) return [];
+  const idOf = (location: JsonRecord) => String(location.name || "").split("/").filter(Boolean).pop() || "";
+  const already = new Set(alreadyMatched.map(idOf));
+  return discovered.filter((location) => pinMatchesLocation(pins, location) && !already.has(idOf(location)));
+}
+
+/**
+ * The GoHighLevel sub-account an AM pinned, when the agency connection can actually see it.
+ *
+ * Pure and exported for the same reason. Returns undefined for a pin this connection cannot
+ * reach, which leaves the caller on its stored match or its name match rather than on nothing.
+ */
+export function selectPinnedGhlLocationId(
+  pinnedIds: string[],
+  locationIndex: JsonRecord[],
+): string | undefined {
+  return pinnedIds
+    .filter(Boolean)
+    .find((id) => locationIndex.some((entry) => String(entry.id || "") === id));
+}
+
 function pickClickUpOwner(task: ClickUpTask) {
   const assignee = task.assignees?.[0];
   return assignee?.username || assignee?.email || "Unassigned";
@@ -3798,11 +3865,33 @@ export async function refreshGhlLeadsForClient(
   const existing = (leadsByClient[clientId] || null) as JsonRecord | null;
   const locationIndex = Array.isArray(payload.locationIndex) ? (payload.locationIndex as JsonRecord[]) : [];
   const byName = locationIndex.find((entry) => namesLikelyMatch(clientName, String(entry.name || "")));
-  const locationId = String(existing?.locationId || byName?.id || "");
+
+  /*
+    The pinned sub-account wins, and it counts from now rather than from the next agency sync.
+
+    This function already told the AM to "pin one on this client's integration mapping" and then
+    never read the pin -- it was only honoured inside the tenant-wide sync, which walks 132
+    sub-accounts and pulls leads for a rotating slice of them. So the instruction in the error
+    message was one the product did not follow until some later night. Same defect as the
+    Business Profile refresh above, reported together on 10 November 2026.
+
+    The pin is tried FIRST, ahead of the stored match: an AM pins a sub-account precisely when
+    the automatic one is wrong, and a pin that loses to the match it was meant to correct is no
+    pin at all. A pin naming a sub-account this agency cannot see is ignored, with the name match
+    still behind it.
+  */
+  const pins = (await readClientPins(context.tenantId, clientId).catch(
+    () => ({}) as NonNullable<ClientRecord["integrationMappings"]>,
+  )).gohighlevel || [];
+  const pinned = selectPinnedGhlLocationId(pins, locationIndex);
+
+  const locationId = String(pinned || existing?.locationId || byName?.id || "");
   if (!locationId) {
     return {
       status: "skipped",
-      detail: `No GoHighLevel sub-account matches "${clientName}", so there were no leads to pull. Pin one on this client's integration mapping.`,
+      detail: pins.length
+        ? `The GoHighLevel sub-account pinned to "${clientName}" is not one this agency connection can see, so there were no leads to pull. Re-pin it from the list on the mapping screen.`
+        : `No GoHighLevel sub-account matches "${clientName}", so there were no leads to pull. Pin one on this client's integration mapping.`,
     };
   }
 
@@ -3817,7 +3906,10 @@ export async function refreshGhlLeadsForClient(
       return { status: "failed", detail: `GoHighLevel refused this client's leads: ${counts.errorMessage}` };
     }
 
-    const locationName = String(existing?.locationName || byName?.name || clientName);
+    // Named after the sub-account actually read, which is not the stored one when a pin replaced
+    // it -- otherwise the brief would show the pinned account's leads under the old name.
+    const readEntry = locationIndex.find((entry) => String(entry.id || "") === locationId);
+    const locationName = String(readEntry?.name || existing?.locationName || byName?.name || clientName);
     await reference.set(
       {
         payload: dropUndefinedDeep({
@@ -4019,14 +4111,41 @@ export async function refreshGbpInsightsForClient(
 
   const payload = stored.payload as JsonRecord;
   const locationsByClient = (payload.locationsByClient || {}) as JsonRecord;
-  const matched = Array.isArray(locationsByClient[clientId])
+  const autoMatched = Array.isArray(locationsByClient[clientId])
     ? (locationsByClient[clientId] as JsonRecord[])
     : [];
+
+  /*
+    A location the AM pinned by hand counts from now, not from the next tenant-wide sync.
+
+    The pin is stored on the client record and was only ever read inside the full sync, which walks
+    every account in the tenant -- so an AM who pinned the right listing on the mapping screen, saw
+    it go green, and re-ran the preparation still got "none of them matches this client by name".
+    Reported by the owner on 10 November 2026 for Belza Painting and Resurfacing, whose listing was
+    pinned and whose brief still said no listing matched. The mapping screen promised "GBP pins
+    apply after their next sync" and that was true, which is the problem: a pin is an instruction,
+    and it has to be in force for the preparation the AM is about to run.
+
+    Additive, exactly like the sync: the pin is added to whatever matched automatically, never
+    instead of it.
+  */
+  const allPins = await readClientPins(context.tenantId, clientId).catch(
+    () => ({}) as NonNullable<ClientRecord["integrationMappings"]>,
+  );
+  const pins = new Set<string>(allPins.googleBusinessProfile || []);
+  const discovered = Array.isArray(payload.locations) ? (payload.locations as JsonRecord[]) : [];
+  const pinnedLocations = selectPinnedGbpLocations([...pins], discovered, autoMatched);
+  // Pins lead: `targets` below is capped, and the one location an AM asked for by hand must never
+  // be the one that falls off the end of it.
+  const matched = [...pinnedLocations, ...autoMatched];
+
   if (!matched.length) {
     return {
       status: "skipped",
       locations: 0,
-      detail: "No Business Profile location is mapped to this client, so there is nothing to re-read.",
+      detail: pins.size
+        ? "The listing pinned to this client is not in the stored Business Profile snapshot, so there is nothing to re-read. Run a Business Profile sync."
+        : "No Business Profile location is mapped to this client, so there is nothing to re-read.",
     };
   }
 
@@ -4046,6 +4165,10 @@ export async function refreshGbpInsightsForClient(
     // preparation into a tenant-sized sync.
     const targets = matched.slice(0, GBP_CLIENT_REFRESH_LOCATION_LIMIT);
     const resolved = await attachAccountResourceNames(accessToken, targets);
+    // Everything matched beyond the cap is carried through untouched. The write below replaces
+    // this client's whole mapping, so without this a client with five locations would come out of
+    // a refresh with four until the next full sync put the fifth back.
+    const beyondTheCap = matched.slice(GBP_CLIENT_REFRESH_LOCATION_LIMIT);
 
     const performance = Array.isArray(payload.performance) ? [...(payload.performance as JsonRecord[])] : [];
     const profileInsights = Array.isArray(payload.profileInsights)
@@ -4104,7 +4227,10 @@ export async function refreshGbpInsightsForClient(
           performance,
           profileInsights,
           // Keep the resolved account ids, so the next refresh skips the account walk entirely.
-          locationsByClient: { ...locationsByClient, [clientId]: resolved.map(toSlimGbpLocation) },
+          locationsByClient: {
+            ...locationsByClient,
+            [clientId]: [...resolved, ...beyondTheCap].map(toSlimGbpLocation),
+          },
         }),
       },
       { merge: true },

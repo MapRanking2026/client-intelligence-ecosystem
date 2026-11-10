@@ -45,6 +45,7 @@ import {
 import { isStageOpen, recomputeGates } from "@/src/lib/server/services/prep-workflow-rules";
 import { matchCalendarEventsToClients, selectMeetingForTouch } from "@/src/lib/server/calendar-touch-matching";
 import { buildGbpCompleteness } from "@/src/lib/server/gbp-listing-completeness";
+import { selectPinnedGbpLocations, selectPinnedGhlLocationId } from "@/src/lib/server/integration-sync";
 import { describeGbpPerformanceGap } from "@/src/lib/server/services/monthly-touch-prep-service";
 
 /**
@@ -1137,6 +1138,70 @@ scenario("A missing Business Profile number says WHICH thing is missing");
   check("the four causes are four different sentences", new Set([gap(), noMatch, refused, notReached]).size === 4);
 }
 
+scenario("A listing the AM pinned by hand counts from the next preparation");
+{
+  /*
+    Reported by the owner on 10 November 2026: he pinned Belza Painting and Resurfacing's Business
+    Profile listing on the client mapping screen, saw it go green, re-ran the preparation, and the
+    brief still said none of the 227 locations matched this client by name.
+
+    It was true. The pin lived on the client record and was only ever read inside the tenant-wide
+    sync; the per-client refresh that runs on every preparation looked solely at the mapping the
+    LAST sync had computed. The mapping screen even said so -- "GBP and GoHighLevel pins apply
+    after their next sync" -- which is not a thing an AM can wait for half an hour before a call.
+
+    These are the pure halves of the two refreshes: which listing or sub-account a pin resolves to.
+  */
+  const discovered = [
+    { name: "accounts/7/locations/111", title: "Belza Painting & Resurfacing" },
+    { name: "accounts/7/locations/222", title: "Someone Else Painting" },
+  ];
+
+  check(
+    "a pinned listing is picked up even though the name never matched",
+    selectPinnedGbpLocations(["111"], discovered, []).length === 1,
+  );
+  check(
+    "and it is the one that was pinned",
+    selectPinnedGbpLocations(["111"], discovered, [])[0]?.title === "Belza Painting & Resurfacing",
+  );
+  check(
+    "a full resource name pins just as well as a bare id",
+    selectPinnedGbpLocations(["accounts/7/locations/111"], discovered, []).length === 1,
+  );
+  // Additive, like the sync: a pin adds to the automatic matches, it does not replace them, and it
+  // must not duplicate one that was already found.
+  check(
+    "a pin for a listing already matched automatically adds nothing",
+    selectPinnedGbpLocations(["111"], discovered, [discovered[0]]).length === 0,
+  );
+  check("no pins means no extra listings", selectPinnedGbpLocations([], discovered, []).length === 0);
+  // A pin naming something the snapshot has never seen cannot be read. Dropping it is the honest
+  // outcome -- inventing a location record for it would put an empty listing on the brief.
+  check(
+    "a pin for a listing nobody has ever synced is dropped",
+    selectPinnedGbpLocations(["999"], discovered, []).length === 0,
+  );
+
+  const subAccounts = [
+    { id: "loc_belza", name: "Belza Painting & Resurfacing" },
+    { id: "loc_other", name: "Another Client" },
+  ];
+  check(
+    "a pinned GoHighLevel sub-account resolves",
+    selectPinnedGhlLocationId(["loc_belza"], subAccounts) === "loc_belza",
+  );
+  check(
+    "a pin this agency connection cannot see resolves to nothing",
+    selectPinnedGhlLocationId(["loc_missing"], subAccounts) === undefined,
+  );
+  check(
+    "the first reachable pin wins when several are set",
+    selectPinnedGhlLocationId(["loc_missing", "loc_other"], subAccounts) === "loc_other",
+  );
+  check("no pins resolves to nothing", selectPinnedGhlLocationId([], subAccounts) === undefined);
+}
+
 // ---------------------------------------------------------------------------
 
 console.log(`\n${checks - failures} of ${checks} checks passed.`);
@@ -1146,6 +1211,8 @@ console.log(
     "Not covered here (needs live credentials, so it is checked by hand against a real account):",
     "  - the Gmail send itself, and the refusal when the connection is read-only",
     "  - the ClickUp page write and the reuse of an existing page",
+    "  - the live Google and GoHighLevel reads a pinned profile triggers, which need real tokens;",
+    "    the pin RESOLUTION above is what regressed and is what is covered",
     "  - the model calls that write the document and the confirmation email",
   ].join("\n"),
 );

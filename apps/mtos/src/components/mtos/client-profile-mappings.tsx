@@ -220,8 +220,9 @@ export function ClientProfileMappings({ clientId, providers }: ClientProfileMapp
           {saved && !isDirty ? "Saved" : "Save mappings"}
         </button>
         <p className="text-xs text-slate-500">
-          Automatic matches stay in place -- manual pins are added on top. Rank Tracker and Map Check-Ins pins apply on
-          the next prep refresh; GBP and GoHighLevel pins apply after their next sync.
+          Automatic matches stay in place -- manual pins are added on top. Rank Tracker, Map Check-Ins, Google Business
+          Profile and GoHighLevel pins apply on the next prep refresh, which reads the pinned profile live. Google Ads
+          and Local Services Ads pins apply after their next sync.
         </p>
       </div>
       {error ? <p className="text-sm text-rose-300">{error}</p> : null}

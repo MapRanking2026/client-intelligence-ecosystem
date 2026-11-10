@@ -159,13 +159,27 @@ export function hasAnyLlmProvider(env: ServerEnv): boolean {
  * and answer, rather than being killed holding a finished result.
  */
 /**
- * Generous on purpose: the prep pack asks for up to 8000 output tokens, and a genuinely long
- * generation at that size can legitimately run well over a minute. This has to cut off hangs
- * without cutting off real work, so it sits above any plausible honest completion -- and still
- * leaves most of a second attempt inside the chain budget.
+ * Generous on purpose: the prep pack asks for up to 16000 output tokens, and a genuinely long
+ * generation at that size can legitimately run for minutes. This has to cut off hangs without
+ * cutting off real work, so it sits above any plausible honest completion -- and still leaves a
+ * usable second attempt inside the chain budget.
+ *
+ * Sized from measurement, 9 November 2026. The monthly-touch preparation writes roughly 10000
+ * output tokens (fourteen sections plus the six legacy fields, the QC block, the read-aloud agenda
+ * and the client email). Measured generation speed on this account: claude-opus-5 ~59 tokens/s,
+ * claude-sonnet-5-5 ~109 tokens/s. So the same document is ~170s on Opus and ~92s on Sonnet, and
+ * the old 150s ceiling cut Opus off a little before it could finish -- which is exactly what the
+ * "no response within 150s" failures were. The ceiling is not the real lever here; the model is.
+ * See MTOS_MODEL_NOTES in the repo README before raising this: 300s is Vercel's hard wall and the
+ * route still has to persist what it has afterwards.
  */
-const LLM_ATTEMPT_TIMEOUT_MS = 150_000;
-const LLM_CHAIN_BUDGET_MS = 230_000;
+const LLM_ATTEMPT_TIMEOUT_MS = 170_000;
+/**
+ * The route's `maxDuration` is 300s and the data pulls finish long before the chain starts, so the
+ * old 230s left ~60s of the function unused while the failover was being told it was out of budget.
+ * 255s keeps a real margin to persist and answer without throwing away a minute of usable time.
+ */
+const LLM_CHAIN_BUDGET_MS = 255_000;
 /** Below this, starting another provider only burns the remainder without plausibly finishing. */
 const LLM_MIN_USEFUL_ATTEMPT_MS = 15_000;
 
@@ -447,7 +461,19 @@ async function callLlmCore<T>(
     }
   }
 
-  throw new Error(`All configured LLM providers failed — ${errors.join("; ")}`);
+  // Word this by what actually went wrong. "All configured LLM providers failed" over a list of
+  // timeouts reads, to the account manager looking at the review screen, like the keys are missing
+  // or nothing is connected -- and it sent us hunting for a broken connection that was never
+  // broken. A key that is absent is reported above, before any call is made; by the time we are
+  // here the providers answered the network and simply did not finish writing in time.
+  const everyFailureWasTheClock = errors.every(
+    (entry) => /no response within|budget was already spent/.test(entry),
+  );
+  throw new Error(
+    everyFailureWasTheClock
+      ? `No LLM finished the generation in time (the keys are configured and the APIs answered; the models ran out of clock) — ${errors.join("; ")}`
+      : `All configured LLM providers failed — ${errors.join("; ")}`,
+  );
 }
 
 /**

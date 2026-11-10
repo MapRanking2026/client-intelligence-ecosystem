@@ -19,7 +19,7 @@ export function getServerEnv() {
     managerSignupCode: process.env.MTOS_MANAGER_SIGNUP_CODE || "",
     adminSignupCode: process.env.MTOS_ADMIN_SIGNUP_CODE || "",
     anthropicApiKey: process.env.ANTHROPIC_API_KEY || "",
-    anthropicModel: process.env.ANTHROPIC_MODEL || "claude-3-5-sonnet-latest",
+    anthropicModel: process.env.ANTHROPIC_MODEL || "claude-sonnet-5-5",
     // Fallback LLM providers. Model defaults are conservative and overridable via
     // env so the exact model can be set without a code change.
     openaiApiKey: process.env.OPENAI_API_KEY || "",

@@ -908,6 +908,11 @@ function toSlimGbpLocation(location: JsonRecord): JsonRecord {
     storeCode: String(location.storeCode || ""),
     websiteUri: String(location.websiteUri || ""),
     accountName: String(location.accountName || ""),
+    // The OWNING ACCOUNT's resource name, kept because the v4 reviews/posts/photos endpoints are
+    // addressed as accounts/{id}/locations/{id} and `accountName` above is only a display name.
+    // Dropping it here used to mean nothing could re-read one location's listing data from the
+    // stored snapshot -- you had to re-walk every account to find out where a location lived.
+    accountResourceName: String(location.accountResourceName || ""),
   };
 }
 
@@ -1224,6 +1229,8 @@ const GBP_TEST_MAX_ACCOUNTS_SCANNED = 25;
 const GBP_MAX_REVIEW_PAGES = 6;
 const GBP_REVIEW_PAGE_SIZE = 50;
 const GBP_HIGHLIGHT_LIMIT = 5;
+/** Locations re-read by a per-client refresh. A preparation must never become a tenant sync. */
+const GBP_CLIENT_REFRESH_LOCATION_LIMIT = 4;
 
 function truncateForSnapshot(value: string, maxLength = 180) {
   const trimmed = value.trim();
@@ -3563,6 +3570,193 @@ export async function testIntegrationConnection(
     summary,
     checks,
   };
+}
+
+export interface GbpClientRefreshResult {
+  status: "refreshed" | "skipped" | "failed";
+  /** How many of this client's locations were actually re-read. */
+  locations: number;
+  /** The sentence an account manager should read about it. */
+  detail: string;
+}
+
+/**
+ * Re-read ONE client's Business Profile listing data right now, and fold it into the snapshot.
+ *
+ * Why this exists. The monthly touch preparation reads `integrationSnapshots/{provider}`, which is
+ * written only by a full provider sync -- the 09:00 cron, or a press on the Integrations screen.
+ * Nothing in the workflow refreshed it, so the preparation reported the state of the world at the
+ * last sync and called it today's. Measured on this tenant, 9 November 2026: the snapshot said
+ * "Trueflow Plumbing LLC has 4 unanswered reviews (85% reply rate)" from a sync 15 hours earlier.
+ * The owner had replied to all four in the meantime, and no amount of re-running the preparation
+ * could change the answer, because re-running never asked Google again.
+ *
+ * Why not just re-sync the provider. A full Business Profile sync on this tenant walks 15 accounts,
+ * 230 locations and ~28,700 reviews. It belongs in a cron, not in a request an account manager is
+ * waiting on -- it would not finish inside the route's 300s and would re-read 125 clients nobody
+ * asked about. This re-reads only the locations mapped to the one client being prepared, which is
+ * a handful of calls, and splices the result into the stored snapshot so everything downstream
+ * reads it the usual way.
+ *
+ * Deliberately non-fatal in every direction: no connection, no mapped location, a refused v4 API,
+ * a Google outage -- each returns a `skipped`/`failed` status with a reason. The preparation then
+ * runs on the older snapshot, exactly as it did before, rather than failing over listing data.
+ */
+export async function refreshGbpInsightsForClient(
+  context: TenantContext,
+  clientId: string,
+): Promise<GbpClientRefreshResult> {
+  const db = getFirebaseAdminDb();
+  if (!db) {
+    return { status: "skipped", locations: 0, detail: "Firestore is not configured." };
+  }
+
+  const reference = db.doc(integrationSnapshotPath(context.tenantId, "google-business-profile"));
+  const document = await reference.get();
+  const stored = document.data() as IntegrationSnapshotRecord | undefined;
+  if (!stored?.payload) {
+    return {
+      status: "skipped",
+      locations: 0,
+      detail: "Business Profile has never been synced, so there is no snapshot to refresh.",
+    };
+  }
+
+  const payload = stored.payload as JsonRecord;
+  const locationsByClient = (payload.locationsByClient || {}) as JsonRecord;
+  const matched = Array.isArray(locationsByClient[clientId])
+    ? (locationsByClient[clientId] as JsonRecord[])
+    : [];
+  if (!matched.length) {
+    return {
+      status: "skipped",
+      locations: 0,
+      detail: "No Business Profile location is mapped to this client, so there is nothing to re-read.",
+    };
+  }
+
+  try {
+    const record = await getConnectedRecord(context, "google-business-profile");
+    const refreshedRecord = await maybeRefreshConnection(context, record);
+    const accessToken = getIntegrationCredentials(refreshedRecord).accessToken;
+    if (!accessToken) {
+      return {
+        status: "failed",
+        locations: 0,
+        detail: "The Business Profile connection holds no access token.",
+      };
+    }
+
+    // A client with many locations is rare; the cap is here so one outlier cannot turn a
+    // preparation into a tenant-sized sync.
+    const targets = matched.slice(0, GBP_CLIENT_REFRESH_LOCATION_LIMIT);
+    const resolved = await attachAccountResourceNames(accessToken, targets);
+
+    const performance = Array.isArray(payload.performance) ? [...(payload.performance as JsonRecord[])] : [];
+    const profileInsights = Array.isArray(payload.profileInsights)
+      ? [...(payload.profileInsights as JsonRecord[])]
+      : [];
+    const refreshedAt = getNowIso();
+
+    for (const location of resolved) {
+      const locationId = String(location.name || "").split("/").filter(Boolean).pop() || "";
+      if (!locationId) {
+        continue;
+      }
+      const [locationPerformance, locationInsights] = await Promise.all([
+        fetchGbpLocationPerformance(accessToken, String(location.name || "")),
+        fetchGbpProfileInsights(accessToken, location),
+      ]);
+
+      // Replace this location's rows in place; every other client's rows are left untouched, so a
+      // targeted refresh never disturbs data it did not re-read.
+      const spliceBy = (rows: JsonRecord[], next: JsonRecord | null) => {
+        const at = rows.findIndex((row) => String(row.locationId || "") === locationId);
+        if (!next) return;
+        if (at >= 0) rows[at] = next;
+        else rows.push(next);
+      };
+      spliceBy(performance, (locationPerformance as JsonRecord | null) ?? null);
+      spliceBy(profileInsights, { ...(locationInsights as unknown as JsonRecord), refreshedAt });
+    }
+
+    await reference.set(
+      {
+        payload: dropUndefinedDeep({
+          ...payload,
+          performance,
+          profileInsights,
+          // Keep the resolved account ids, so the next refresh skips the account walk entirely.
+          locationsByClient: { ...locationsByClient, [clientId]: resolved.map(toSlimGbpLocation) },
+        }),
+      },
+      { merge: true },
+    );
+
+    return {
+      status: "refreshed",
+      locations: resolved.length,
+      detail: `Business Profile re-read for ${resolved.length} location${resolved.length === 1 ? "" : "s"} just now.`,
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "unknown error";
+    return {
+      status: "failed",
+      locations: 0,
+      detail: `Business Profile could not be re-read: ${message}. The preparation used the stored snapshot instead.`,
+    };
+  }
+}
+
+/**
+ * Make sure each location knows which account owns it, because the v4 endpoints cannot be
+ * addressed without that. Snapshots written before `toSlimGbpLocation` kept the field have to find
+ * it the slow way -- one accounts list, then a cheap probe per account until one answers -- and
+ * the caller writes the answer back so this happens at most once per location.
+ */
+async function attachAccountResourceNames(
+  accessToken: string,
+  locations: JsonRecord[],
+): Promise<JsonRecord[]> {
+  if (locations.every((location) => String(location.accountResourceName || ""))) {
+    return locations;
+  }
+
+  let accounts: string[] = [];
+  try {
+    const payload = await fetchJson("https://mybusinessaccountmanagement.googleapis.com/v1/accounts", {
+      headers: getBearerHeaders(accessToken),
+    });
+    accounts = (Array.isArray(payload.accounts) ? (payload.accounts as JsonRecord[]) : [])
+      .map((account) => String(account.name || ""))
+      .filter(Boolean);
+  } catch {
+    // No account list, no v4 path. fetchGbpProfileInsights says so in its own notes.
+    return locations;
+  }
+
+  const results: JsonRecord[] = [];
+  for (const location of locations) {
+    if (String(location.accountResourceName || "")) {
+      results.push(location);
+      continue;
+    }
+    const locationId = String(location.name || "").split("/").filter(Boolean).pop() || "";
+    let owner = "";
+    for (const account of accounts) {
+      try {
+        const url = new URL(`https://mybusiness.googleapis.com/v4/${account}/locations/${locationId}/reviews`);
+        url.searchParams.set("pageSize", "1");
+        await fetchJson(url.toString(), { headers: getBearerHeaders(accessToken) });
+        owner = account;
+        break;
+      } catch {
+        // Not this account's location; try the next.
+      }
+    }
+    results.push(owner ? { ...location, accountResourceName: owner } : location);
+  }
+  return results;
 }
 
 export async function syncIntegrationProvider(

@@ -12,6 +12,7 @@ import type { MonthlyTouchRecord } from "@/src/lib/mtos-data";
 import { getMtosDataSource } from "@/src/lib/server/data/seed-mtos-data-source";
 import { getFirebaseAdminDb } from "@/src/lib/server/firebase/admin";
 import { monthlyTouchPath } from "@/src/lib/server/firebase/collections";
+import { refreshGbpInsightsForClient } from "@/src/lib/server/integration-sync";
 import { getIntegrationConnection } from "@/src/lib/server/integrations";
 import { filePrepNotesToClientBook } from "@/src/lib/server/services/client-book-service";
 import {
@@ -141,6 +142,14 @@ async function persist(
 async function recordSourceChecks(
   context: TenantContext,
   touch: MonthlyTouchRecord,
+  /**
+   * What the per-client Business Profile re-read achieved this run, if anything.
+   *
+   * Said out loud on the Business Profile line because "last synced <date>" was the one thing on
+   * this screen that could quietly be yesterday's answer: the AM has no other way to tell whether
+   * the review count in front of them was read a minute ago or at nine this morning.
+   */
+  gbpRefresh?: { status: "refreshed" | "skipped" | "failed"; locations: number; detail: string },
 ): Promise<{ sourceChecks: PrepSourceCheck[]; commsVerification: PrepCommsVerification }> {
   // Needed only for the client's email address, which is what turns the Intercom read from a weak
   // name match into real evidence. A client that can't be loaded degrades the Intercom check; it
@@ -171,16 +180,23 @@ async function recordSourceChecks(
     const connection = await getIntegrationConnection(context, provider.id).catch(() => undefined);
     const connected = Boolean(connection && connection.status === "connected");
     const source = answered.get(provider.id);
+    const freshness =
+      provider.id === "google-business-profile" && gbpRefresh
+        ? gbpRefresh.status === "refreshed"
+          ? ` Re-read for this client at the start of this run, so the listing figures are current (${gbpRefresh.locations} location${gbpRefresh.locations === 1 ? "" : "s"}).`
+          : ` ${gbpRefresh.detail}`
+        : "";
     checks.push({
       key: provider.id,
       label: provider.label,
       checked: connected,
       reachable: connected && Boolean(source),
-      detail: !connected
-        ? "Not connected in MTOS, so this source was not checked."
-        : source
-          ? `${source.summary} (last synced ${source.syncedAt}).`
-          : "Connected, but it returned nothing for this client in this run.",
+      detail:
+        (!connected
+          ? "Not connected in MTOS, so this source was not checked."
+          : source
+            ? `${source.summary} (last synced ${source.syncedAt}).`
+            : "Connected, but it returned nothing for this client in this run.") + freshness,
     });
   }
 
@@ -250,10 +266,29 @@ export interface PrepStageResult {
  * mark the touch `Ready` either way, which is exactly the contradiction this replaces.
  */
 export async function runResearchStage(context: TenantContext, touchId: string): Promise<PrepStageResult> {
-  const { touch } = await loadTouch(context, touchId);
+  const { touch, client } = await loadTouch(context, touchId);
   const startedAt = getNowIso();
   const before = workflowOf(touch);
   const attempts = (before.stages.research.attempts ?? 0) + 1;
+
+  /**
+   * Ask Google again before reading the snapshot.
+   *
+   * The preparation reads whatever the last provider sync stored, and nothing in the workflow ever
+   * refreshed it -- so pressing the button again re-ran the ANALYSIS over yesterday's facts and
+   * produced the same stale sentence every time. The owner's case, 9 November 2026: the brief kept
+   * saying four reviews were unanswered for hours after they had all been replied to, because the
+   * snapshot behind it was written at 09:17 that morning.
+   *
+   * Scoped to this client's locations and non-fatal: a refused API or a missing connection leaves
+   * the older snapshot in place and the preparation carries on, as it always did.
+   */
+  const gbpRefresh = await refreshGbpInsightsForClient(context, client.id).catch((error) => ({
+    status: "failed" as const,
+    locations: 0,
+    detail: error instanceof Error ? error.message : "The Business Profile refresh failed.",
+  }));
+  console.info(`[prep] ${client.id}: gbp refresh ${gbpRefresh.status} -- ${gbpRefresh.detail}`);
 
   let prepared: MonthlyTouchRecord;
   try {
@@ -291,7 +326,7 @@ export async function runResearchStage(context: TenantContext, touchId: string):
           ? "The account review produced no agenda, so there is nothing to tell the client."
           : "";
 
-  const { sourceChecks, commsVerification } = await recordSourceChecks(context, prepared);
+  const { sourceChecks, commsVerification } = await recordSourceChecks(context, prepared, gbpRefresh);
 
   const workflow: PrepWorkflowState = {
     ...before,

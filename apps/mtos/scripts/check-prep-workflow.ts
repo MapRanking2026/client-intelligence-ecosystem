@@ -45,6 +45,7 @@ import {
 import { isStageOpen, recomputeGates } from "@/src/lib/server/services/prep-workflow-rules";
 import { matchCalendarEventsToClients, selectMeetingForTouch } from "@/src/lib/server/calendar-touch-matching";
 import { buildGbpCompleteness } from "@/src/lib/server/gbp-listing-completeness";
+import { describeGbpPerformanceGap } from "@/src/lib/server/services/monthly-touch-prep-service";
 
 /**
  * The document's section catalogue, read from the bundled Prompt Engine library rather than from a
@@ -1064,6 +1065,76 @@ scenario("A listing is never reported incomplete because nobody loaded its field
   const bare = buildGbpCompleteness(emptyButLoaded);
   check("a genuinely bare listing is still reported", bare?.percent === 0);
   check("with every field named", bare?.missing.length === 8);
+}
+
+scenario("A missing Business Profile number says WHICH thing is missing");
+{
+  /*
+    Reported by the owner on 10 November 2026 off a Belzer Striping & Resurfacing preparation. One
+    sentence covered four different causes: "No Google Business Profile location matched this
+    client's name, or performance data is unavailable for the matched location -- confirm the GBP
+    listing title matches this client." If the title already matches, confirming it changes
+    nothing, and the AM cannot tell from the sentence which half applies to them. Same defect as
+    the GoHighLevel "single sub-account" note, in the other integration.
+
+    Each case below needs a different action from the AM, so each has to be a different sentence.
+  */
+  const gap = (payload?: Record<string, unknown>) =>
+    describeGbpPerformanceGap(
+      new Map(payload ? [["google-business-profile", payload]] : []) as never,
+      "acme-plumbing",
+      "Acme Plumbing",
+    );
+
+  check(
+    "never synced: says so, and points at Integrations",
+    gap().includes("never completed a sync") && gap().includes("Integrations"),
+    gap(),
+  );
+
+  const noMatch = gap({
+    locations: [
+      { name: "locations/1", title: "Someone Else Plumbing" },
+      { name: "locations/2", title: "Third Co" },
+    ],
+    locationsByClient: {},
+    performance: [],
+  });
+  check(
+    "no listing matched: says how many were reached, and to pin one",
+    noMatch.includes("2 locations") && noMatch.includes("Pin the right listing"),
+    noMatch,
+  );
+  check("and only that case talks about the listing title", noMatch.includes("listing title"), noMatch);
+
+  const matched = { name: "locations/1", title: "Acme Plumbing" };
+  const refused = gap({
+    locations: [matched],
+    locationsByClient: { "acme-plumbing": [matched] },
+    performance: [{ locationId: "1", error: "Request had insufficient authentication scopes." }],
+  });
+  check(
+    "Google refused the metrics: quotes what Google actually said",
+    refused.includes("insufficient authentication scopes"),
+    refused,
+  );
+  check("and says the match itself is fine", refused.includes("not a naming one"), refused);
+  // The one that matters most: a listing that DID match must never be sent back to be renamed.
+  check("a matched listing is never blamed on its name", !refused.includes("Pin the right listing"), refused);
+
+  const notReached = gap({
+    locations: [matched],
+    locationsByClient: { "acme-plumbing": [matched] },
+    performance: [{ locationId: "9", calls: 4 }],
+  });
+  check(
+    "sync stopped short: says to re-run it, and that nothing needs renaming",
+    notReached.includes("Re-run the Google Business Profile sync") && notReached.includes("nothing needs renaming"),
+    notReached,
+  );
+  check("and names the listing it did match", notReached.includes("Acme Plumbing"), notReached);
+
+  check("the four causes are four different sentences", new Set([gap(), noMatch, refused, notReached]).size === 4);
 }
 
 // ---------------------------------------------------------------------------

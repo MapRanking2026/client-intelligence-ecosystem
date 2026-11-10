@@ -313,6 +313,27 @@ function str(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
+/**
+ * A section's id as the model wrote it.
+ *
+ * The contract asks for `"id": "1"`, and `str` would read a number as nothing at all -- so a model
+ * that answers `"id": 1`, which is the more natural JSON for a number and costs it nothing, would
+ * have every one of its sections dropped on the floor with no error anywhere. The brief would read
+ * "the preparation did not write this section" fifteen times over a response that wrote all
+ * fifteen. Numbers are read, a `Section 4` or `#4` prefix is tolerated, and `R` keeps its letter.
+ *
+ * Nothing here invents an id: a value that carries no id still comes back empty and is still
+ * dropped.
+ */
+function sectionId(value: unknown): string {
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  return str(value)
+    .replace(/^#/, "")
+    .replace(/^section\s*/i, "")
+    .replace(/[.:]$/, "")
+    .trim();
+}
+
 function strings(value: unknown, limit = 20): string[] {
   if (!Array.isArray(value)) return [];
   return value.map(str).filter(Boolean).slice(0, limit);
@@ -380,7 +401,7 @@ export function normalizePrepBrief(raw: unknown, generatedAt?: string): PrepBrie
   // or the AM reads the paid-media numbers under the SEO heading's lead-in.
   const collected: { promptRank: number; section: BriefSectionContent }[] = [];
   for (const entry of rows(row.sections)) {
-    const promptId = str(entry.id);
+    const promptId = sectionId(entry.id);
     const mapped = PROMPT_SECTION_TO_BRIEF[promptId];
     const markdown = str(entry.markdown);
     if (!mapped || !markdown) continue;

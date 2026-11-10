@@ -224,6 +224,24 @@ export function normalizeClaudeTouchPayload(raw: JsonRecord) {
       : [];
 
   return {
+    /*
+      Everything the model returned, kept exactly as it came, BEFORE the six legacy fields below
+      override their own keys.
+
+      This spread is the whole fix for "the preparation did not write this section", reported by the
+      owner on 10 November 2026 with all fifteen sections showing it. This function built a brand new
+      object out of six keys, so `sections`, `missing`, `retention`, `qcPromises`, `qcFocus`,
+      `qcProposals`, `agendaReadAloud`, `clientAgendaEmail` and `unreportedSeoWins` were thrown away
+      one line before `normalizePrepBrief` was asked to read them off it. The brief was therefore
+      empty on EVERY run, whatever the model answered -- which is why fixing the prompt that asked
+      for the sections (9 November) changed nothing visible: the sections were arriving and being
+      discarded here.
+
+      Nothing downstream is widened by this. `claudeResponseSchema` is a plain `z.object`, so its
+      `safeParse` strips unknown keys before anything reads `parsed.data`, and `salvageTouchOutput`
+      reads the six by name.
+    */
+    ...record,
     executiveBrief: coerceToText(record.executiveBrief, "\n\n"),
     agenda: coerceToTextArray(record.agenda).slice(0, 6),
     talkingPoints: coerceToTextArray(record.talkingPoints).slice(0, 6),
@@ -828,6 +846,7 @@ function buildSeoPerformance(
   heatmapGrids: HeatmapGrid[],
   checkinBusinesses: MapCheckinBusinessSummary[],
   clientName: string,
+  gbpPerformanceGap: string,
 ): SeoPerformancePack {
   const notes: string[] = [];
   const inactiveProfiles = profiles.filter((profile) => profile.status === "inactive");
@@ -853,9 +872,7 @@ function buildSeoPerformance(
     );
   }
   if (!gbpPerformance.length) {
-    notes.push(
-      "No Google Business Profile location matched this client's name, or performance data is unavailable for the matched location -- confirm the GBP listing title matches this client.",
-    );
+    notes.push(gbpPerformanceGap);
   }
   if (!checkinBusinesses.length) {
     notes.push("No Map Check-Ins business matched this client -- check-ins may not be part of this client's package.");
@@ -1129,6 +1146,67 @@ function buildRecapQuestions() {
  * stopped before reaching it. Each of those needs a different action, so each gets its own
  * sentence.
  */
+/**
+ * Why this client has no Business Profile numbers -- the true reason, read off the stored snapshot.
+ *
+ * Same defect as `describeGhlLeadGap` below, in the other integration, reported by the owner on
+ * 10 November 2026 for Belzer Striping & Resurfacing. One fixed sentence covered four different
+ * causes at once -- "No Google Business Profile location matched this client's name, OR
+ * performance data is unavailable for the matched location -- confirm the GBP listing title
+ * matches this client" -- so it could not be acted on. If the listing title does match and the
+ * problem is that Google refused the performance call, confirming the title changes nothing, and
+ * the AM has no way to tell which half of the sentence applies to them.
+ *
+ * The snapshot carries enough to say which: `locations` is every location the sync discovered,
+ * `locationsByClient[clientId]` is the ones matched to this client (by name, or pinned on the
+ * client's integration mapping), and each `performance` row carries either its metrics or the
+ * error Google answered with.
+ */
+export function describeGbpPerformanceGap(
+  rawSnapshots: Map<string, JsonRecord>,
+  clientId: string,
+  clientName: string,
+): string {
+  const snapshot = rawSnapshots.get("google-business-profile");
+  if (!snapshot) {
+    return "No Google Business Profile data: the integration has never completed a sync. Connect it (or run a sync) on the Integrations screen, then re-run this preparation.";
+  }
+
+  const locationsByClient = (snapshot.locationsByClient || {}) as JsonRecord;
+  const matched = Array.isArray(locationsByClient[clientId]) ? (locationsByClient[clientId] as JsonRecord[]) : [];
+  const discovered = Array.isArray(snapshot.locations) ? (snapshot.locations as JsonRecord[]) : [];
+
+  if (!matched.length) {
+    return `No Google Business Profile numbers for this client: the sync reached ${discovered.length} location${
+      discovered.length === 1 ? "" : "s"
+    }, but none of them matches "${clientName}" by name. Pin the right listing on this client's integration mapping, or correct the listing title, then re-sync.`;
+  }
+
+  // Matched, so the title is not the problem. Either the performance pull failed for these
+  // locations or it never reached them.
+  const matchedIds = new Set(
+    matched.map((location) => String(location.name || "").split("/").filter(Boolean).pop()),
+  );
+  const rows = Array.isArray(snapshot.performance) ? (snapshot.performance as JsonRecord[]) : [];
+  const forThisClient = rows.filter((row) => matchedIds.has(String(row.locationId || "")));
+  const titles = matched
+    .map((location) => String(location.title || ""))
+    .filter(Boolean)
+    .join(", ");
+
+  const firstError = forThisClient.find((row) => row.error);
+  if (firstError) {
+    return `Google Business Profile matched this client's listing${titles ? ` ("${titles}")` : ""}, but Google refused the performance metrics for it: ${String(
+      firstError.error,
+    )}. This is a permissions or API problem on the listing, not a naming one -- the listing itself is correctly matched.`;
+  }
+
+  // No error and no usable row: the pull never reached these locations. (There is no fifth case --
+  // a stored row without an error is exactly what `extractGbpPerformanceRows` keeps, so this
+  // function is only ever called when none of them survived that filter.)
+  return `Google Business Profile matched this client's listing${titles ? ` ("${titles}")` : ""}, but the last sync stored no performance metrics for it. Re-run the Google Business Profile sync; the listing match is correct, so nothing needs renaming.`;
+}
+
 function describeGhlLeadGap(rawSnapshots: Map<string, JsonRecord>, clientId: string, clientName: string): string {
   const snapshot = rawSnapshots.get("gohighlevel");
   if (!snapshot) {
@@ -1886,6 +1964,7 @@ async function buildPrepPack(
     heatmapGrids,
     checkinBusinesses,
     client.name,
+    describeGbpPerformanceGap(rawSnapshots, client.id, client.name),
   );
   const adsPerformance = buildAdsPerformanceFromSnapshots(rawSnapshots, client.id);
   const strategicAction = buildStrategicActionStatus(client);

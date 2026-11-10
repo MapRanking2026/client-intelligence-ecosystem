@@ -28,6 +28,7 @@ import { join } from "node:path";
 
 import {
   claudeResponseSchema,
+  normalizeClaudeTouchPayload,
   salvageTouchOutput,
 } from "@/src/lib/server/services/monthly-touch-prep-service";
 import { normalizePrepBrief } from "@/src/lib/contracts/prep-brief";
@@ -220,6 +221,86 @@ console.log("\nwhat survives a salvaged run");
   check("nothing usable gives nothing, rather than empty strings", Object.keys(salvageTouchOutput({})).length === 0);
   check("a non-object gives nothing", Object.keys(salvageTouchOutput("not json")).length === 0);
   check("an empty list is absent, not an empty tile", salvageTouchOutput({ ...good(), risks: [] }).risks === undefined);
+}
+
+console.log("\nthe sections the model wrote reach the brief");
+{
+  /*
+    Defect 3, reported by the owner on 10 November 2026: every one of the fifteen sections on the
+    review screen read "The preparation did not write this section".
+
+    `normalizeClaudeTouchPayload` built a brand new object out of six keys, so `sections`, `missing`,
+    `retention`, the QC blocks, the read-aloud agenda and the client email were dropped one line
+    before `normalizePrepBrief` was handed that object to read them off. The brief was empty on
+    every run, whatever the model answered. It is also why fixing the prompt the day before changed
+    nothing the owner could see: the sections were arriving and being thrown away here.
+
+    So this checks the join, not either half: a response goes through the real normalizer and the
+    real brief reader, exactly as the service does it.
+  */
+  const sections = [
+    { id: "1", title: "Quick Client Snapshot", markdown: "Who they are." },
+    { id: "2", title: "Opening Questions", markdown: "Ask about the month." },
+    { id: "8", title: "SEO & GBP", markdown: "Rankings held." },
+    { id: "9", title: "Google Ads", markdown: "CPL up." },
+    { id: "14", title: "Live Recap & Close", markdown: "Agree the dates live." },
+  ];
+  const response = {
+    ...good(),
+    sections,
+    missing: [{ item: "No call tracking", whyItMatters: "Cannot review handling", askOrCheck: "Ask on the call" }],
+    qcPromises: [{ what: "Send the report", byWhen: "Oct 30", status: "delivered", source: "QC" }],
+  };
+
+  const normalized = normalizeClaudeTouchPayload(response) as Record<string, unknown>;
+  check("the normalizer keeps `sections`", Array.isArray(normalized.sections));
+  check(
+    "and every other v2 field it does not reshape",
+    Array.isArray(normalized.missing) && Array.isArray(normalized.qcPromises),
+  );
+  check(
+    "while still reshaping the six it owns",
+    typeof normalized.executiveBrief === "string" && Array.isArray(normalized.agenda),
+  );
+
+  const brief = normalizePrepBrief(normalized);
+  check("the brief carries the sections the model wrote", brief.sections.length === 5);
+  check(
+    "section 1 lands where the AM reads the snapshot",
+    brief.sections.some((section) => section.markdown === "Who they are."),
+  );
+  check(
+    "the three paid/SEO sections fold into one, each keeping its subtitle",
+    brief.sections.filter((section) => section.id === "10").length === 2,
+  );
+  check("the gaps survive too", brief.gaps.length === 1);
+  check("and the QC promises", brief.promises.length === 1);
+
+  // The strict schema must not be widened by any of this: it still strips what it does not know.
+  const parsed = claudeResponseSchema.safeParse(normalized);
+  check("the six-field contract still parses the same response", parsed.success);
+  check(
+    "and still strips everything it does not declare",
+    parsed.success && !("sections" in parsed.data),
+  );
+
+  // A model that writes its ids as numbers wrote the sections just the same.
+  const numbered = normalizePrepBrief({
+    ...normalized,
+    sections: sections.map((section) => ({ ...section, id: Number(section.id) })),
+  });
+  check("a numeric section id is still a section", numbered.sections.length === 5);
+  const prefixed = normalizePrepBrief({
+    ...normalized,
+    sections: sections.map((section) => ({ ...section, id: `Section ${section.id}` })),
+  });
+  check('so is "Section 4"', prefixed.sections.length === 5);
+  // But an id nobody can place is still dropped, rather than guessed into some section.
+  const nonsense = normalizePrepBrief({
+    ...normalized,
+    sections: [{ id: "banana", title: "T", markdown: "Body." }],
+  });
+  check("an id that maps to nothing is still dropped", nonsense.sections.length === 0);
 }
 
 console.log(

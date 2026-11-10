@@ -59,6 +59,18 @@ function renderConfirmationEmail(email: ConfirmationEmailState | undefined): str
   if (!email) {
     return "CONFIRMATION EMAIL: none has been approved in MTOS. Write section 15 as a fresh draft and say it has not been sent yet.";
   }
+  // A skipped email is not a draft waiting to go out, and section 15 must not describe it as one.
+  // Say the plain fact -- no agenda reached the client -- so the document cannot imply otherwise.
+  if (email.status === "skipped") {
+    return [
+      "CONFIRMATION EMAIL: the account manager deliberately ran this touch WITHOUT one.",
+      email.skipReason ? `Their reason: ${email.skipReason}` : "",
+      "No agenda was sent to the client. Write section 15 saying exactly that -- do not reproduce",
+      "any draft wording as though the client received it, and do not describe it as pending.",
+    ]
+      .filter(Boolean)
+      .join("\n");
+  }
   const sent =
     email.status === "sent"
       ? `It was sent on ${email.sentAt} via ${email.sentVia || "the configured channel"}.`

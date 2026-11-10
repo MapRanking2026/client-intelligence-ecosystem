@@ -12,6 +12,7 @@ import {
   markConfirmationEmailSentStage,
   runResearchStage,
   sendConfirmationEmailStage,
+  skipConfirmationEmailStage,
 } from "@/src/lib/server/services/prep-workflow-service";
 
 /**
@@ -42,6 +43,7 @@ const requestSchema = z.discriminatedUnion("action", [
     timeZone: z.string().max(100).optional(),
   }),
   z.object({ action: z.literal("send_confirmation_email") }),
+  z.object({ action: z.literal("skip_confirmation_email"), reason: z.string().max(400).optional() }),
   z.object({
     action: z.literal("mark_confirmation_email_sent"),
     channel: z.string().min(1).max(200),
@@ -85,6 +87,10 @@ export async function POST(request: Request, { params }: { params: Promise<{ tou
           });
         case "send_confirmation_email":
           return sendConfirmationEmailStage(context, touchId);
+        case "skip_confirmation_email":
+          return skipConfirmationEmailStage(context, touchId, {
+            ...(payload.reason ? { reason: payload.reason } : {}),
+          });
         case "mark_confirmation_email_sent":
           return markConfirmationEmailSentStage(context, touchId, {
             channel: payload.channel,

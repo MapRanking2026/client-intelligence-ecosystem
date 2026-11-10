@@ -42,6 +42,7 @@ type Action =
   | "generate_confirmation_email"
   | "approve_confirmation_email"
   | "send_confirmation_email"
+  | "skip_confirmation_email"
   | "mark_confirmation_email_sent"
   | "generate_prep_notes"
   | "approve_prep_notes"
@@ -144,6 +145,10 @@ export function PrepWorkflowPanel({ touchId, workflow, clientName }: PrepWorkflo
   const [recipient, setRecipient] = useState(email?.recipient ?? "");
   const [timeZone, setTimeZone] = useState(email?.timeZone ?? "");
   const [manualChannel, setManualChannel] = useState("email from my own inbox");
+  // Skipping the email is deliberately two steps: the link reveals the reason, the reason confirms
+  // it. Kept quiet on the page -- it is the exception, not an equal option to approving.
+  const [skipOpen, setSkipOpen] = useState(false);
+  const [skipReason, setSkipReason] = useState("Booked the same day — the client already has the time.");
   const [showNotes, setShowNotes] = useState(false);
 
   async function run(action: Action, payload: Record<string, unknown> = {}) {
@@ -174,6 +179,7 @@ export function PrepWorkflowPanel({ touchId, workflow, clientName }: PrepWorkflo
   const busy = pending !== null;
   const stages = workflow.stages;
   const emailSent = email?.status === "sent" || email?.status === "sent_manually";
+  const emailSkipped = email?.status === "skipped";
 
   return (
     <div>
@@ -274,15 +280,42 @@ export function PrepWorkflowPanel({ touchId, workflow, clientName }: PrepWorkflo
             The account review has to finish first — the email tells the client the agenda it produces.
           </Notice>
         ) : !email ? (
-          <button
-            type="button"
-            className="btn btn-primary"
-            disabled={busy}
-            onClick={() => run("generate_confirmation_email")}
-          >
-            {pending === "generate_confirmation_email" ? <LoaderCircle className="animate-spin" /> : <Mail />}
-            Write the confirmation email
-          </button>
+          <div>
+            {error ? (
+              <div className="mb-3">
+                <Notice tone="risk">{error}</Notice>
+              </div>
+            ) : null}
+            <button
+              type="button"
+              className="btn btn-primary"
+              disabled={busy}
+              onClick={() => run("generate_confirmation_email")}
+            >
+              {pending === "generate_confirmation_email" ? <LoaderCircle className="animate-spin" /> : <Mail />}
+              Write the confirmation email
+            </button>
+            {/*
+              The same escape hatch before anything is drafted. A same-day booking does not need a
+              draft written only to be skipped a moment later, so the way out is offered here too.
+            */}
+            <p className="mt-2.5">
+              <button
+                type="button"
+                className="link-quiet"
+                disabled={busy}
+                onClick={() =>
+                  run("skip_confirmation_email", {
+                    reason: "Booked the same day — the client already has the time.",
+                  })
+                }
+              >
+                {pending === "skip_confirmation_email"
+                  ? "Skipping…"
+                  : "This client booked late — continue without the email"}
+              </button>
+            </p>
+          </div>
         ) : (
           <div className="grid gap-4">
             <div className="grid gap-2 text-[0.82rem]">
@@ -310,6 +343,13 @@ export function PrepWorkflowPanel({ touchId, workflow, clientName }: PrepWorkflo
                 <CheckCircle2 style={{ width: 14, height: 14, display: "inline", marginRight: 6 }} />
                 Sent {email.sentAt ? new Date(email.sentAt).toLocaleString() : ""} — {email.sentVia}. The wording below is
                 what the client received.
+              </Notice>
+            ) : emailSkipped ? (
+              <Notice tone="watch">
+                <strong>Running this touch without a confirmation email.</strong> The client has not been sent an
+                agenda, and the preparation notes will say so.
+                {email.skipReason ? ` Your reason: ${email.skipReason}` : ""} Approve the wording below if you change
+                your mind — that puts this touch back on the normal path.
               </Notice>
             ) : email.status === "approved" ? (
               <Notice tone="watch">
@@ -380,6 +420,14 @@ export function PrepWorkflowPanel({ touchId, workflow, clientName }: PrepWorkflo
               />
             </div>
 
+            {/*
+              The error belongs here as well as at the top of the panel.
+              An AM reading step 2 is scrolled past the panel header, so a failure rendered only up
+              there looked exactly like a button that did nothing -- which is how the Firestore
+              write error on approval went unnoticed for so long.
+            */}
+            {error && !emailSent ? <Notice tone="risk">{error}</Notice> : null}
+
             {!emailSent ? (
               <div className="flex flex-wrap gap-2.5">
                 <button
@@ -421,6 +469,66 @@ export function PrepWorkflowPanel({ touchId, workflow, clientName }: PrepWorkflo
                   Write it again
                 </button>
               </div>
+            ) : null}
+
+            {/*
+              The way out, for the touch that does not need an email at all.
+              A quiet link rather than a button on purpose: approving and sending is the normal
+              path, and this should not read as an equal choice sitting next to it. Two steps, so
+              it cannot be hit by accident, and it asks for a reason because that reason is what
+              section 15 will say instead of the agenda.
+            */}
+            {!emailSent && !emailSkipped ? (
+              skipOpen ? (
+                <div className="quick-ref">
+                  <div className="quick-ref-label">Continue without the email</div>
+                  <p className="mt-1.5 text-[0.82rem]">
+                    {clientName} will <strong>not</strong> be sent an agenda, and the preparation notes will say so
+                    rather than describe a message nobody received. You can still approve and send it afterwards.
+                  </p>
+                  <div className="mt-3 flex flex-wrap items-end gap-2.5">
+                    <div className="field" style={{ minWidth: 260, flex: 1 }}>
+                      <label className="field-label" htmlFor="skip-reason">
+                        Why this touch does not need one
+                      </label>
+                      <input
+                        id="skip-reason"
+                        className="input"
+                        value={skipReason}
+                        disabled={busy}
+                        onChange={(event) => setSkipReason(event.target.value)}
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      className="btn btn-ghost"
+                      disabled={busy}
+                      onClick={() =>
+                        run("skip_confirmation_email", {
+                          ...(skipReason.trim() ? { reason: skipReason.trim() } : {}),
+                        })
+                      }
+                    >
+                      {pending === "skip_confirmation_email" ? <LoaderCircle className="animate-spin" /> : <Check />}
+                      Skip it and carry on
+                    </button>
+                    <button
+                      type="button"
+                      className="link-quiet"
+                      disabled={busy}
+                      onClick={() => setSkipOpen(false)}
+                    >
+                      Never mind
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <p className="mt-2.5">
+                  <button type="button" className="link-quiet" disabled={busy} onClick={() => setSkipOpen(true)}>
+                    This client booked late — continue without the email
+                  </button>
+                </p>
+              )
             ) : null}
 
             {!emailSent && (email.status === "approved" || email.status === "failed") ? (
@@ -470,10 +578,10 @@ export function PrepWorkflowPanel({ touchId, workflow, clientName }: PrepWorkflo
           <Notice tone="info">
             <Lock style={{ width: 14, height: 14, display: "inline", marginRight: 6 }} />
             {!email
-              ? "Write and approve the client email first. The notes reproduce the agenda the client received, so they cannot be written before the client has it."
+              ? "Settle the client email first. The notes reproduce the agenda the client received, so they cannot be written while that is still an open question — write and send it, or use the link in step 2 to continue without one."
               : email.status === "draft"
                 ? "Approve the email wording first, so the notes and what the client receives describe the same meeting."
-                : "The email is approved but has not gone out yet. Send it, or send it yourself and press “I sent this myself” — then the notes can be written."}
+                : "The email is approved but has not gone out yet. Send it, send it yourself and press “I sent this myself”, or use the link in step 2 to continue without it — then the notes can be written."}
           </Notice>
         ) : (
           <div className="grid gap-4">

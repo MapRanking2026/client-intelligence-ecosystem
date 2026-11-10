@@ -94,7 +94,7 @@ async function persist(
   const withWorkflow: MonthlyTouchRecord = { ...touch, prepWorkflow: gated };
   const readiness = computeReadiness(withWorkflow);
   const confidence = computeConfidence(withWorkflow);
-  const finalWorkflow: PrepWorkflowState = { ...gated, readiness, confidence };
+  const finalWorkflow: PrepWorkflowState = stripUndefinedDeep({ ...gated, readiness, confidence });
 
   const updated: MonthlyTouchRecord = stripUndefinedDeep({
     ...withWorkflow,
@@ -109,6 +109,14 @@ async function persist(
   if (db) {
     await db.doc(monthlyTouchPath(context.tenantId, touch.id)).set(
       {
+        // `finalWorkflow` is stripped above, and it has to stay that way.
+        //
+        // An unstripped workflow here is what made "Approve this wording" look like a dead
+        // button. Approving writes `lastError: undefined` to clear a previous failure, and
+        // MTOS's Firestore is the one Admin app that does NOT set `ignoreUndefinedProperties`,
+        // so the driver threw "Cannot use undefined as a Firestore value (found in field
+        // prepWorkflow.confirmationEmail.lastError)", the whole approval was lost, and the AM
+        // saw a button that did nothing. Do not hand a raw workflow to this write.
         prepWorkflow: finalWorkflow,
         readinessScore: updated.readinessScore,
         confidenceScore: updated.confidenceScore,
@@ -424,6 +432,77 @@ export async function approveConfirmationEmailStage(
     message: recipient
       ? `Approved. It has not been sent yet — send it to ${recipient}, or send it yourself and record that.`
       : "Approved. Add the client's email address before this can be sent.",
+  };
+}
+
+/**
+ * Stage 2 -- run this touch WITHOUT a confirmation email, on purpose.
+ *
+ * For the client who books the call the same day: they already know when it is, and an agenda
+ * email landing after the meeting is worse than none. Without this the AM's only way past the
+ * gate was to send an email nobody needed, or to press "I sent this myself" about a message that
+ * never existed -- which would have put a lie in the preparation notes to satisfy the screen.
+ *
+ * Recorded as `skipped`, never as sent. Section 15 of the notes is told plainly that no email went
+ * out, and the readiness score books it as a deliberate omission rather than a success.
+ *
+ * Reversible: the draft, if there is one, is left intact, so writing or approving it afterwards
+ * puts the touch straight back on the normal path.
+ */
+export async function skipConfirmationEmailStage(
+  context: TenantContext,
+  touchId: string,
+  options: { reason?: string } = {},
+): Promise<PrepStageResult> {
+  const { touch } = await loadTouch(context, touchId);
+  const before = workflowOf(touch);
+  assertStageOpen(before, "confirmation_email");
+
+  const email = before.confirmationEmail;
+  if (email && (email.status === "sent" || email.status === "sent_manually")) {
+    return {
+      touch,
+      workflow: before,
+      message: "This email has already gone out, so there is nothing to skip.",
+    };
+  }
+
+  const nowIso = getNowIso();
+  const reason = options.reason?.trim();
+  // A touch can be skipped before anything was ever drafted -- that is the whole point for a
+  // same-day booking -- so stand up the minimum state rather than demanding a draft first.
+  const base: ConfirmationEmailState = email ?? {
+    subject: "",
+    body: "",
+    channel: "email",
+    recipient: "",
+    recipientSource: "No draft was written for this touch.",
+    timeZone: "",
+    timeZoneSource: "No draft was written for this touch.",
+    meetingWhen: "—",
+    status: "draft",
+    generatedAt: nowIso,
+    deliveryAttempts: 0,
+    idempotencyKey: `skipped-${touchId}-${nowIso}`,
+    gaps: [],
+  };
+
+  const skipped: ConfirmationEmailState = {
+    ...base,
+    status: "skipped",
+    skippedAt: nowIso,
+    skippedBy: context.userId,
+    ...(reason ? { skipReason: reason } : {}),
+    lastError: undefined,
+  };
+
+  const workflow: PrepWorkflowState = { ...before, confirmationEmail: skipped };
+  const saved = await persist(context, touch, workflow);
+  return {
+    touch: saved,
+    workflow: saved.prepWorkflow!,
+    message:
+      "Skipped. The client has NOT been sent an agenda, and the preparation notes will say so. The next step is open.",
   };
 }
 

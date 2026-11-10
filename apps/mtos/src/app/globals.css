@@ -218,6 +218,25 @@ a { color: inherit; text-decoration: none; }
 /* "End call" and nothing else so far: the one button on a live screen that stops something. */
 .btn-risk { background: var(--risk); color: #ffffff; }
 .btn-risk:hover { filter: brightness(0.92); }
+/*
+ * A text link that happens to be a button, for an action that should not read as a real option.
+ * The first and so far only use is "continue without the confirmation email": a genuine escape
+ * hatch for a same-day booking, but one that must never sit next to Approve looking like a peer.
+ */
+.link-quiet {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  font-size: 0.8rem;
+  color: var(--slate-300);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+.link-quiet:hover { color: var(--text); }
+.link-quiet:disabled { opacity: 0.5; cursor: default; text-decoration: none; }
+
 .btn-sm { padding: 6px 12px; font-size: 0.8rem; }
 .btn-block { width: 100%; }
 

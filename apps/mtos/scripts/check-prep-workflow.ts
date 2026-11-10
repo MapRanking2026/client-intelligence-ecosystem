@@ -669,6 +669,56 @@ scenario("A client whose confirmation email requires approval");
   );
 }
 
+scenario("A client who booked the call the same day, so the email is skipped on purpose");
+{
+  const drafted = workflowAt("prep_notes");
+  const unsent: PrepWorkflowState = recomputeGates({
+    ...drafted,
+    confirmationEmail: {
+      ...drafted.confirmationEmail!,
+      status: "draft",
+      approvedAt: undefined,
+      approvedBy: undefined,
+      sentAt: undefined,
+      sentVia: undefined,
+    },
+  });
+  check("the notes are shut while the email is unsettled", !isStageOpen(unsent, "prep_notes"));
+
+  const skipped = recomputeGates({
+    ...unsent,
+    confirmationEmail: {
+      ...unsent.confirmationEmail!,
+      status: "skipped",
+      skippedAt: NOW,
+      skippedBy: "am-1",
+      skipReason: "Booked the same day — the client already has the time.",
+    },
+  });
+  check("a deliberate skip opens the notes", isStageOpen(skipped, "prep_notes"));
+  check("and it is never recorded as sent", skipped.confirmationEmail!.status === "skipped");
+  check("nothing claims a send happened", !skipped.confirmationEmail!.sentAt);
+
+  const skippedTouch = touch({ prepWorkflow: skipped, prepPack: prepPack() });
+  const emailInput = computeReadiness(skippedTouch).inputs.find((input) => input.key === "confirmation_email")!;
+  // A skip unblocks the work; it does not earn the points for a step that did not happen.
+  check("a skip is part credit, not full", emailInput.status === "partial");
+  check(
+    "and the score says the client got no agenda",
+    emailInput.detail.includes("was not sent an agenda"),
+    emailInput.detail,
+  );
+  check("the AM's reason is kept", emailInput.detail.includes("Booked the same day"), emailInput.detail);
+
+  // Reversible: approving the wording afterwards puts the touch back on the normal path, where
+  // approval alone is once again not enough to open the notes.
+  const reconsidered = recomputeGates({
+    ...skipped,
+    confirmationEmail: { ...skipped.confirmationEmail!, status: "approved", approvedAt: NOW, approvedBy: "am-1" },
+  });
+  check("changing your mind puts the gate back", !isStageOpen(reconsidered, "prep_notes"));
+}
+
 scenario("A client whose confirmation email fails to send");
 {
   const sendFailed = recomputeGates({

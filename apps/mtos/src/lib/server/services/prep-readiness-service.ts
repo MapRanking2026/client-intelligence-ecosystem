@@ -77,6 +77,10 @@ export function computeReadiness(touch: MonthlyTouchRecord): ReadinessBreakdown 
         if (!email) return "missing";
         if (email.status === "failed") return "failed";
         if (email.status === "sent" || email.status === "sent_manually") return "ok";
+        // A deliberate skip unblocks the workflow but is not a success: the client was not told
+        // the agenda, and the score should keep saying so rather than crediting a full 20 points
+        // for a step that did not happen.
+        if (email.status === "skipped") return "partial";
         if (email.status === "approved") return "partial";
         return "missing";
       })(),
@@ -84,7 +88,9 @@ export function computeReadiness(touch: MonthlyTouchRecord): ReadinessBreakdown 
         ? "No confirmation email has been written."
         : email.status === "sent" || email.status === "sent_manually"
           ? `Sent ${email.sentAt ?? ""} via ${email.sentVia ?? "the configured channel"}.`
-          : email.status === "approved"
+          : email.status === "skipped"
+            ? `Skipped for this touch${email.skipReason ? ` — ${email.skipReason}` : ""}. The client was not sent an agenda.`
+            : email.status === "approved"
             ? "Approved but not sent yet, so the client has not been told the agenda."
             : email.status === "failed"
               ? email.lastError || "The send failed."

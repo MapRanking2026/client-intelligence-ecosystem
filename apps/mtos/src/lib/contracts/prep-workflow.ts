@@ -81,6 +81,15 @@ export type ConfirmationEmailStatus =
   | "sending"
   | "sent"
   | "sent_manually"
+  /**
+   * The account manager chose to run this touch without a confirmation email.
+   *
+   * A real case, not a loophole: a client who books the call the same day already knows when it
+   * is, and a confirmation email that arrives after the meeting is worse than none. Recorded as
+   * its own status rather than faked as "sent" so nothing downstream -- the notes, the readiness
+   * score, a report -- can ever claim the client was sent an agenda they never received.
+   */
+  | "skipped"
   | "failed";
 
 export interface ConfirmationEmailState {
@@ -108,6 +117,11 @@ export interface ConfirmationEmailState {
   sentVia?: string;
   deliveryAttempts: number;
   lastError?: string;
+  /** Set only when `status` is "skipped": when the AM chose to proceed without the email. */
+  skippedAt?: string;
+  skippedBy?: string;
+  /** The AM's own words for why, shown on the screen and carried into the notes. */
+  skipReason?: string;
   /**
    * Stable for the life of one approved draft. A retried send reuses it, so a transport that
    * succeeded on a request MTOS never saw the answer to cannot produce a second email.
@@ -234,7 +248,7 @@ export const PREP_STAGE_PREREQUISITE: Record<PrepStageId, string> = {
   confirmation_email:
     "The account review has to finish first, because the email tells the client the agenda the preparation produced.",
   prep_notes:
-    "The confirmation email has to be approved and gone out first — sent by MTOS, or sent by you and recorded here. The notes reproduce what the client received, so they cannot be written before the client has it.",
+    "The confirmation email has to be settled first — sent by MTOS, sent by you and recorded here, or deliberately skipped for this touch. The notes reproduce what the client received, so they cannot be written while that is still an open question.",
   clickup_filing:
     "The preparation notes have to be written and approved by you before anything is filed in the client's ClickUp book.",
 };

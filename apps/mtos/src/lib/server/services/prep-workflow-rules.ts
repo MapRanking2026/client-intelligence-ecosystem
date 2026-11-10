@@ -44,6 +44,17 @@ export function recomputeGates(workflow: PrepWorkflowState): PrepWorkflowState {
    * having the agenda. Nothing downstream claims MTOS delivered it.
    */
   const emailDelivered = Boolean(email && (email.status === "sent" || email.status === "sent_manually"));
+  /**
+   * A deliberate skip settles the question too.
+   *
+   * The gate exists so the notes cannot describe a message the client never got -- not to force an
+   * email out of every touch. A client who books the call the same day already knows when it is,
+   * and holding the whole preparation hostage to an email nobody needs only teaches the AM to send
+   * a pointless one to get past the screen. `skipped` is recorded as its own fact, and section 15
+   * is told plainly that no email went out, so nothing downstream can overstate it.
+   */
+  const emailSkipped = email?.status === "skipped";
+  const emailSettled = emailDelivered || emailSkipped;
   const notesApproved = isPrepDocumentComplete(workflow.document) && Boolean(workflow.document?.approvedAt);
 
   if (!researchDone && stages.research.status !== "failed" && stages.research.status !== "running") {
@@ -56,7 +67,7 @@ export function recomputeGates(workflow: PrepWorkflowState): PrepWorkflowState {
     stages.confirmation_email = { status: "ready" };
   }
 
-  if (!emailDelivered) {
+  if (!emailSettled) {
     // A recorded failure stays visible; otherwise the stage is simply not open yet.
     stages.prep_notes = stages.prep_notes.status === "failed" ? stages.prep_notes : { status: "blocked" };
   } else if (stages.prep_notes.status === "blocked") {

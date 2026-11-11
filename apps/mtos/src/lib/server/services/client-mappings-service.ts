@@ -6,7 +6,11 @@ import { clientPath, integrationSnapshotPath } from "@/src/lib/server/firebase/c
 import { getFirebaseAdminDb } from "@/src/lib/server/firebase/admin";
 import { withQuotaFallback } from "@/src/lib/server/firebase/quota";
 import { namesLikelyMatch } from "@/src/lib/server/name-matching";
-import { resolveGbpMapping } from "@/src/lib/contracts/client-mappings";
+import {
+  resolveGbpMapping,
+  suggestMappingCandidates,
+  type MappingSuggestion,
+} from "@/src/lib/contracts/client-mappings";
 import {
   fetchAllBusinesses,
   fetchCheckinBusinesses,
@@ -37,12 +41,42 @@ export interface ProviderMappingView {
   candidates: MappingCandidate[];
   autoMatchedIds: string[];
   manualIds: string[];
+  /**
+   * The best few candidates to offer when nothing matched, ranked, with a reason each.
+   *
+   * Added because the dropdown is not a workable answer at this size: on the live tenant 141 of 243
+   * clients have no Business Profile listing, and finding the right one of 227 by typing into a
+   * search box, 141 times, is not something anybody does. These are advisory -- they change no
+   * brief and no number until somebody clicks one.
+   */
+  suggestions: MappingSuggestion[];
 }
 
 export interface ClientMappingView {
   clientId: string;
   clientName: string;
   providers: ProviderMappingView[];
+}
+
+/**
+ * Rank the leftovers for one provider, so a provider with nothing matched still offers a shortlist.
+ *
+ * Suggestions are computed for every provider rather than only the ones with no match: a client
+ * with one listing matched and a second branch unmatched has the same problem on a smaller scale.
+ * Anything already matched or pinned is left out, so the list is only ever things to consider.
+ */
+function withSuggestions(
+  clientName: string,
+  view: Omit<ProviderMappingView, "suggestions">,
+): ProviderMappingView {
+  return {
+    ...view,
+    suggestions: suggestMappingCandidates({
+      clientName,
+      candidates: view.candidates,
+      excludeIds: [...view.autoMatchedIds, ...view.manualIds],
+    }),
+  };
 }
 
 async function readSnapshotPayload(tenantId: string, providerId: string): Promise<JsonRecord | null> {
@@ -108,26 +142,31 @@ export async function getClientMappingView(
     dashboardNote = `Could not load live candidates: ${error instanceof Error ? error.message : "unknown error"}`;
   }
 
-  providers.push({
-    providerId: "rankTracker",
-    label: "Rank Tracker",
-    note: dashboardNote,
-    candidates: rankTrackerCandidates,
-    autoMatchedIds: rankTrackerAuto,
-    manualIds: mappings.rankTracker || [],
-  });
-  providers.push({
-    providerId: "mapCheckins",
-    label: "Map Check-Ins",
-    note: dashboardNote,
-    candidates: checkinCandidates,
-    autoMatchedIds: checkinAuto,
-    manualIds: mappings.mapCheckins || [],
-  });
+  providers.push(
+    withSuggestions(client.name, {
+      providerId: "rankTracker",
+      label: "Rank Tracker",
+      note: dashboardNote,
+      candidates: rankTrackerCandidates,
+      autoMatchedIds: rankTrackerAuto,
+      manualIds: mappings.rankTracker || [],
+    }),
+  );
+  providers.push(
+    withSuggestions(client.name, {
+      providerId: "mapCheckins",
+      label: "Map Check-Ins",
+      note: dashboardNote,
+      candidates: checkinCandidates,
+      autoMatchedIds: checkinAuto,
+      manualIds: mappings.mapCheckins || [],
+    }),
+  );
 
   const gbpPayload = await readSnapshotPayload(context.tenantId, "google-business-profile");
   const gbpLocations = Array.isArray(gbpPayload?.locations) ? (gbpPayload!.locations as JsonRecord[]) : [];
-  providers.push({
+  providers.push(
+    withSuggestions(client.name, {
     providerId: "googleBusinessProfile",
     label: "Google Business Profile",
     note: gbpLocations.length
@@ -142,11 +181,13 @@ export async function getClientMappingView(
       .filter((location) => namesLikelyMatch(client.name, String(location.title || "")))
       .map((location) => String(location.name || "").split("/").filter(Boolean).pop() || ""),
     manualIds: mappings.googleBusinessProfile || [],
-  });
+    }),
+  );
 
   const ghlPayload = await readSnapshotPayload(context.tenantId, "gohighlevel");
   const ghlLocations = Array.isArray(ghlPayload?.locationIndex) ? (ghlPayload!.locationIndex as JsonRecord[]) : [];
-  providers.push({
+  providers.push(
+    withSuggestions(client.name, {
     providerId: "gohighlevel",
     label: "GoHighLevel",
     note: ghlLocations.length
@@ -161,13 +202,15 @@ export async function getClientMappingView(
       .filter((location) => namesLikelyMatch(client.name, String(location.name || "")))
       .map((location) => String(location.id || "")),
     manualIds: mappings.gohighlevel || [],
-  });
+    }),
+  );
 
   const googleAdsPayload = await readSnapshotPayload(context.tenantId, "google-ads");
   const googleAdsCustomers = Array.isArray(googleAdsPayload?.customerIndex)
     ? (googleAdsPayload!.customerIndex as JsonRecord[])
     : [];
-  providers.push({
+  providers.push(
+    withSuggestions(client.name, {
     providerId: "googleAds",
     label: "Google Ads",
     note: googleAdsCustomers.length
@@ -182,13 +225,15 @@ export async function getClientMappingView(
       .filter((customer) => namesLikelyMatch(client.name, String(customer.descriptiveName || customer.name || "")))
       .map((customer) => String(customer.customerId || customer.id || "")),
     manualIds: mappings.googleAds || [],
-  });
+    }),
+  );
 
   const googleLsaPayload = await readSnapshotPayload(context.tenantId, "google-lsa");
   const googleLsaAccounts = Array.isArray(googleLsaPayload?.accountIndex)
     ? (googleLsaPayload!.accountIndex as JsonRecord[])
     : [];
-  providers.push({
+  providers.push(
+    withSuggestions(client.name, {
     providerId: "googleLsa",
     label: "Google Local Services Ads",
     note: googleLsaAccounts.length
@@ -203,7 +248,8 @@ export async function getClientMappingView(
       .filter((account) => namesLikelyMatch(client.name, String(account.businessName || "")))
       .map((account) => String(account.accountId || "")),
     manualIds: mappings.googleLsa || [],
-  });
+    }),
+  );
 
   /*
     Meta Ads, pinnable for the first time.
@@ -217,7 +263,8 @@ export async function getClientMappingView(
   const metaAdsAccounts = Array.isArray(metaAdsPayload?.accountIndex)
     ? (metaAdsPayload!.accountIndex as JsonRecord[])
     : [];
-  providers.push({
+  providers.push(
+    withSuggestions(client.name, {
     providerId: "metaAds",
     label: "Meta Ads",
     note: metaAdsAccounts.length
@@ -239,7 +286,8 @@ export async function getClientMappingView(
       .filter((account) => namesLikelyMatch(client.name, String(account.name || "")))
       .map((account) => String(account.accountId || "")),
     manualIds: mappings.metaAds || [],
-  });
+    }),
+  );
 
   return {
     clientId: client.id,

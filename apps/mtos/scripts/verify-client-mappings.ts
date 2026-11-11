@@ -31,6 +31,7 @@ import {
   resolveAccountIds,
   resolveGbpMapping,
   resolveGhlLocationId,
+  suggestMappingCandidates,
 } from "@/src/lib/contracts/client-mappings";
 import type { ClientRecord } from "@/src/lib/mtos-data";
 import type { IntegrationSnapshotRecord } from "@/src/lib/contracts/integration-sync";
@@ -132,6 +133,30 @@ async function main() {
     }
     if (!gbpMapping.locations.length) {
       flags.push("GBP resolves to no listing — the brief will say no location matches this client");
+      /*
+        And the closest names, so this is a shortlist rather than a complaint. The same ranking the
+        mapping screen shows, printed here because a run over the whole book is how you work through
+        141 of them without opening 141 screens.
+      */
+      const suggestions = suggestMappingCandidates({
+        clientName: client.name,
+        candidates: gbpDiscovered.map((entry) => ({
+          id: gbpLocationId(entry),
+          label: String(entry.title || ""),
+          detail: String(entry.storeCode || entry.websiteUri || ""),
+        })),
+        limit: 3,
+      });
+      for (const suggestion of suggestions) {
+        lines.push(
+          `                 ? ${suggestion.label} (${suggestion.id}) — ${
+            suggestion.score >= 70 ? "likely" : suggestion.score >= 45 ? "possible" : "weak"
+          }: ${suggestion.why}`,
+        );
+      }
+      if (!suggestions.length) {
+        lines.push("                 ? no listing in the snapshot shares a distinguishing word with this name");
+      }
     }
 
     // ---- GoHighLevel ------------------------------------------------------

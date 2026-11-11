@@ -1,5 +1,19 @@
+/**
+ * A name reduced to lowercase letters, digits and single spaces.
+ *
+ * Accents are folded rather than deleted. Deleting them is what this did until 10 November 2026,
+ * which turned "Éden 3D Québec" into "den 3d bec" -- not a normalization of the name but a
+ * different name, and one that could never match the listing it belonged to. Both sides of a
+ * comparison fold the same way, so an accented client name and an unaccented listing title meet.
+ */
 export function normalizeText(value: string) {
-  return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  return value
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
 }
 
 export function stripBusinessNameNoise(value: string) {
@@ -23,18 +37,25 @@ export function stripBusinessNameNoise(value: string) {
  * before anything else is thrown away.
  */
 const IDENTITY_FREE_WORDS = new Set([
-  "and",
-  "the",
-  "of",
   "a",
   "an",
-  "llc",
-  "inc",
-  "corp",
+  "and",
+  "at",
+  "by",
   "co",
-  "ltd",
-  "usa",
+  "corp",
   "dba",
+  "for",
+  "in",
+  "inc",
+  "llc",
+  "ltd",
+  "of",
+  "on",
+  "the",
+  "to",
+  "usa",
+  "with",
 ]);
 
 /**
@@ -46,6 +67,8 @@ const IDENTITY_FREE_WORDS = new Set([
 function identityTokens(value: string): string[] {
   return value
     .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
     .replace(/&/g, " and ")
     .replace(/[^a-z0-9]+/g, " ")
     .split(" ")

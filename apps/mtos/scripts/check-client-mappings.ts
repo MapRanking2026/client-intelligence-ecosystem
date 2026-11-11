@@ -32,6 +32,7 @@
  * Run with: npm run check:client-mappings
  */
 import { namesLikelyMatch } from "@/src/lib/server/name-matching";
+import { suggestMappingCandidates } from "@/src/lib/contracts/client-mappings";
 import {
   gbpLocationId,
   pinMatchesGbpLocation,
@@ -312,6 +313,99 @@ check(
 );
 
 // ---------------------------------------------------------------------------
+scenario("Suggesting a pin, when nothing matched");
+
+/*
+  Every name below is a real pair from the live tenant on 10 November 2026, taken from the 141
+  clients that had no Business Profile listing. The point of the ranking is that the good ones and
+  the bad ones are both offered and are visibly different -- a suggestion is a shortlist entry, not
+  a match, and the only thing that acts on it is a person clicking it.
+*/
+const LISTINGS = [
+  { id: "l1", label: "Law Office of Roberto Alvarez, APC", detail: "" },
+  { id: "l2", label: "Castro's Hardscape & Masonry", detail: "" },
+  { id: "l3", label: "M M garage door services", detail: "" },
+  { id: "l4", label: "Naturally Clean", detail: "" },
+  { id: "l5", label: "HLI Tree Services", detail: "" },
+  { id: "l6", label: "Belza Painting and Resurfacing", detail: "" },
+];
+
+const forAlvarez = suggestMappingCandidates({ clientName: "Roberto Alvarez Law", candidates: LISTINGS });
+check("the right listing is offered", forAlvarez.some((entry) => entry.id === "l1"), forAlvarez.map((e) => e.label).join(" | "));
+check("and it is first", forAlvarez[0]?.id === "l1", forAlvarez[0]?.label);
+check("it is ranked as likely rather than weak", (forAlvarez[0]?.score ?? 0) >= 70, String(forAlvarez[0]?.score));
+check("and it says why", (forAlvarez[0]?.why || "").length > 20, forAlvarez[0]?.why);
+
+const forCastro = suggestMappingCandidates({ clientName: "Castro's Harscapes and Masonry", candidates: LISTINGS });
+check(
+  "a typo on our side still surfaces the listing",
+  forCastro[0]?.id === "l2",
+  forCastro.map((entry) => entry.label).join(" | "),
+);
+
+const forHli = suggestMappingCandidates({ clientName: "Hli Tree Sevices", candidates: LISTINGS });
+check("a misspelt client name finds its listing", forHli[0]?.id === "l5", forHli[0]?.label);
+
+/*
+  The case that decides this is suggestions and not matching. Three different garage-door clients
+  all had "M M garage door services" as their single closest candidate, so a rule that matched on
+  this evidence would hand one client another company's reviews.
+*/
+const forGarage = suggestMappingCandidates({ clientName: "Master Pro Garage Door", candidates: LISTINGS });
+check(
+  "a trade-word-only overlap is NOT offered as likely",
+  (forGarage[0]?.score ?? 0) < 70,
+  `${forGarage[0]?.label} scored ${forGarage[0]?.score}`,
+);
+check(
+  "the words that merely say what the business does carry no weight on their own",
+  forGarage.every((entry) => entry.score < 45),
+  forGarage.map((entry) => `${entry.label}:${entry.score}`).join(" | "),
+);
+check(
+  "an unrelated business is not offered at all",
+  !suggestMappingCandidates({ clientName: "Clean Group", candidates: LISTINGS }).some(
+    (entry) => entry.id === "l4" && entry.score >= 45,
+  ),
+);
+
+check(
+  "something already matched is not suggested again",
+  !suggestMappingCandidates({
+    clientName: "Roberto Alvarez Law",
+    candidates: LISTINGS,
+    excludeIds: ["l1"],
+  }).some((entry) => entry.id === "l1"),
+);
+check(
+  "a pinned listing is not suggested again either",
+  !suggestMappingCandidates({
+    clientName: "Belza Painting & Resurfacing",
+    candidates: LISTINGS,
+    excludeIds: ["l6"],
+  }).some((entry) => entry.id === "l6"),
+);
+check(
+  "the Belza listing is the top suggestion when it is not yet pinned",
+  suggestMappingCandidates({ clientName: "Belza Painting & Resurfacing", candidates: LISTINGS })[0]?.id === "l6",
+);
+check(
+  "the list is capped so the screen stays a shortlist",
+  suggestMappingCandidates({ clientName: "Belza Painting", candidates: LISTINGS, limit: 2 }).length <= 2,
+);
+check("an empty client name suggests nothing", suggestMappingCandidates({ clientName: "", candidates: LISTINGS }).length === 0);
+check("no candidates suggests nothing", suggestMappingCandidates({ clientName: "Anything", candidates: [] }).length === 0);
+check(
+  "suggestions come back in descending order",
+  (() => {
+    const scores = suggestMappingCandidates({ clientName: "Belza Painting & Resurfacing", candidates: LISTINGS }).map(
+      (entry) => entry.score,
+    );
+    return scores.every((score, index) => index === 0 || scores[index - 1] >= score);
+  })(),
+);
+
+// ---------------------------------------------------------------------------
 
 console.log(`\n${checks - failures} of ${checks} checks passed.`);
 console.log(
@@ -326,9 +420,11 @@ console.log(
     "  - the Meta Ads sync itself: `/me/adaccounts` paging, the `/insights` call, and leads being",
     "    summed across the three action types Meta reports a lead under",
     "  - that an account Meta refuses is stored as the refusal rather than as zero spend",
-    "  - the 141 clients on the live tenant that have no Business Profile listing at all: there is",
-    "    no listing for them among the ones the connected Google accounts hold, which is a pin or a",
-    "    connection to add rather than a rule to loosen",
+    "  - of the 141 clients on the live tenant with no Business Profile listing, 83 share no",
+    "    distinguishing word with any unclaimed listing: their listing is not in the accounts MTOS",
+    "    is connected to, which is a connection or a pin to add rather than a rule to loosen",
+    "  - whether a suggestion is RIGHT. It is a shortlist entry; the only thing that acts on one is",
+    "    an account manager clicking it",
   ].join("\n"),
 );
 

@@ -23,6 +23,15 @@ interface ProviderMappingView {
   candidates: MappingCandidate[];
   autoMatchedIds: string[];
   manualIds: string[];
+  suggestions: MappingSuggestion[];
+}
+
+interface MappingSuggestion {
+  id: string;
+  label: string;
+  detail: string;
+  score: number;
+  why: string;
 }
 
 interface ClientProfileMappingsProps {
@@ -66,6 +75,12 @@ function ProviderMappingBlock({
   }, [query, provider.candidates, autoSet, manualSet]);
 
   const showSearchInput = provider.candidates.length > 0 || provider.providerId === "googleBusinessProfile";
+
+  // A suggestion the AM has since pinned drops off the list without waiting for a page load.
+  const suggestions = useMemo(
+    () => provider.suggestions.filter((suggestion) => !manualSet.has(suggestion.id) && !autoSet.has(suggestion.id)),
+    [provider.suggestions, manualSet, autoSet],
+  );
 
   return (
     <div className="rounded-2xl border border-white/8 bg-black/20 p-4">
@@ -117,10 +132,58 @@ function ProviderMappingBlock({
 
         {!provider.autoMatchedIds.length && !manualIds.length ? (
           <p className="rounded-xl border border-amber-400/15 bg-amber-500/8 px-3 py-2 text-xs text-amber-100">
-            Nothing matched automatically -- search below to pin the correct profile.
+            Nothing matched automatically{suggestions.length ? " -- the closest names are below." : " -- search below to pin the correct profile."}
           </p>
         ) : null}
       </div>
+
+      {/*
+        The closest names, ranked, with the reason each one is here.
+
+        The search box below is the only way to pin something, and on the live tenant that means
+        finding one listing among 227 by typing, for 141 clients that have none. Nobody does that,
+        so the mapping screen was in practice a screen that reported the problem. These are a
+        shortlist: a suggestion changes nothing until it is clicked, which is why the ranking can
+        afford to offer a weak match and say it is weak -- a glance costs nothing and a wrong
+        listing on a brief costs a client call.
+      */}
+      {suggestions.length ? (
+        <div className="mt-3">
+          <p className="text-xs font-semibold text-slate-400">
+            Closest names {suggestions.length === 1 ? "" : `(${suggestions.length})`} — check before pinning
+          </p>
+          <div className="mt-2 space-y-1">
+            {suggestions.map((suggestion) => (
+              <button
+                key={`suggest-${suggestion.id}`}
+                type="button"
+                onClick={() => onAdd(suggestion.id)}
+                className="flex w-full items-start justify-between gap-3 rounded-xl border border-white/8 bg-white/4 px-3 py-2 text-left transition hover:border-emerald-400/30"
+              >
+                <div className="min-w-0">
+                  <p className="truncate text-sm text-slate-200">
+                    {suggestion.label}
+                    <span
+                      className={`ml-2 text-xs ${
+                        suggestion.score >= 70
+                          ? "text-emerald-300"
+                          : suggestion.score >= 45
+                            ? "text-amber-300"
+                            : "text-slate-500"
+                      }`}
+                    >
+                      {suggestion.score >= 70 ? "likely" : suggestion.score >= 45 ? "possible" : "weak"}
+                    </span>
+                  </p>
+                  <p className="text-xs text-slate-500">{suggestion.why}</p>
+                  {suggestion.detail ? <p className="truncate text-xs text-slate-600">{suggestion.detail}</p> : null}
+                </div>
+                <Plus className="h-4 w-4 shrink-0 text-emerald-300" />
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : null}
 
       {showSearchInput ? (
         <div className="mt-3">

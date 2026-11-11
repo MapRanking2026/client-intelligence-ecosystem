@@ -24,6 +24,7 @@
     "check:touch-stages": "tsx scripts/check-touch-stages.ts",
     "check:client-mappings": "tsx scripts/check-client-mappings.ts",
     "check:lead-mix": "tsx scripts/check-lead-mix.ts",
+    "check:performance-refresh": "tsx scripts/check-performance-refresh.ts",
     "check:prep-brief": "tsx scripts/check-prep-brief.ts",
     "check:prep-generation": "tsx scripts/check-prep-generation.ts",
     "check:agenda-email": "tsx scripts/check-agenda-email.ts",

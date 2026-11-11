@@ -19,6 +19,7 @@ import { RetentionButton } from "@/src/components/mtos/retention-button";
 import { Linkified, Callout, SmartMarkdown } from "@/src/components/mtos/annotate";
 import { countClientAttachments } from "@/src/lib/server/services/client-attachments-service";
 import { ClientProfileMappings } from "@/src/components/mtos/client-profile-mappings";
+import { PerformanceRefresh } from "@/src/components/mtos/performance-refresh";
 import { LeadVerificationQuickActions } from "@/src/components/mtos/lead-verification-quick-actions";
 import {
   ScorecardGrid,
@@ -370,28 +371,24 @@ export default async function ClientWorkspacePage({
   );
 
   const prep = touch?.prepPack;
-  // These numbers are a snapshot taken when the preparation last ran, not a live read. Saying so,
-  // with the date, is the difference between an AM quoting a current figure and quoting a figure
-  // from five weeks ago in front of the client.
-  const snapshotDate = prep?.preparedAt ? new Date(prep.preparedAt) : null;
-  const snapshotValid = Boolean(snapshotDate && !Number.isNaN(snapshotDate.getTime()));
+  /*
+    These numbers are a snapshot, not a live read, and the card at the top says so with its date --
+    the difference between an AM quoting a current figure and quoting one from five weeks ago in
+    front of the client.
+
+    It now carries the way out as well as the warning. Saying "run the preparation again for current
+    numbers" was true and not much use: that is a three-to-five-minute job which also re-runs the
+    model and rewrites the agenda, so nobody set it off to check this month's call volume before a
+    call. The refresh button re-reads the platforms and rewrites these three panels only.
+  */
   const performance = prep ? (
     <div className="flex flex-col gap-4">
-      <div className="card" style={{ borderLeft: "3px solid var(--accent)" }}>
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <div className="card-title">Snapshot, not live data</div>
-            <p className="mt-1.5 text-[0.86rem]" style={{ color: "var(--text-2)" }}>
-              Taken when the preparation last ran for {client.name}
-              {snapshotValid
-                ? ` on ${new Intl.DateTimeFormat("en-US", { dateStyle: "medium", timeStyle: "short" }).format(snapshotDate!)}`
-                : ""}
-              . Nothing here has changed since. Run the preparation again for current numbers.
-            </p>
-          </div>
-          <span className="chip muted">{snapshotValid ? "Historical snapshot" : "Date unknown"}</span>
-        </div>
-      </div>
+      <PerformanceRefresh
+        clientId={client.id}
+        clientName={client.name}
+        {...(prep.preparedAt ? { preparedAt: prep.preparedAt } : {})}
+        {...(prep.performanceRefreshedAt ? { refreshedAt: prep.performanceRefreshedAt } : {})}
+      />
       <div className="card">
         <div className="card-title mb-4">Business scorecard</div>
         <ScorecardGrid scorecard={prep.businessScorecard} clientId={client.id} />

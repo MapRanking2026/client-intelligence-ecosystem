@@ -2208,6 +2208,89 @@ async function buildPrepPack(
   } satisfies MonthlyTouchPrepPack;
 }
 
+/**
+ * Rebuild the three performance panels on this client's latest touch, from whatever the provider
+ * snapshots currently hold.
+ *
+ * The caller refreshes the platforms first -- see `refreshClientPerformance` in
+ * `client-performance-service`, which owns that half because `integration-sync` imports this
+ * module and importing its refreshers back in here would close a cycle.
+ *
+ * ## Why not `prepareMonthlyTouch` with `includeClaude: false`
+ *
+ * That would have been the one-line version and it is the wrong tool. With no model in the run,
+ * `executiveBrief`, `agenda`, `talkingPoints` and `aiRecommendations` fall back to their
+ * deterministic text, so refreshing a touch whose brief had already been written -- or approved --
+ * would quietly replace the model's agenda with a placeholder one. A button that says "refresh"
+ * must not rewrite the brief.
+ *
+ * So the whole pack is rebuilt in memory and exactly three fields are written back: the business
+ * scorecard, the SEO and Business Profile panel, and the paid-media panel. Everything else on the
+ * touch, the brief included, is left as the AM left it.
+ */
+export async function rewriteTouchPerformancePanels(
+  context: TenantContext,
+  clientId: string,
+  refreshedAt: string,
+): Promise<{ rebuilt: boolean; touchId?: string }> {
+  const db = getFirebaseAdminDb();
+  if (!db) {
+    throw new Error("Firestore is not configured, so nothing can be rewritten.");
+  }
+
+  const dataSource = getMtosDataSource(context);
+  const client = await dataSource.getClientById(clientId);
+  if (!client) {
+    throw new Error("Client not found or not visible for the current user");
+  }
+
+  const touches = await dataSource.getMonthlyTouches();
+  const touch = touches
+    .filter((candidate) => candidate.clientId === clientId)
+    .sort((left, right) => String(right.updatedAt || "").localeCompare(String(left.updatedAt || "")))[0];
+
+  if (!touch) {
+    return { rebuilt: false };
+  }
+
+  const [openCommitments, opportunities, integrationSources, rawSnapshots] = await Promise.all([
+    dataSource.getCommitments(clientId),
+    dataSource.getOpportunities(clientId),
+    getIntegrationSources(context.tenantId),
+    getRawIntegrationSnapshots(context.tenantId),
+  ]);
+
+  const pack = await buildPrepPack(
+    context,
+    client,
+    touch,
+    openCommitments,
+    opportunities,
+    integrationSources,
+    rawSnapshots,
+  );
+
+  /*
+    Three fields, by name, with `mergeFields` so nothing else on the document can be caught by this
+    write. The lead-mix tiles are filled from the verification review already stored on the touch,
+    the same join the preparation and the touch screen both make.
+  */
+  await db.doc(monthlyTouchPath(context.tenantId, touch.id)).set(
+    stripUndefinedDeep({
+      prepPack: {
+        ...touch.prepPack,
+        businessScorecard: withVerifiedLeadMix(pack.businessScorecard, touch.leadVerification),
+        seoPerformance: pack.seoPerformance,
+        adsPerformance: pack.adsPerformance,
+        performanceRefreshedAt: refreshedAt,
+      },
+    }),
+    { mergeFields: ["prepPack"] },
+  );
+
+  return { rebuilt: true, touchId: touch.id };
+}
+
 export async function prepareMonthlyTouch(
   context: TenantContext,
   touchId: string,

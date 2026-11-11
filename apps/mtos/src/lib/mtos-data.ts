@@ -425,6 +425,16 @@ export interface MonthlyTouchPrepPack {
   decisionsTogether?: DecisionTogether[];
   /** Soft variety guardrail note — how this touch differs from the last, or a warning if too similar. */
   varietyNote?: string;
+  /**
+   * When the three performance panels were last re-read on their own, from the Performance tab
+   * refresh button.
+   *
+   * Distinct from `preparedAt`, which is when the whole preparation ran: an AM can refresh the
+   * numbers several times between preparations, and the screen has to be able to say which of the
+   * two dates the figures in front of them carry. Absent on every touch prepared before the button
+   * existed, which reads as "never refreshed separately" rather than as a missing value.
+   */
+  performanceRefreshedAt?: string;
 }
 
 /** A rotating meeting "format" that changes the angle/structure of a touch month to month. */

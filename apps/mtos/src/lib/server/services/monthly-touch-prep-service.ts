@@ -642,6 +642,18 @@ function extractGbpProfileInsights(
     });
 }
 
+/**
+ * One scorecard tile.
+ *
+ * `source` is the line printed under the number, and `missingReason` replaces it when there is no
+ * number. Those are two different sentences and the tile only ever shows one of them, which is the
+ * fix for a whole class of misdirection: a blank tile used to print the system it would have come
+ * from, so "New leads --" read as "we asked GoHighLevel and it gave us nothing" when the truth, for
+ * 16 of the 28 stored touches, was that no GoHighLevel sub-account is mapped to the client at all.
+ * The AM cannot act on the first sentence and can act on the second.
+ *
+ * Callers that pass no reason keep the old behaviour, so a tile is never left with a blank line.
+ */
 function metric(
   label: string,
   value: number | null,
@@ -649,6 +661,7 @@ function metric(
   source: string,
   unit: ScorecardMetric["unit"] = "count",
   period = "Last 30 days",
+  missingReason?: string,
 ): ScorecardMetric {
   return {
     label,
@@ -656,7 +669,7 @@ function metric(
     previousValue,
     unit,
     availability: value === null ? "unavailable" : "available",
-    source,
+    source: value === null && missingReason ? missingReason : source,
     period,
   };
 }
@@ -709,6 +722,18 @@ function buildBusinessScorecard(
     verification engine uses the same ones, so the tiles and the lead table cannot disagree about
     what counts as a form or as a missed call.
   */
+  /*
+    Why a GoHighLevel tile is empty, which is a different fact from where it would have come from.
+
+    Two cases, and an AM does different things about them: no sub-account is mapped to this client
+    (go and map one), or one is mapped and did not return this particular figure (the sub-account
+    is there but the pipeline, or the window, is empty).
+  */
+  const crmMissingReason = (what: string) =>
+    crm
+      ? `The mapped GoHighLevel sub-account${crm.locationName ? ` (${String(crm.locationName)})` : ""} returned no ${what}`
+      : "No GoHighLevel sub-account is mapped to this client — pin one on its integration mapping";
+
   const rawLeads = crm && Array.isArray(crm.leads) ? (crm.leads as JsonRecord[]) : [];
   const crmLeads = Boolean(crm) && rawLeads.length > 0;
   const leadMix = summarizeLeadMix(rawLeads);
@@ -732,7 +757,15 @@ function buildBusinessScorecard(
     : "Last 30 days";
 
   return {
-    totalLeads: metric("New leads", totalLeads, null, "GoHighLevel contacts", "count", "Last 30 days"),
+    totalLeads: metric(
+      "New leads",
+      totalLeads,
+      null,
+      "GoHighLevel contacts",
+      "count",
+      "Last 30 days",
+      crmMissingReason("new leads"),
+    ),
     qualifiedLeads: metric(
       "Pipeline opportunities",
       qualifiedLeads,
@@ -740,6 +773,7 @@ function buildBusinessScorecard(
       "GoHighLevel opportunities",
       "count",
       "All time",
+      crmMissingReason("opportunities"),
     ),
     costPerLead: metric(
       "Cost per lead",
@@ -756,6 +790,7 @@ function buildBusinessScorecard(
       "Google Business Profile performance",
       "count",
       gbpPeriod,
+      "No Business Profile listing resolved for this client — pin the right listing on its integration mapping",
     ),
     /*
       Both of these were hard-coded null, with a note saying what they would need, beside a
@@ -806,6 +841,7 @@ function buildBusinessScorecard(
       "GoHighLevel won opportunities",
       "count",
       "All time",
+      crmMissingReason("won opportunities"),
     ),
     shareOfLocalVoice: metric(
       "Market Share (avg across keywords)",
@@ -814,6 +850,7 @@ function buildBusinessScorecard(
       "Rank Tracker keyword scans",
       "percent",
       "Latest scan vs previous",
+      "No Rank Tracker keyword scans for this client — pin its Rank Tracker profile on the integration mapping",
     ),
     top3Coverage: metric(
       "Average keyword rank",
@@ -822,6 +859,7 @@ function buildBusinessScorecard(
       "Rank Tracker keyword scans",
       "count",
       "Latest scan vs previous",
+      "No Rank Tracker keyword scans for this client — pin its Rank Tracker profile on the integration mapping",
     ),
     mapCheckIns: metric(
       "Map Check-In posts",
@@ -832,6 +870,7 @@ function buildBusinessScorecard(
       "Map Check-Ins dashboard",
       "count",
       "All time",
+      "No Map Check-Ins profile resolved for this client — pin one on its integration mapping",
     ),
     hasSalesStructureData: totalLeads !== null && qualifiedLeads !== null,
   };

@@ -17,6 +17,7 @@ import type {
 } from "@/src/lib/mtos-data";
 import { LEAD_CHANNEL_LABEL } from "@/src/lib/mtos-data";
 import { CALL_LABEL_LABEL, automaticCallLabel } from "@/src/lib/contracts/call-labels";
+import { callWasMissed, leadArrivalSignal, resolveLeadType } from "@/src/lib/contracts/lead-mix";
 import { gbpLocationId, resolveGbpMapping } from "@/src/lib/contracts/client-mappings";
 import { getMtosDataSource } from "@/src/lib/server/data/seed-mtos-data-source";
 import { getFirebaseAdminDb } from "@/src/lib/server/firebase/admin";
@@ -111,18 +112,9 @@ function pickEnum<T extends string>(value: unknown, allowed: readonly T[], fallb
 
 /** All the source/attribution text of a lead, lowercased, for heuristic matching. */
 function leadSignal(lead: JsonRecord): string {
-  const attribution = (lead.attribution || {}) as JsonRecord;
-  return [
-    lead.source,
-    attribution.source,
-    attribution.medium,
-    attribution.campaign,
-    attribution.referrer,
-    ...(Array.isArray(lead.tags) ? (lead.tags as unknown[]) : []),
-  ]
-    .map((part) => str(part))
-    .join(" ")
-    .toLowerCase();
+  // The shared rule, so the brief's scorecard tiles and this table cannot disagree about how a
+  // lead arrived. See `contracts/lead-mix`.
+  return leadArrivalSignal(lead);
 }
 
 function resolveChannelHeuristic(lead: JsonRecord): LeadChannel {
@@ -150,14 +142,7 @@ function resolveChannelHeuristic(lead: JsonRecord): LeadChannel {
 }
 
 function resolveTypeHeuristic(lead: JsonRecord): LeadType {
-  const signal = leadSignal(lead);
-  if (/call|phone|inbound|dial/.test(signal)) {
-    return "call";
-  }
-  if (/chat|sms|message|widget|whatsapp/.test(signal)) {
-    return "chat";
-  }
-  return "form";
+  return resolveLeadType(lead);
 }
 
 /** Deterministic first-pass verdict. Conservative: unknowns default to needs_review. */
@@ -183,13 +168,12 @@ function contactUrl(locationId: string, leadId: string): string | undefined {
 
 /** First-pass verdict for a phone call from its metadata (duration + status). */
 function classifyCallHeuristic(call: JsonRecord): { status: LeadStatus; category: LeadCategory } {
-  const status = str(call.status).toLowerCase();
   const duration = Number(call.durationSec) || 0;
-  const missed = /missed|no-?answer|no_answer|voicemail|busy|failed|cancel|unanswered|declin/.test(status);
   // Not answered / went to voicemail -> its own status so missed calls can be
   // counted. Keep it a valid_new_lead category (a missed call is still a real
-  // potential customer the client didn't reach), not spam.
-  if (missed) {
+  // potential customer the client didn't reach), not spam. The rule itself is
+  // shared with the brief's "Calls missed" tile -- see `contracts/lead-mix`.
+  if (callWasMissed(call)) {
     return { status: "missed_call", category: "valid_new_lead" };
   }
   // A very short connected call is almost always a misdial or hangup.

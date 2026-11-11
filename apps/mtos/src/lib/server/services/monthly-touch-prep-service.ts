@@ -5,6 +5,11 @@ import type { IntegrationSnapshotRecord } from "@/src/lib/contracts/integration-
 import type { TenantContext } from "@/src/lib/contracts/mtos";
 import { normalizePrepBrief, type PrepBrief } from "@/src/lib/contracts/prep-brief";
 import { gbpLocationId, resolveGbpMapping } from "@/src/lib/contracts/client-mappings";
+import {
+  leadWindowLabel,
+  summarizeLeadMix,
+  withVerifiedLeadMix,
+} from "@/src/lib/contracts/lead-mix";
 import type {
   AdsPerformancePack,
   BusinessScorecard,
@@ -698,6 +703,20 @@ function buildBusinessScorecard(
   const bookedJobs = crm && typeof crm.bookedJobs === "number" ? crm.bookedJobs : null;
   const googleAdsCostPerLead = googleAds && typeof googleAds.costPerLead === "number" ? googleAds.costPerLead : null;
 
+  /*
+    The normalized lead records this client's sub-account returned, which carry a type and, for
+    calls, the status the telephony provider reported. `summarizeLeadMix` holds the rules; the
+    verification engine uses the same ones, so the tiles and the lead table cannot disagree about
+    what counts as a form or as a missed call.
+  */
+  const rawLeads = crm && Array.isArray(crm.leads) ? (crm.leads as JsonRecord[]) : [];
+  const crmLeads = Boolean(crm) && rawLeads.length > 0;
+  const leadMix = summarizeLeadMix(rawLeads);
+  // At the cap the real figure may be higher, and a tile that quotes a capped sample as a total is
+  // the kind of number an AM repeats to a client.
+  const leadsAreCapped = rawLeads.length >= GHL_SNAPSHOT_LEAD_CAP;
+  const leadWindow = leadWindowLabel();
+
   const gbpTotals = gbpPerformance.reduce(
     (acc, row) => ({
       calls: acc.calls + row.calls,
@@ -738,14 +757,47 @@ function buildBusinessScorecard(
       "count",
       gbpPeriod,
     ),
-    callsMissed: metric("Calls missed", null, null, "Requires CRM call-tracking data", "count", "Last 30 days"),
+    /*
+      Both of these were hard-coded null, with a note saying what they would need, beside a
+      verification engine that had been counting them all along. The AM read "--" on both and the
+      note told them the data did not exist.
+
+      Counted here from the normalized leads the GoHighLevel sync already stores per client, so the
+      tiles cost nothing extra. The snapshot's copy is capped (`GHL_LEAD_PULL_CAP`) to keep the
+      shared document under Firestore's 1MB ceiling, so `withVerifiedLeadMix` replaces both numbers
+      with the per-client review's fuller count the moment one is available -- which, during a
+      preparation, is immediately after the parallel block that produces both.
+    */
+    /*
+      Null unless a call's outcome could actually be read.
+
+      The shared snapshot holds contacts, not call conversations: a lead it types as a call from its
+      source wording carries no status, so there is nothing to judge. Reporting the resulting zero
+      would put "0 calls missed" on a brief beside 83 calls -- a confident number nobody measured,
+      which is the one thing this scorecard exists not to do. The per-client verification review
+      does fetch the call records, and `withVerifiedLeadMix` fills this in from it.
+    */
+    callsMissed: metric(
+      "Calls missed",
+      leadMix.callsWithStatus > 0 ? leadMix.missedCalls : null,
+      null,
+      leadMix.callsWithStatus > 0
+        ? `GoHighLevel call records${leadsAreCapped ? " (snapshot sample)" : ""}`
+        : crmLeads
+          ? "Needs the lead & call verification run — the shared snapshot holds contacts, not call outcomes"
+          : "Requires a mapped GoHighLevel sub-account",
+      "count",
+      leadWindow,
+    ),
     formSubmissions: metric(
       "Form submissions",
+      crmLeads ? leadMix.forms : null,
       null,
-      null,
-      "Requires per-source contact breakdown",
+      crmLeads
+        ? `GoHighLevel contacts by source${leadsAreCapped ? " (snapshot sample)" : ""}`
+        : "Requires a mapped GoHighLevel sub-account",
       "count",
-      "Last 30 days",
+      leadWindow,
     ),
     bookedJobs: metric(
       "Booked jobs (won)",
@@ -784,6 +836,16 @@ function buildBusinessScorecard(
     hasSalesStructureData: totalLeads !== null && qualifiedLeads !== null,
   };
 }
+
+/**
+ * How many leads the shared snapshot keeps per client before it stops.
+ *
+ * Mirrors `GHL_LEAD_PULL_CAP` in the sync. Repeated rather than imported because importing it
+ * would pull the whole integration-sync module -- and its Google and GoHighLevel clients -- into
+ * the preparation for one number. If the sync's cap changes, this reads high and the tile says
+ * "snapshot sample" when it did not need to, which is the harmless direction.
+ */
+const GHL_SNAPSHOT_LEAD_CAP = 100;
 
 function formatReviewAge(timestamp: string | null) {
   if (!timestamp) {
@@ -2156,6 +2218,15 @@ export async function prepareMonthlyTouch(
     }),
   ]);
   console.info(`[prep] ${client.id}: data gathering took ${Math.round((Date.now() - prepStartedAt) / 1000)}s`);
+
+  /*
+    The scorecard's two lead-mix tiles, upgraded from the snapshot's capped sample to the review's
+    full per-client count. Both results are in hand here, so this costs nothing and keeps the two
+    stretches of I/O above parallel.
+  */
+  if (prepPack) {
+    prepPack.businessScorecard = withVerifiedLeadMix(prepPack.businessScorecard, leadVerification);
+  }
   const env = getServerEnv();
 
   let executiveBrief = buildExecutiveBrief(

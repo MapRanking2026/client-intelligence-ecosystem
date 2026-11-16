@@ -1,8 +1,10 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { AlertTriangle, Check, Eye, Plus, RefreshCw, Save, Trash2, X } from "lucide-react";
 
+import { hasMeetingNotes } from "@/src/lib/contracts/follow-through-notes";
 import { readJsonResponse } from "@/src/lib/api/read-json-response";
 import {
   GOAL_STATUSES,
@@ -123,12 +125,15 @@ export function FollowThroughNotes({
   touchId,
   notes,
   draftNote,
+  autoPrepare = false,
 }: {
   touchId: string;
   /** Absent until the AM asks MTOS to read the call -- the first draft is a model pass. */
   notes?: NotesDraft;
+  autoPrepare?: boolean;
   draftNote?: string;
 }) {
+  const router = useRouter();
   const [draft, setDraft] = useState<NotesDraft | undefined>(notes);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
@@ -163,6 +168,8 @@ export function FollowThroughNotes({
     setError("");
     try {
       await post({ action: "save_notes", notes: draft });
+      await post({ action: "prepare_follow_through" });
+      window.location.assign("?step=tickets#tickets");
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "The notes were not saved.");
     } finally {
@@ -170,12 +177,14 @@ export function FollowThroughNotes({
     }
   }
 
-  async function redraft() {
+  async function redraft(manual = false) {
     setBusy("draft");
     setError("");
     setConfirmRedraft(false);
     try {
-      const data = await post({ action: "draft_notes" });
+      const data = await post(draft || manual
+        ? { action: "draft_notes", manual }
+        : { action: "prepare_follow_through" });
       if (data?.notes) setDraft(data.notes);
       setNote(data?.note || "");
     } catch (caught) {
@@ -184,6 +193,30 @@ export function FollowThroughNotes({
       setBusy("");
     }
   }
+
+  useEffect(() => {
+    if (!autoPrepare) return;
+    let active = true;
+    const timer = window.setTimeout(() => {
+      setBusy("draft");
+      void post({ action: "prepare_follow_through" }).then((data) => {
+        if (active && data?.notes) {
+          const generated = data.notes;
+          setDraft((current) => hasMeetingNotes(current) ? current : generated);
+          setBusy("");
+          router.refresh();
+        }
+      }).catch((error: unknown) => {
+        if (active) setError(error instanceof Error ? error.message : "The drafts could not be prepared.");
+      }).finally(() => {
+        if (active) setBusy("");
+      });
+    }, 0);
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [autoPrepare, post, router]);
 
   function setDepartment(index: number, next: DepartmentNotes) {
     setDraft((previous) =>
@@ -208,8 +241,7 @@ export function FollowThroughNotes({
     return (
       <div className="grid gap-3">
         <p className="text-[0.86rem] leading-7" style={{ color: "var(--text-2)" }}>
-          MTOS has not read the call for the notes yet. Drafting is a pass over the whole
-          transcript, so it is a button rather than something this page does on its own.
+          MTOS can draft these notes from the transcript and any notes captured during the call.
         </p>
         <div>
           <button
@@ -220,6 +252,9 @@ export function FollowThroughNotes({
           >
             <RefreshCw />
             {busy === "draft" ? "Reading the call…" : "Draft the notes from the call"}
+          </button>
+          <button type="button" className="btn btn-ghost" disabled={Boolean(busy)} onClick={() => void redraft(true)}>
+            Open the notes editor
           </button>
         </div>
         {error ? (
@@ -719,7 +754,7 @@ export function FollowThroughNotes({
       <div className="flex flex-wrap items-center gap-2">
         <button type="button" className="btn btn-primary" disabled={Boolean(busy)} onClick={() => void save()}>
           <Save />
-          {busy === "save" ? "Saving…" : "Save the notes"}
+          {busy === "save" ? "Saving…" : "Save notes and continue to tickets"}
         </button>
         <button type="button" className="btn btn-ghost btn-sm" onClick={() => setPreview((open) => !open)}>
           <Eye />

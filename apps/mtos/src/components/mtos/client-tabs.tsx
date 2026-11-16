@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { useEffect, useRef, type ReactNode } from "react";
+import { useSearchParams } from "next/navigation";
 
 interface Tab {
   id: string;
@@ -11,33 +11,22 @@ interface Tab {
 
 export function ClientTabs({ tabs }: { tabs: Tab[] }) {
   const params = useSearchParams();
-  const router = useRouter();
-  const pathname = usePathname();
   const barRef = useRef<HTMLDivElement>(null);
 
-  const indexFromUrl = () => {
-    const id = params.get("tab");
-    const i = tabs.findIndex((t) => t.id === id);
-    return i >= 0 ? i : 0;
-  };
-  const [active, setActive] = useState(indexFromUrl);
+  const active = Math.max(0, tabs.findIndex((tab) => tab.id === params.get("tab")));
+  const previousTab = useRef(active);
 
-  // Follow ?tab= changes (e.g. arriving from an internal link elsewhere) and
-  // gently scroll the tabs into view so the destination isn't hidden below the fold.
   useEffect(() => {
-    const i = indexFromUrl();
-    if (i !== active) {
-      setActive(i);
+    if (previousTab.current !== active) {
+      previousTab.current = active;
       barRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [params]);
+  }, [active]);
 
-  function select(i: number, id: string) {
-    setActive(i);
-    const next = new URLSearchParams(params.toString());
-    next.set("tab", id);
-    router.replace(`${pathname}?${next.toString()}`, { scroll: false });
+  function select(id: string) {
+    const url = new URL(window.location.href);
+    url.searchParams.set("tab", id);
+    window.history.replaceState(null, "", url);
   }
 
   return (
@@ -48,7 +37,7 @@ export function ClientTabs({ tabs }: { tabs: Tab[] }) {
             key={t.id}
             type="button"
             className={`segtab ${i === active ? "active" : ""}`}
-            onClick={() => select(i, t.id)}
+            onClick={() => select(t.id)}
           >
             {t.label}
           </button>

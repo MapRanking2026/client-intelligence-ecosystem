@@ -487,6 +487,8 @@ export interface ClientRecord {
   lifecycleStage: string;
   touchId: string;
   touchDate: string;
+  /** The AM-entered schedule for the current touch, protected from automatic sync. */
+  manualTouchStartAt?: string;
   /**
    * null means "not assessed", which is distinct from a low score. ClickUp's Health Tracker carries
    * a three-state label (Good / Neutral / Risk), so a stored number is the band's representative
@@ -1451,6 +1453,8 @@ export interface TouchFollowThroughState {
 }
 
 export interface MonthlyTouchRecord {
+  /** A test attempt removed from the working history. */
+  deletedAt?: string;
   /**
    * The furthest step this touch has reached: prep, review, live, follow, qa.
    *
@@ -1474,6 +1478,8 @@ export interface MonthlyTouchRecord {
   status: "Preparing" | "Ready" | "Live" | "Completed";
   readinessScore: number;
   confidenceScore: number;
+  /** Meeting day as entered by the AM, for date-only fields in notes and trackers. */
+  scheduledLocalDate?: string;
   scheduledAt?: string;
   calendarEventId?: string;
   updatedAt?: string;

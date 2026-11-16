@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, Check, Clock, PenLine, RotateCcw, Sparkles, X } from "lucide-react";
 
 import { readJsonResponse } from "@/src/lib/api/read-json-response";
@@ -156,11 +156,13 @@ export function FollowThroughGate({
   clientName,
   gate,
   analysis,
+  autoAnalyze = false,
 }: {
   touchId: string;
   clientName: string;
   gate?: ScoreGateState;
   analysis?: GateAnalysis;
+  autoAnalyze?: boolean;
 }) {
   const [state, setState] = useState<ScoreGateState>(
     gate?.findings?.length
@@ -218,12 +220,7 @@ export function FollowThroughGate({
     [touchId],
   );
 
-  /**
-   * Read the call. A button rather than something the page does on load: it is a model pass over
-   * the whole transcript, and an AM who opened this screen to re-read their own notes should not
-   * pay for one -- nor wait for it.
-   */
-  async function analyzeCall() {
+  const analyzeCall = useCallback(async () => {
     setBusy("analyze");
     setError("");
     try {
@@ -256,7 +253,17 @@ export function FollowThroughGate({
     } finally {
       setBusy("");
     }
-  }
+  }, [post, clientName]);
+
+  const autoStarted = useRef(false);
+  useEffect(() => {
+    if (!autoAnalyze || gate || autoStarted.current) return;
+    const timer = window.setTimeout(() => {
+      autoStarted.current = true;
+      void analyzeCall();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [autoAnalyze, gate, analyzeCall]);
 
   function setFinding(next: RedFlagFinding) {
     setState((previous) => ({
@@ -286,6 +293,8 @@ export function FollowThroughGate({
         ...(action === "reopen_score_gate" ? {} : { gate: cleanGate({ ...state, findings }) }),
       });
       if (data?.gate) setState(data.gate);
+      if (action === "confirm_score_gate") window.location.assign("?step=notes#notes");
+      if (action === "reopen_score_gate") window.location.reload();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "That did not work.");
     } finally {

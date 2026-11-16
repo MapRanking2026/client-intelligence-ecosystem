@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { AlertTriangle, CheckCircle2, LoaderCircle, RefreshCw } from "lucide-react";
 
 import { readJsonResponse } from "@/src/lib/api/read-json-response";
@@ -47,7 +48,7 @@ function whenLabel(iso: string | undefined): string | undefined {
   if (!iso) return undefined;
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return undefined;
-  return new Intl.DateTimeFormat("en-US", { dateStyle: "medium", timeStyle: "short" }).format(date);
+  return new Intl.DateTimeFormat("en-US", { dateStyle: "medium", timeStyle: "short", timeZone: "UTC" }).format(date) + " UTC";
 }
 
 export function PerformanceRefresh({
@@ -63,11 +64,12 @@ export function PerformanceRefresh({
   preparedAt?: string;
   refreshedAt?: string;
 }) {
+  const router = useRouter();
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState<RefreshResult | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const refresh = useCallback(async () => {
+  async function refresh() {
     setRunning(true);
     setError(null);
     setResult(null);
@@ -80,22 +82,16 @@ export function PerformanceRefresh({
         throw new Error(body?.error || "The refresh could not be completed. Nothing was changed.");
       }
       setResult(body.data);
-      /*
-        Reloaded rather than patched in: the three panels below are server-rendered from the touch
-        this just rewrote, so a reload is the only way the numbers on the screen are the numbers in
-        the database. The result above survives it in the sense that matters -- the card will then
-        show the new refresh time.
-      */
-      globalThis.location.reload();
+      if (body.data.rebuilt) router.refresh();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "The refresh could not be completed.");
     } finally {
       setRunning(false);
     }
-  }, [clientId]);
+  }
 
   const prepared = whenLabel(preparedAt);
-  const refreshed = whenLabel(refreshedAt);
+  const refreshed = whenLabel(result?.rebuilt ? result.refreshedAt : refreshedAt);
 
   return (
     <div className="card" style={{ borderLeft: "3px solid var(--accent)" }}>
@@ -143,7 +139,7 @@ export function PerformanceRefresh({
       ) : null}
 
       {result ? (
-        <div className="mt-3">
+        <div className="mt-3" role="status">
           <p
             className="rounded-[10px] px-3 py-2.5 text-[0.82rem] leading-6"
             style={{ background: "var(--good-bg)", color: "var(--good)" }}

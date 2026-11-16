@@ -274,11 +274,12 @@ export async function buildFollowThroughItems(
   const businessName = client?.name || "";
   const owners = await readDepartmentOwners(context);
   const today = new Date();
-  const touchDate = (touch.scheduledAt || today.toISOString()).slice(0, 10);
+  const touchDate = touch.scheduledLocalDate || (touch.scheduledAt || today.toISOString()).slice(0, 10);
 
   const existing = touch.followThrough?.items || [];
   const byActionId = new Map(existing.filter((item) => item.actionId).map((item) => [item.actionId!, item]));
 
+  const legacyTickets = new Map((touch.postMeeting?.draftTickets || []).map((ticket) => [`legacy-${ticket.id}`, ticket]));
   const items: FollowThroughItem[] = [];
   const overLongActionIds: string[] = [];
 
@@ -291,15 +292,29 @@ export async function buildFollowThroughItems(
         items.push(kept);
         continue;
       }
-      items.push(
-        looksLikeBilling(action)
-          ? billingFromAction(action, { businessName, touchDate, today })
-          : ticketFromAction(action, department.department, department.clientFeedback, {
-              businessName,
-              owners,
-              today,
-            }),
-      );
+      const legacy = legacyTickets.get(action.id);
+      const decision = legacy?.status === "declined" ? "denied" as const : undefined;
+      const billing = legacy?.ticketType === "billing" || looksLikeBilling(action);
+      if (billing) {
+        items.push({
+          ...billingFromAction(action, { businessName, touchDate, today }),
+          ...(legacy?.description ? { details: legacy.description } : {}),
+          ...(legacy?.billingChangeType ? { changeType: legacy.billingChangeType } : {}),
+          ...(legacy?.dateRequested ? { dateRequested: legacy.dateRequested } : {}),
+          ...(legacy?.assignee ? { assignee: legacy.assignee } : {}),
+          ...(decision ? { decision } : {}),
+        });
+      } else {
+        items.push({
+          ...ticketFromAction(action, department.department, department.clientFeedback, { businessName, owners, today }),
+          ...(legacy?.description ? { description: legacy.description } : {}),
+          ...(legacy?.assignee ? { assignee: legacy.assignee } : {}),
+          ...(legacy?.businessName ? { businessName: legacy.businessName } : {}),
+          ...(legacy?.priority ? { priority: legacy.priority } : {}),
+          ...(legacy?.timeEstimateMinutes ? { timeEstimateMinutes: legacy.timeEstimateMinutes } : {}),
+          ...(decision ? { decision } : {}),
+        });
+      }
     }
   }
 

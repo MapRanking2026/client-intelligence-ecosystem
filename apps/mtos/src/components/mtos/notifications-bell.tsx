@@ -48,7 +48,6 @@ const DOT: Record<AppNotification["tone"], string> = {
 
 export function NotificationsBell() {
   const [open, setOpen] = useState(false);
-  const [ring, setRing] = useState(false);
   const [items, setItems] = useState<NotificationRecord[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [toasts, setToasts] = useState<ToastView[]>([]);
@@ -77,15 +76,6 @@ export function NotificationsBell() {
       active = false;
     };
   }, []);
-
-  // Swing once when something arrives unread.
-  useEffect(() => {
-    if (unread > 0) {
-      setRing(true);
-      const t = setTimeout(() => setRing(false), 1000);
-      return () => clearTimeout(t);
-    }
-  }, [unread]);
 
   useEffect(() => {
     if (!open) return;
@@ -199,7 +189,7 @@ export function NotificationsBell() {
         title="Notifications"
         type="button"
       >
-        <span className={ring ? "bell-ring" : ""} style={{ display: "inline-flex" }}>
+        <span key={unread} className={unread > 0 ? "bell-ring" : ""} style={{ display: "inline-flex" }}>
           <Bell />
         </span>
         {unread > 0 ? <span className="bell-dot" /> : null}

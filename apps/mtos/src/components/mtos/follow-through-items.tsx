@@ -569,6 +569,7 @@ export function FollowThroughItems({
     setError("");
     try {
       await post({ action: "save_items", items: list });
+      window.location.assign("?step=trackers#trackers");
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "The tickets were not saved.");
     } finally {
@@ -676,7 +677,7 @@ export function FollowThroughItems({
       <div className="flex flex-wrap items-center gap-2">
         <button type="button" className="btn btn-primary" disabled={Boolean(busy)} onClick={() => void save()}>
           <Save />
-          {busy === "save" ? "Saving…" : "Save the tickets"}
+          {busy === "save" ? "Saving…" : "Save tickets and continue to trackers"}
         </button>
         <button
           type="button"

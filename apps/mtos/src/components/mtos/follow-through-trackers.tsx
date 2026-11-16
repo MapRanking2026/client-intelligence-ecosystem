@@ -176,6 +176,8 @@ export function FollowThroughTrackers({
     setError("");
     try {
       await post({ action: "save_tracker_cards", cards: list });
+      await post({ action: "prepare_recap" });
+      window.location.assign("?step=recap#recap");
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "The tracker rows were not saved.");
     } finally {
@@ -323,7 +325,7 @@ export function FollowThroughTrackers({
       <div className="flex flex-wrap items-center gap-2">
         <button type="button" className="btn btn-primary" disabled={Boolean(busy)} onClick={() => void save()}>
           <Save />
-          {busy === "save" ? "Saving…" : "Save the tracker rows"}
+          {busy === "save" ? "Saving…" : "Save trackers and continue to recap"}
         </button>
         <button type="button" className="btn btn-ghost btn-sm" disabled={Boolean(busy)} onClick={() => void build()}>
           <RefreshCw />

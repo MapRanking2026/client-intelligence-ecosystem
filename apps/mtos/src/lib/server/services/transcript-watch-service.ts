@@ -152,7 +152,8 @@ export async function watchTouchTranscript(
     lastCheckedAt: checkedAt,
   };
 
-  if (!touch.calendarEventId) {
+  const calendarEventId = touch.googleMeeting?.calendarEventId || touch.calendarEventId;
+  if (!calendarEventId) {
     return persist(context, touchId, {
       ...base,
       status: "none",
@@ -169,7 +170,7 @@ export async function watchTouchTranscript(
   }
 
   const eventUrl = new URL(
-    `${CALENDAR_API}/calendars/primary/events/${encodeURIComponent(touch.calendarEventId)}`,
+    `${CALENDAR_API}/calendars/primary/events/${encodeURIComponent(calendarEventId)}`,
   );
   const eventResult = await googleGet(eventUrl.toString(), token.accessToken);
   if (!eventResult.ok) {
@@ -311,12 +312,13 @@ export async function attachTouchTranscript(
 export async function readTouchTranscriptPayload(
   context: TenantContext,
   touchId: string,
+  legacyTranscript?: string,
 ): Promise<string | undefined> {
   const db = getFirebaseAdminDb();
-  if (!db) return undefined;
+  if (!db) return legacyTranscript?.trim() || undefined;
   const snapshot = await db
     .doc(monthlyTouchArtifactPath(context.tenantId, touchId, TRANSCRIPT_ARTIFACT_ID))
     .get();
   const payload = snapshot.exists ? (snapshot.data() as { payload?: unknown } | undefined)?.payload : undefined;
-  return typeof payload === "string" && payload.trim() ? payload : undefined;
+  return typeof payload === "string" && payload.trim() ? payload : legacyTranscript?.trim() || undefined;
 }

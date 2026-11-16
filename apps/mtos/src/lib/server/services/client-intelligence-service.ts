@@ -168,6 +168,7 @@ function defaultClientType(accountManager: string): ClientType {
 // ---------------------------------------------------------------------------
 
 interface AnalysisInput {
+  transcript?: string;
   recapSummary: string;
   extractedCommitments: string[];
   draftTickets: Array<{ title: string; description: string; department: string }>;

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Check, Minus, Paperclip, Sparkles, X } from "lucide-react";
 
 import { readJsonResponse } from "@/src/lib/api/read-json-response";
@@ -70,8 +71,9 @@ export function TranscriptWaitPanel({
   touchId: string;
   callEndedAt?: string;
   transcript?: TouchTranscriptState;
-  followThroughHref: string;
+  followThroughHref?: string;
 }) {
+  const router = useRouter();
   const [state, setState] = useState<TouchTranscriptState | undefined>(transcript);
   const [checking, setChecking] = useState(false);
   const [error, setError] = useState("");
@@ -119,7 +121,10 @@ export function TranscriptWaitPanel({
     setChecking(true);
     try {
       const next = await post({ action: "watch_transcript" });
-      if (next) setState(next);
+      if (next) {
+        setState(next);
+        if (!followThroughHref && next.status === "found") router.refresh();
+      }
       setError("");
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not check for the transcript.");
@@ -127,7 +132,7 @@ export function TranscriptWaitPanel({
       inFlight.current = false;
       setChecking(false);
     }
-  }, [post]);
+  }, [post, followThroughHref, router]);
 
   const keepPolling = view.keepPolling;
   useEffect(() => {
@@ -152,6 +157,7 @@ export function TranscriptWaitPanel({
       setError("");
       setShowAttach(false);
       setPasted("");
+      if (!followThroughHref) router.refresh();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "That transcript was not attached.");
     } finally {
@@ -159,12 +165,12 @@ export function TranscriptWaitPanel({
     }
   }
 
-  if (view.phase === "not_ended") return null;
+  if (view.phase === "not_ended" && followThroughHref) return null;
 
   const tone = view.phase === "found" || view.phase === "attached" ? "good" : view.phase === "none" ? "watch" : "info";
 
   return (
-    <div className="card mt-4" style={{ position: "sticky", bottom: 12, zIndex: 20 }}>
+    <div className="card mt-4" style={{ position: followThroughHref ? "sticky" : "static", bottom: 12, zIndex: 20 }}>
       <div className="flex flex-wrap items-center gap-3">
         <span className={`chip ${tone}`}>
           <span className={`sig-dot ${tone === "info" ? "muted" : tone}`} />
@@ -176,7 +182,7 @@ export function TranscriptWaitPanel({
             <Paperclip />
             {showAttach ? "Cancel" : "Attach transcript"}
           </button>
-          {view.canBeginFollowThrough ? (
+          {view.canBeginFollowThrough && followThroughHref ? (
             <Link href={followThroughHref} className="btn btn-primary btn-sm">
               <Sparkles />
               Begin follow-through

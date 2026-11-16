@@ -125,7 +125,7 @@ export async function getQcAmView(
   const source = getMtosDataSource(context);
   const touches = await Promise.all(
     [...wanted.keys()].map(async (touchId) => {
-      const touch = await source.getMonthlyTouchById(touchId).catch(() => undefined);
+      const touch = await source.getMonthlyTouchById(touchId, { qcAccessVerified: true }).catch(() => undefined);
       return touch ? ([touchId, touch] as const) : undefined;
     }),
   );
@@ -449,7 +449,7 @@ export async function getLatestQcCoaching(
   if (!row) return undefined;
 
   const touch = await getMtosDataSource(context)
-    .getMonthlyTouchById(row.touchId)
+    .getMonthlyTouchById(row.touchId, { qcAccessVerified: true })
     .catch(() => undefined);
   if (!touch?.qc) return undefined;
 

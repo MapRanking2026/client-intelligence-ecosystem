@@ -18,6 +18,7 @@ import {
 import {
   HEALTH_TRACKER_FIELDS,
   diffRow,
+  trackerCardDiffs,
   type TrackerCard,
 } from "@/src/lib/contracts/follow-through-trackers";
 import { getMtosDataSource } from "@/src/lib/server/data/seed-mtos-data-source";
@@ -664,15 +665,14 @@ export async function processFollowThrough(
     throw new Error("The client for this touch is not visible to you.");
   }
 
+  if (touch.postMeeting?.status === "approved" || touch.postMeeting?.draftTickets?.some((ticket) => ticket.clickupTaskId)) {
+    throw new Error("This touch already has follow-up filed from the earlier screen. Open that screen to review what was sent.");
+  }
+
   const follow = touch.followThrough;
   const notes = follow?.notes;
   const cards = follow?.trackerCards || [];
-  const diffs: Record<string, ReturnType<typeof diffRow>> = {};
-  for (const card of cards) {
-    if (card.kind === "health") {
-      diffs[card.id] = diffRow(card.current, card.next, HEALTH_TRACKER_FIELDS);
-    }
-  }
+  const diffs = Object.fromEntries(cards.map((card) => [card.id, trackerCardDiffs(card)]));
 
   // The same gate the screen applies, re-applied here because the screen's copy can be bypassed
   // and this one creates tickets.

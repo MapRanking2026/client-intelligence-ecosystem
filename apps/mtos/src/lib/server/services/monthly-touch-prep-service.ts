@@ -1718,20 +1718,6 @@ function stripUndefinedDeep<T>(value: T): T {
   return value;
 }
 
-function extractJsonObject(value: string) {
-  const trimmed = value.trim();
-  if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
-    return JSON.parse(trimmed) as JsonRecord;
-  }
-
-  const match = trimmed.match(/\{[\s\S]*\}/);
-  if (!match) {
-    throw new Error("Claude response did not include a JSON object");
-  }
-
-  return JSON.parse(match[0]) as JsonRecord;
-}
-
 async function generateClaudeTouchOutput(
   context: TenantContext,
   env: ReturnType<typeof getServerEnv>,
@@ -2270,22 +2256,14 @@ export async function rewriteTouchPerformancePanels(
     rawSnapshots,
   );
 
-  /*
-    Three fields, by name, with `mergeFields` so nothing else on the document can be caught by this
-    write. The lead-mix tiles are filled from the verification review already stored on the touch,
-    the same join the preparation and the touch screen both make.
-  */
-  await db.doc(monthlyTouchPath(context.tenantId, touch.id)).set(
+  // Patch the nested fields without replacing sibling fields from the earlier touch read.
+  await db.doc(monthlyTouchPath(context.tenantId, touch.id)).update(
     stripUndefinedDeep({
-      prepPack: {
-        ...touch.prepPack,
-        businessScorecard: withVerifiedLeadMix(pack.businessScorecard, touch.leadVerification),
-        seoPerformance: pack.seoPerformance,
-        adsPerformance: pack.adsPerformance,
-        performanceRefreshedAt: refreshedAt,
-      },
+      "prepPack.businessScorecard": withVerifiedLeadMix(pack.businessScorecard, touch.leadVerification),
+      "prepPack.seoPerformance": pack.seoPerformance,
+      "prepPack.adsPerformance": pack.adsPerformance,
+      "prepPack.performanceRefreshedAt": refreshedAt,
     }),
-    { mergeFields: ["prepPack"] },
   );
 
   return { rebuilt: true, touchId: touch.id };

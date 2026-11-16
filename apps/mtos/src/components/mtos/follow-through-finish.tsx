@@ -18,8 +18,7 @@ import {
 import { renderNotesMarkdown, type NotesDraft } from "@/src/lib/contracts/follow-through-notes";
 import type { FollowThroughItem } from "@/src/lib/contracts/follow-through-tickets";
 import {
-  HEALTH_TRACKER_FIELDS,
-  diffRow,
+  trackerCardDiffs,
   type TrackerCard,
 } from "@/src/lib/contracts/follow-through-trackers";
 import type { RecapEmailState } from "@/src/lib/contracts/follow-through-recap-email";
@@ -70,13 +69,10 @@ export function FollowThroughFinish({
   const [error, setError] = useState("");
   const [blockers, setBlockers] = useState<string[]>([]);
 
-  const diffs = useMemo(() => {
-    const out: Record<string, ReturnType<typeof diffRow>> = {};
-    for (const card of trackerCards || []) {
-      if (card.kind === "health") out[card.id] = diffRow(card.current, card.next, HEALTH_TRACKER_FIELDS);
-    }
-    return out;
-  }, [trackerCards]);
+  const diffs = useMemo(
+    () => Object.fromEntries((trackerCards || []).map((card) => [card.id, trackerCardDiffs(card)])),
+    [trackerCards],
+  );
 
   const inputs = useMemo(
     () => ({

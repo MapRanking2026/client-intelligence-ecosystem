@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { resolveTenantContext } from "@/src/lib/auth/resolve-tenant-context";
+import { getMtosDataSource } from "@/src/lib/server/data/seed-mtos-data-source";
 import { getFirebaseAdminDb } from "@/src/lib/server/firebase/admin";
 import { monthlyTouchPath } from "@/src/lib/server/firebase/collections";
 
@@ -22,11 +23,12 @@ export async function POST(request: Request, { params }: { params: Promise<{ tou
   if (!db) return NextResponse.json({ error: "Storage is not configured." }, { status: 500 });
 
   try {
-    // Deep-merge writes only this section's override, leaving the others intact.
-    await db.doc(monthlyTouchPath(context.tenantId, touchId)).set(
-      { callGuideScreens: { [String(idx)]: key } },
-      { merge: true },
-    );
+    if (!(await getMtosDataSource(context).getMonthlyTouchById(touchId))) {
+      return NextResponse.json({ error: "Monthly touch not found" }, { status: 404 });
+    }
+    await db.doc(monthlyTouchPath(context.tenantId, touchId)).update({
+      [`callGuideScreens.${idx}`]: key,
+    });
     return NextResponse.json({ ok: true });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Couldn't save" }, { status: 500 });

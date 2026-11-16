@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
-    "check": "tsc --noEmit && eslint .",
+    "check": "next typegen && tsc --noEmit && eslint .",
     "seed:firestore": "tsx scripts/seed-firestore-pilot.ts",
     "bootstrap:map-ranking": "tsx scripts/bootstrap-map-ranking.ts",
     "import:prompts": "tsx scripts/import-prompt-library.ts",

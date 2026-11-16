@@ -145,7 +145,7 @@ function emptyDraft(
     }),
     nps: gate?.score ?? null,
     npsJustification: gate?.justification || "",
-    goalQuarter: quarterLabel(touch.scheduledAt || date),
+    goalQuarter: quarterLabel(date),
     goalText: client.goals?.[0] || "",
     goalStatus: "Not discussed",
     goalEvidence: "",
@@ -169,6 +169,7 @@ function emptyDraft(
 export async function draftFollowThroughNotes(
   context: TenantContext,
   touchId: string,
+  manual = false,
 ): Promise<{ notes: NotesDraft; note?: string }> {
   const dataSource = getMtosDataSource(context);
   const touch = await dataSource.getMonthlyTouchById(touchId);
@@ -188,13 +189,32 @@ export async function draftFollowThroughNotes(
   const profile = await getAccountManagerProfile(context);
   const amName = profile.name || client.accountManager || "";
   const month = await monthNumber(context, touch);
-  const date = (touch.scheduledAt || getNowIso()).slice(0, 10);
+  const date = touch.scheduledLocalDate || (touch.scheduledAt || getNowIso()).slice(0, 10);
   const base = emptyDraft(touch, client, amName, month, date);
+  if (manual) return { notes: base };
+  const legacy = touch.postMeeting;
+  if (!touch.transcript?.foundAt || (legacy?.analyzedAt && legacy.analyzedAt >= touch.transcript.foundAt)) {
+    const departments = new Map<string, NotesDraft["departments"][number]>();
+    for (const ticket of legacy?.draftTickets || []) {
+      const department = ticket.department;
+      const group = departments.get(department) || { department, clientFeedback: "", actions: [] };
+      group.actions.push({ id: `legacy-${ticket.id}`, what: ticket.title, team: department, due: ticket.dueDate || "" });
+      departments.set(department, group);
+    }
+    if (legacy?.recapSummary?.trim() || departments.size) {
+      return { notes: { ...base, summary: legacy?.recapSummary?.trim() || "", departments: [...departments.values()] } };
+    }
+  }
 
   const env = getServerEnv();
-  const transcript = await readTouchTranscriptPayload(context, touchId);
+  const transcript = await readTouchTranscriptPayload(context, touchId, legacy?.transcript);
 
-  if (!transcript) {
+  const captured = [
+    ...Object.values(touch.live?.notes || {}),
+    ...(touch.liveSession?.segments || []).map((segment) => segment.notes),
+    touch.liveSession?.closeNotes,
+  ].filter((note) => note?.trim()).join("\n");
+  if (!transcript && !captured) {
     return {
       notes: base,
       note: "There is no transcript on this touch, so the notes start empty. Write them from your own notes, or attach a transcript on the call screen first.",
@@ -239,16 +259,19 @@ export async function draftFollowThroughNotes(
     ),
     "",
     "Transcript:",
-    transcript,
+    transcript || "(unavailable)",
+    "",
+    "Account manager notes:",
+    captured,
   ].join("\n");
 
   const { data } = await callLlmForJson({ env, system, userText, maxTokens: 6000 });
   const parsed = draftSchema.safeParse(data);
   if (!parsed.success) {
-    return {
-      notes: base,
-      note: `The call read came back in a shape MTOS could not use (${parsed.error.issues[0]?.message || "unexpected fields"}), so the notes start empty.`,
-    };
+    throw new Error("MTOS could not read the generated notes. Try drafting again.");
+  }
+  if (!parsed.data.summary?.trim() && !parsed.data.departments?.length) {
+    throw new Error("The transcript analysis returned no usable notes. Try drafting again or attach a fuller transcript.");
   }
 
   const bullets: NotesDraft["bullets"] = {};

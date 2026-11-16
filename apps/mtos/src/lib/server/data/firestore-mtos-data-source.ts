@@ -134,7 +134,7 @@ export class FirestoreMtosDataSource implements MtosDataSource {
     const visibleSet = visibleClientIds ? new Set(visibleClientIds) : null;
     const touches = touchesSnap.docs
       .map((doc) => doc.data() as FirestoreMonthlyTouchRecord)
-      .filter((touch) => !visibleSet || visibleSet.has(touch.clientId));
+      .filter((touch) => !touch.deletedAt && (!visibleSet || visibleSet.has(touch.clientId)));
     const commitments = commitmentsSnap.docs
       .map((doc) => doc.data() as FirestoreCommitmentRecord)
       .filter((commitment) => !visibleSet || visibleSet.has(commitment.clientId));
@@ -237,7 +237,9 @@ export class FirestoreMtosDataSource implements MtosDataSource {
     if (!snapshot) {
       return [];
     }
-    const touches = snapshot.docs.map((doc) => doc.data() as FirestoreMonthlyTouchRecord);
+    const touches = snapshot.docs
+      .map((doc) => doc.data() as FirestoreMonthlyTouchRecord)
+      .filter((touch) => !touch.deletedAt);
     if (visibleClientIds === null) {
       return touches;
     }
@@ -245,7 +247,10 @@ export class FirestoreMtosDataSource implements MtosDataSource {
     return touches.filter((touch) => visibleSet.has(touch.clientId));
   }
 
-  async getMonthlyTouchById(touchId: string): Promise<MonthlyTouchRecord | undefined> {
+  async getMonthlyTouchById(
+    touchId: string,
+    options?: { qcAccessVerified?: boolean },
+  ): Promise<MonthlyTouchRecord | undefined> {
     const db = getFirebaseAdminDb();
     if (!db) {
       return undefined;
@@ -261,7 +266,11 @@ export class FirestoreMtosDataSource implements MtosDataSource {
     if (!snapshot.exists) {
       return undefined;
     }
-    return snapshot.data() as FirestoreMonthlyTouchRecord;
+    const touch = snapshot.data() as FirestoreMonthlyTouchRecord;
+    if (touch.deletedAt || (!options?.qcAccessVerified && !(await this.isClientVisible(touch.clientId)))) {
+      return undefined;
+    }
+    return touch;
   }
 
   async getCommitments(clientId?: string): Promise<CommitmentRecord[]> {

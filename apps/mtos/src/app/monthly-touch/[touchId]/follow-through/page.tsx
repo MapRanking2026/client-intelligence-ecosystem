@@ -1,3 +1,7 @@
+import { canDeleteTestTouch } from "@/src/lib/contracts/touch-progress";
+import { hasMeetingNotes } from "@/src/lib/contracts/follow-through-notes";
+import { StartNewMonthlyTouch } from "@/src/components/mtos/start-new-monthly-touch";
+import { TranscriptWaitPanel } from "@/src/components/mtos/transcript-wait-panel";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
@@ -51,6 +55,16 @@ export default async function FollowThroughPage({
   const gate = touch.followThrough?.score;
   const confirmed = scoreConfirmed(gate);
   const hasNotes = Boolean(touch.followThrough?.notes);
+  const hasTranscript = Boolean(touch.postMeeting?.transcript || touch.postMeeting?.recapSummary) ||
+    touch.transcript?.status === "attached" || touch.transcript?.status === "found";
+  const hasCapture = Object.values(touch.live?.notes || {}).some((note) => note.trim()) ||
+    touch.liveSession?.segments.some((segment) => segment.notes.trim()) || Boolean(touch.liveSession?.closeNotes.trim());
+  const hasUsableNotes = hasMeetingNotes(touch.followThrough?.notes);
+  const autoPrepare = hasUsableNotes
+    ? !touch.followThrough?.items || !touch.followThrough?.trackerCards
+    : Boolean(hasTranscript || hasCapture);
+  const legacyFiled = touch.postMeeting?.status === "approved" ||
+    touch.postMeeting?.draftTickets?.some((ticket) => ticket.clickupTaskId);
 
   // Read once on the server and handed down, so the ticket forms open on real departments, real
   // people and the tags that actually exist rather than on a dropdown of guesses. Each of these
@@ -69,17 +83,40 @@ export default async function FollowThroughPage({
       title={`${client.name} — follow-through`}
       subtitle="Everything the call commits us to, drafted for you to approve. Nothing is created in ClickUp, written to a tracker or sent to the client until you finish this screen."
     >
+      <div className="mb-4 flex flex-wrap justify-between gap-2">
+        <Link href={`/monthly-touch/${touch.id}/summary`} className="ilink text-[0.8rem]">
+          Earlier post-meeting screen
+        </Link>
+        <StartNewMonthlyTouch
+          touchId={touch.id}
+          current={client.touchId === touch.id}
+          canDelete={canDeleteTestTouch(touch)}
+        />
+      </div>
+      {legacyFiled ? (
+        <p className="card mb-4">Follow-up was already filed from the earlier screen. Open it to review what was sent.</p>
+      ) : null}
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_280px]">
         <div className="min-w-0">
+      {touch.postMeeting?.transcript && !touch.transcript ? (
+        <p className="muted mb-3 text-[0.8rem]">Transcript available from the earlier post-meeting screen.</p>
+      ) : (
+        <TranscriptWaitPanel
+          touchId={touch.id}
+          {...(touch.live?.callEndedAt ? { callEndedAt: touch.live.callEndedAt } : {})}
+          {...(touch.transcript ? { transcript: touch.transcript } : {})}
+        />
+      )}
       <SectionCard
         eyebrow="Step 1 of the follow-through"
         title="Score the account"
         subtitle="The score decides what the rest of this page contains, so it comes first. A 6 or below adds the Risk Register row, the playbook and the Manager tag; the Health Tracker row reads it either way."
       >
-        <FollowThroughGate touchId={touch.id} clientName={client.name} {...(gate ? { gate } : {})} />
+        <FollowThroughGate autoAnalyze={hasTranscript && !legacyFiled} touchId={touch.id} clientName={client.name} {...(gate ? { gate } : {})} />
       </SectionCard>
 
       {confirmed ? (
+        <div id="notes" className="scroll-mt-20">
         <SectionCard
           eyebrow="Step 2 of the follow-through"
           title="Post Monthly Touch Notes"
@@ -87,12 +124,15 @@ export default async function FollowThroughPage({
         >
           <FollowThroughNotes
             touchId={touch.id}
+            autoPrepare={Boolean(autoPrepare) && !legacyFiled}
             {...(touch.followThrough?.notes ? { notes: touch.followThrough.notes } : {})}
           />
         </SectionCard>
+        </div>
       ) : null}
 
       {confirmed && hasNotes ? (
+        <div id="tickets" className="scroll-mt-20">
         <SectionCard
           eyebrow="Step 3 of the follow-through"
           title="Tickets"
@@ -107,9 +147,11 @@ export default async function FollowThroughPage({
             owners={owners}
           />
         </SectionCard>
+        </div>
       ) : null}
 
       {confirmed && hasNotes ? (
+        <div id="trackers" className="scroll-mt-20">
         <SectionCard
           eyebrow="Step 4 of the follow-through"
           title="Tracker rows"
@@ -120,9 +162,11 @@ export default async function FollowThroughPage({
             {...(touch.followThrough?.trackerCards ? { cards: touch.followThrough.trackerCards } : {})}
           />
         </SectionCard>
+        </div>
       ) : null}
 
       {confirmed && hasNotes ? (
+        <div id="recap" className="scroll-mt-20">
         <SectionCard
           eyebrow="Step 5 of the follow-through"
           title="Client recap email"
@@ -133,9 +177,11 @@ export default async function FollowThroughPage({
             {...(touch.followThrough?.recap ? { recap: touch.followThrough.recap } : {})}
           />
         </SectionCard>
+        </div>
       ) : null}
 
-      {confirmed && hasNotes ? (
+      {confirmed && hasNotes && !legacyFiled ? (
+        <div id="finish" className="scroll-mt-20">
         <SectionCard
           eyebrow="Step 6 of the follow-through"
           title="Finish and process"
@@ -151,6 +197,7 @@ export default async function FollowThroughPage({
             qaHref={`/qa/${touch.clientId}/${touch.id}`}
           />
         </SectionCard>
+        </div>
       ) : null}
 
         </div>

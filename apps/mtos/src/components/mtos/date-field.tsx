@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 /**
  * Click-to-open calendar date field. Replaces bare <input type="date"> so the
@@ -109,16 +109,6 @@ export function DateField({
 
   useEffect(() => {
     if (!open) return;
-    const base = parsedDate
-      ? { y: parsedDate.getFullYear(), m: parsedDate.getMonth() }
-      : parsedMonth ?? { y: today.getFullYear(), m: today.getMonth() };
-    setViewY(base.y);
-    setViewM(base.m);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
-
-  useEffect(() => {
-    if (!open) return;
     function onDown(e: MouseEvent) {
       if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false);
     }
@@ -133,12 +123,18 @@ export function DateField({
     };
   }, [open]);
 
-  useLayoutEffect(() => {
-    if (!open || !rootRef.current) return;
-    const rect = rootRef.current.getBoundingClientRect();
-    const spaceBelow = window.innerHeight - rect.bottom;
-    setDropUp(spaceBelow < 340 && rect.top > spaceBelow);
-  }, [open]);
+  function toggleCalendar() {
+    if (!open) {
+      setViewY(initial.y);
+      setViewM(initial.m);
+      const rect = rootRef.current?.getBoundingClientRect();
+      if (rect) {
+        const spaceBelow = window.innerHeight - rect.bottom;
+        setDropUp(spaceBelow < 340 && rect.top > spaceBelow);
+      }
+    }
+    setOpen(!open);
+  }
 
   const disabled = (iso: string) => (!!min && iso < min) || (!!max && iso > max);
 
@@ -190,7 +186,7 @@ export function DateField({
         id={id}
         aria-haspopup="dialog"
         aria-expanded={open}
-        onClick={() => setOpen((o) => !o)}
+        onClick={toggleCalendar}
         className={`flex w-full items-center justify-between rounded-xl border px-3 py-2 text-left text-sm outline-none transition-colors ${t.trigger}`}
       >
         <span className={display ? "" : t.placeholder}>

@@ -19,7 +19,8 @@ export interface MtosDataSource {
   getClients(): Promise<ClientRecord[]>;
   getClientById(clientId: string): Promise<ClientRecord | undefined>;
   getMonthlyTouches(): Promise<MonthlyTouchRecord[]>;
-  getMonthlyTouchById(touchId: string): Promise<MonthlyTouchRecord | undefined>;
+  /** QC callers may pass this option after authorizing access through the tenant's QC index. */
+  getMonthlyTouchById(touchId: string, options?: { qcAccessVerified?: boolean }): Promise<MonthlyTouchRecord | undefined>;
   getCommitments(clientId?: string): Promise<CommitmentRecord[]>;
   getOpportunities(clientId?: string): Promise<OpportunityRecord[]>;
 }

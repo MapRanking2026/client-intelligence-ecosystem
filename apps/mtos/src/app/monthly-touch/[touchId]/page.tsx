@@ -1,3 +1,5 @@
+import { canDeleteTestTouch } from "@/src/lib/contracts/touch-progress";
+import { StartNewMonthlyTouch } from "@/src/components/mtos/start-new-monthly-touch";
 import { GoogleMeetingPanel } from "@/src/components/mtos/google-meeting-panel";
 import { notFound } from "next/navigation";
 import Link from "next/link";
@@ -478,10 +480,15 @@ export default async function MonthlyTouchRunSheetPage({
           <h1 className="h2 mt-2.5">{client.name}</h1>
           <p className="muted mt-1.5 text-[0.84rem]">
             {client.industry}
-            {client.location ? ` · ${client.location}` : ""} · meeting {client.touchDate}
+            {client.location ? ` · ${client.location}` : ""} · meeting {wallClockLabel(touch.scheduledAt, profile.timeZone) || client.touchDate}
             {client.accountManager ? ` · ${client.accountManager}` : ""}
           </p>
         </div>
+        <StartNewMonthlyTouch
+          touchId={touch.id}
+          current={client.touchId === touch.id}
+          canDelete={canDeleteTestTouch(touch)}
+        />
       </div>
 
       {/*

@@ -6,7 +6,11 @@ import type { ClientRecord } from "@/src/lib/mtos-data";
 import { TONE_CLASS, TONE_LABEL, formatScore } from "@/src/lib/health-display";
 
 /** A client name that links to the profile and previews key facts on hover. */
-export function ClientHint({ client, label }: { client: ClientRecord; label?: string }) {
+export function ClientHint({ client, label, linked = true }: {
+  client: ClientRecord;
+  label?: string;
+  linked?: boolean;
+}) {
   const tone = TONE_CLASS[client.tone];
   const stats: [string, string][] = [
     ["Health", formatScore(client.healthScore)],
@@ -52,20 +56,24 @@ export function ClientHint({ client, label }: { client: ClientRecord; label?: st
             <span className="muted" style={{ fontSize: "0.7rem" }}>
               Next touch {client.touchDate}
             </span>
-            <Link
-              href={`/clients/${client.id}`}
-              className="ilink"
-              style={{ fontSize: "0.78rem", display: "inline-flex", alignItems: "center", gap: 4 }}
-            >
-              View client <ArrowRight style={{ width: 13, height: 13 }} />
-            </Link>
+            {linked ? (
+              <Link
+                href={`/clients/${client.id}`}
+                className="ilink"
+                style={{ fontSize: "0.78rem", display: "inline-flex", alignItems: "center", gap: 4 }}
+              >
+                View client <ArrowRight style={{ width: 13, height: 13 }} />
+              </Link>
+            ) : null}
           </span>
         </span>
       }
     >
-      <Link href={`/clients/${client.id}`} className="ilink">
-        {label ?? client.name}
-      </Link>
+      {linked ? (
+        <Link href={`/clients/${client.id}`} className="ilink">{label ?? client.name}</Link>
+      ) : (
+        <span>{label ?? client.name}</span>
+      )}
     </Preview>
   );
 }

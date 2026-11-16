@@ -1,3 +1,7 @@
+import { readTouchTranscriptPayload } from "@/src/lib/server/services/transcript-watch-service";
+import { generateClientIntelligence } from "@/src/lib/server/services/client-intelligence-service";
+import { getServerEnv } from "@/src/lib/server/env";
+import { hasAnyLlmProvider } from "@/src/lib/server/services/mtos-ai";
 import type { TenantContext } from "@/src/lib/contracts/mtos";
 import type { ClientRecord, RiskRegisterEntry } from "@/src/lib/mtos-data";
 import {
@@ -178,7 +182,29 @@ export async function buildTrackerCards(
   }
   const score = gate.score ?? null;
   const notes = touch.followThrough?.notes;
-  const intelligence = touch.postMeeting?.clientIntelligence;
+  const legacy = touch.postMeeting;
+  const newerTranscript = touch.transcript?.foundAt &&
+    touch.transcript.foundAt > (legacy?.analyzedAt || "");
+  let intelligence = newerTranscript ? undefined : legacy?.clientIntelligence;
+  let intelligenceError: string | undefined;
+  const env = getServerEnv();
+  if (notes && !intelligence?.stakeholderMap && !touch.followThrough?.trackerCards?.length && hasAnyLlmProvider(env)) {
+    try {
+      const transcript = await readTouchTranscriptPayload(context, touchId, touch.postMeeting?.transcript);
+      intelligence = await generateClientIntelligence(context, env, touch, client, {
+        ...(transcript ? { transcript } : {}),
+        recapSummary: notes.summary,
+        extractedCommitments: notes.clientActions.map((action) => action.what),
+        draftTickets: notes.departments.flatMap((group) => group.actions.map((action) => ({
+          title: action.what,
+          description: group.clientFeedback,
+          department: group.department,
+        }))),
+      }, client.accountManager || "");
+    } catch {
+      intelligenceError = "MTOS could not draft the tracker details from the call. Review the available fields before approving.";
+    }
+  }
   const existing = touch.followThrough?.trackerCards || [];
   /**
    * A card the AM has already worked on, by id AND kind.
@@ -224,24 +250,27 @@ export async function buildTrackerCards(
   );
 
   // --- the Risk Register row --------------------------------------------------
-  if (riskRegisterRequired(score)) {
+  if (riskRegisterRequired(score) || intelligence?.riskDetected || intelligence?.riskRegister || existing.some((card) => card.kind === "risk")) {
+    const meetingDay = touch.scheduledLocalDate || touch.scheduledAt?.slice(0, 10);
     const fromFlags: RiskRegisterEntry = {
       ...(intelligence?.riskRegister || {}),
       ...(client.accountManager ? { accountManager: client.accountManager } : {}),
-      dateFlagged: (touch.scheduledAt || new Date().toISOString()).slice(0, 10),
+      dateFlagged: meetingDay || new Date().toISOString().slice(0, 10),
       ...Object.fromEntries(
         (gate.findings || [])
           .filter((finding) => finding.found)
           .map((finding) => [finding.id, "Yes" as const]),
       ),
-      ...(touch.scheduledAt ? { lastMonthlyTouch: touch.scheduledAt.slice(0, 10) } : {}),
+      ...(meetingDay ? { lastMonthlyTouch: meetingDay } : {}),
       ...(gate.justification ? { latestComments: gate.justification } : {}),
     };
     cards.push(
       kept("risk", "risk") || {
         id: "risk",
         kind: "risk",
-        ...(intelligence?.riskRegister ? { current: intelligence.riskRegister } : { isNewRow: true }),
+        ...(intelligence?.riskRegister && intelligence.riskRegisterTaskUrl
+          ? { current: intelligence.riskRegister }
+          : { isNewRow: true }),
         next: withDerivedRiskFields(fromFlags),
       },
     );
@@ -249,18 +278,13 @@ export async function buildTrackerCards(
 
   // --- the Stakeholder cards --------------------------------------------------
   const stakeholder = intelligence?.stakeholderMap;
-  if (stakeholder) {
-    const id = `stakeholder-${(stakeholder.clientName || client.contact || "primary").toLowerCase().replace(/\s+/g, "-")}`;
-    cards.push(
-      kept(id, "stakeholder") || {
-        id,
-        kind: "stakeholder",
-        ...(stakeholder.clientName ? { personName: stakeholder.clientName } : {}),
-        isNewRow: true,
-        next: stakeholder,
-      },
-    );
-  }
+  const keptStakeholder = existing.find((card) => card.kind === "stakeholder");
+  cards.push(keptStakeholder || {
+    id: "stakeholder",
+    kind: "stakeholder",
+    isNewRow: true,
+    next: { ...(client.contact ? { clientName: client.contact } : {}), ...stakeholder },
+  });
 
   const diffs: TrackerCardsResult["diffs"] = {};
   for (const card of cards) {
@@ -279,7 +303,8 @@ export async function buildTrackerCards(
     );
   }
 
-  return { cards, diffs, ...(current.reason ? { reason: current.reason } : {}) };
+  const reason = [current.reason, intelligenceError].filter(Boolean).join(" ");
+  return { cards, diffs, ...(reason ? { reason } : {}) };
 }
 
 export async function saveTrackerCards(

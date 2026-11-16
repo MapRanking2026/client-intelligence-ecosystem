@@ -32,18 +32,23 @@ export function SectionAdditions({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const notesUrl = `/api/clients/${clientId}/notes?section=${encodeURIComponent(sectionKey)}`;
+
   async function refresh() {
-    try {
-      const res = await fetch(`/api/clients/${clientId}/notes?section=${encodeURIComponent(sectionKey)}`);
-      if (res.ok) setNotes((await res.json()).data as SectionNote[]);
-    } catch {
-      /* keep current */
-    }
+    const res = await fetch(notesUrl);
+    if (res.ok) setNotes((await res.json()).data as SectionNote[]);
   }
+
   useEffect(() => {
-    void refresh();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [clientId, sectionKey]);
+    const request = new AbortController();
+    fetch(notesUrl, { signal: request.signal })
+      .then((res) => res.ok ? res.json() : null)
+      .then((payload) => {
+        if (payload && !request.signal.aborted) setNotes(payload.data as SectionNote[]);
+      })
+      .catch(() => undefined);
+    return () => request.abort();
+  }, [notesUrl]);
 
   async function add() {
     if (!text.trim()) return;
@@ -59,7 +64,7 @@ export function SectionAdditions({
       if (!res.ok) throw new Error(json.error || "Couldn't add that");
       setText("");
       setOpen(false);
-      await refresh();
+      await refresh().catch(() => undefined);
       onChange?.();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Couldn't add that");

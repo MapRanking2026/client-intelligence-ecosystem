@@ -255,7 +255,7 @@ async function syncGoogleCalendar(context: TenantContext, record: IntegrationCon
       updatedAt: getNowIso(),
     };
     if (next) {
-      clientUpdate.touchDate = formatDateLabel(next.startIso);
+      if (!client.manualTouchStartAt) clientUpdate.touchDate = formatDateLabel(next.startIso);
       clientUpdate.nextTouchEventId = next.eventId;
       clientUpdate.nextTouchStartAt = next.startIso;
     } else if (staleNextTouch) {
@@ -272,7 +272,8 @@ async function syncGoogleCalendar(context: TenantContext, record: IntegrationCon
     batch.set(db.doc(clientPath(context.tenantId, client.id)), clientUpdate, { merge: true });
     writes += 1;
 
-    if (next) {
+    if (next && (!client.manualTouchStartAt ||
+      Date.parse(next.startIso) === Date.parse(client.manualTouchStartAt))) {
       batch.set(
         db.doc(monthlyTouchPath(context.tenantId, client.touchId)),
         {
@@ -3857,7 +3858,7 @@ export interface GbpClientRefreshResult {
  * reviews) and cannot be made to fit inside a request somebody is waiting on. Meta Ads has no
  * sync implemented at all, so there is nothing here to refresh.
  */
-const PREP_REFRESHABLE_PROVIDERS: IntegrationProviderId[] = [
+export const PREP_REFRESHABLE_PROVIDERS: readonly IntegrationProviderId[] = [
   "clickup",
   "gohighlevel",
   "google-ads",

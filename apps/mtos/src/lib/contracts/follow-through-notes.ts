@@ -301,6 +301,15 @@ export interface NotesDraft {
   pending: PendingItem[];
 }
 
+/** Whether the draft already contains material someone could have reviewed or edited. */
+export function hasMeetingNotes(notes: NotesDraft | undefined): notes is NotesDraft {
+  return Boolean(notes && (
+    notes.summary.trim() || Object.values(notes.bullets).some((line) => line?.trim()) ||
+    notes.departments.length || notes.clientActions.length || notes.pending.length ||
+    notes.goalEvidence.trim() || notes.amContext?.trim() || notes.goalStatus !== "Not discussed"
+  ));
+}
+
 /** The `[PENDING – ...]` marker a pending item carries into the notes and its ticket title. */
 export function pendingMarker(item: Pick<PendingItem, "waitingOn">): string {
   return `[PENDING – ${item.waitingOn === "Client" ? "waiting on Client" : "AM review"}]`;

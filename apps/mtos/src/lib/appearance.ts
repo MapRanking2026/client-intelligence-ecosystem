@@ -70,3 +70,12 @@ export function applyAppearance(preferences: { theme: ThemeChoice; highlightFact
   applyTheme(preferences.theme);
   applyHighlightFacts(preferences.highlightFacts);
 }
+
+/** Subscribe to appearance changes from the header and account preferences. */
+export function subscribeToAppearance(listener: () => void) {
+  const observer = new MutationObserver(listener);
+  observer.observe(document.documentElement, {
+    attributeFilter: ["data-theme", "data-annotations"],
+  });
+  return () => observer.disconnect();
+}

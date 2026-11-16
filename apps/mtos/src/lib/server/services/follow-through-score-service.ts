@@ -143,20 +143,24 @@ export async function analyzeScoreGate(
   const clientName = client?.name || "this client";
 
   const env = getServerEnv();
-  const transcript = await readTouchTranscriptPayload(context, touchId);
+  const transcript = await readTouchTranscriptPayload(context, touchId, touch.postMeeting?.transcript);
 
-  if (!transcript) {
+  const legacy = touch.postMeeting?.clientIntelligence?.healthSuggestion;
+  const legacyScore = legacy?.suggestedNps;
+  const newerTranscript = touch.transcript?.foundAt &&
+    touch.transcript.foundAt > (touch.postMeeting?.analyzedAt || "");
+  if (!transcript || !hasAnyLlmProvider(env) || (!newerTranscript && isScoreValue(legacyScore))) {
     const { findings, note } = findingsFromIntelligence(touch);
     return {
       findings,
-      justifications: {},
-      note: "There is no transcript on this touch yet, so nothing has been read from the call. Tick what you remember and say what was said. " + note,
+      ...(!newerTranscript && isScoreValue(legacyScore) ? { suggested: legacyScore } : {}),
+      justifications: !newerTranscript && isScoreValue(legacyScore) && legacy?.suggestedNpsReason
+        ? { [legacyScore]: legacy.suggestedNpsReason }
+        : {},
+      note: !newerTranscript && isScoreValue(legacyScore)
+        ? "Score suggestion and risk flags loaded from the earlier transcript analysis. Confirm them against the call."
+        : note,
     };
-  }
-
-  if (!hasAnyLlmProvider(env)) {
-    const { findings, note } = findingsFromIntelligence(touch);
-    return { findings, justifications: {}, note };
   }
 
   // The flag list and the ceiling each flag puts on the score stay in code because the parser and

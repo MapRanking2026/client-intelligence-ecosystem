@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useSyncExternalStore } from "react";
 import { Highlighter } from "lucide-react";
 
-import { applyHighlightFacts } from "@/src/lib/appearance";
+import { applyHighlightFacts, subscribeToAppearance } from "@/src/lib/appearance";
 import { savePreference } from "@/src/lib/save-preference";
 
 /**
@@ -13,15 +13,14 @@ import { savePreference } from "@/src/lib/save-preference";
  * that order: the switch has to feel instant, and a failed save must not undo what the AM pressed.
  */
 export function AnnotationsToggle() {
-  const [on, setOn] = useState(false);
-
-  useEffect(() => {
-    setOn(document.documentElement.getAttribute("data-annotations") === "on");
-  }, []);
+  const on = useSyncExternalStore(
+    subscribeToAppearance,
+    () => document.documentElement.getAttribute("data-annotations") === "on",
+    () => false,
+  );
 
   function toggle() {
     const next = !on;
-    setOn(next);
     applyHighlightFacts(next);
     void savePreference({ highlightFacts: next });
   }

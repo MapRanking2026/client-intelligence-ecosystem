@@ -244,6 +244,17 @@ export type TrackerCard =
       next: StakeholderMapEntry;
     });
 
+export function trackerCardDiffs(card: TrackerCard): FieldDiff[] {
+  switch (card.kind) {
+    case "health":
+      return diffRow(card.current, card.next, HEALTH_TRACKER_FIELDS);
+    case "risk":
+      return diffRow(card.current, card.next, RISK_REGISTER_FIELDS);
+    case "stakeholder":
+      return diffRow(card.current, card.next, STAKEHOLDER_FIELDS);
+  }
+}
+
 /** The derived Risk Register fields, recomputed rather than trusted from the screen. */
 export function withDerivedRiskFields(entry: RiskRegisterEntry): RiskRegisterEntry {
   const count = riskFlagCount(entry);

@@ -1,3 +1,4 @@
+import type { MonthlyTouchRecord } from "@/src/lib/mtos-data";
 /**
  * Where a Monthly Touch has got to, and when its follow-through is due.
  *
@@ -227,4 +228,17 @@ function durationLabel(ms: number): string {
   }
   if (hours >= 1) return `${hours}h ${minutes % 60}m`;
   return `${minutes}m`;
+}
+
+export function canDeleteTestTouch(touch: MonthlyTouchRecord): boolean {
+  return !(
+    touch.deletedAt || touch.status === "Completed" || touch.qc || touch.qaReview ||
+    touch.approval?.startedAt || touch.agendaEmail?.sentAt ||
+    touch.prepWorkflow?.confirmationEmail?.sentAt || touch.prepWorkflow?.filing?.links ||
+    touch.followThrough?.processing || touch.followThrough?.recap?.sentAt ||
+    Object.keys(touch.followThrough?.ticketIds || {}).length ||
+    touch.postMeeting?.status === "approved" || touch.postMeeting?.notes?.clientBook ||
+    touch.postMeeting?.clientIntelligence?.status === "applied" ||
+    touch.postMeeting?.draftTickets?.some((ticket) => ticket.clickupTaskId)
+  );
 }

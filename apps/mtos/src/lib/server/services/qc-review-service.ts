@@ -136,7 +136,7 @@ export async function getQcScoringView(
   row: QcIndexRow,
 ): Promise<QcScoringView | undefined> {
   const source = getMtosDataSource(context);
-  const touch = await source.getMonthlyTouchById(touchId).catch(() => undefined);
+  const touch = await source.getMonthlyTouchById(touchId, { qcAccessVerified: true }).catch(() => undefined);
   if (!touch?.qc) return undefined;
   const client = await source.getClientById(touch.clientId).catch(() => undefined);
   return {

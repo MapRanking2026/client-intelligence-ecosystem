@@ -192,17 +192,6 @@ function formatMetric(metric: ScorecardMetric) {
   return metric.value.toLocaleString();
 }
 
-function deltaLabel(value: number | null, previousValue: number | null) {
-  if (value === null || previousValue === null) {
-    return null;
-  }
-  const diff = value - previousValue;
-  if (diff === 0) {
-    return "Flat vs. prior period";
-  }
-  return `${diff > 0 ? "+" : ""}${diff} vs. prior period`;
-}
-
 /** Metrics where a decrease is the good outcome (cost, missed calls). */
 const METRIC_LOWER_IS_BETTER = (label: string) => /cost|missed/i.test(label);
 

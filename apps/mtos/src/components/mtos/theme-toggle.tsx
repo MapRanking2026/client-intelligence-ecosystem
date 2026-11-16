@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useSyncExternalStore } from "react";
 import { Moon, Sun } from "lucide-react";
 
-import { applyTheme } from "@/src/lib/appearance";
+import { applyTheme, subscribeToAppearance } from "@/src/lib/appearance";
 import { savePreference } from "@/src/lib/save-preference";
 
 /**
@@ -19,15 +19,14 @@ import { savePreference } from "@/src/lib/save-preference";
  * worse version of the dropdown that already exists.
  */
 export function ThemeToggle() {
-  const [dark, setDark] = useState(false);
-
-  useEffect(() => {
-    setDark(document.documentElement.getAttribute("data-theme") === "dark");
-  }, []);
+  const dark = useSyncExternalStore(
+    subscribeToAppearance,
+    () => document.documentElement.getAttribute("data-theme") === "dark",
+    () => false,
+  );
 
   function toggle() {
     const next = !dark;
-    setDark(next);
     const theme = next ? "dark" : "light";
     applyTheme(theme);
     void savePreference({ theme });

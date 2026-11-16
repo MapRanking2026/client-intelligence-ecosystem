@@ -380,7 +380,7 @@ export default async function CommandCenterPage() {
                   <span className={`sig-dot ${tone}`} aria-hidden />
                   <span className="min-w-0 flex-1">
                     <span className="block text-[0.88rem] font-semibold" style={{ color: "var(--text)" }}>
-                      <ClientHint client={client} />
+                      <ClientHint client={client} linked={false} />
                     </span>
                     <span className="muted block text-[0.78rem]">
                       {client.topRisks?.length ? client.topRisks.join(" · ") : client.summary}

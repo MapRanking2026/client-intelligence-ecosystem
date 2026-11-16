@@ -4,7 +4,7 @@ import {
   refreshGbpInsightsForClient,
   refreshGhlLeadsForClient,
   refreshSnapshotsForPrep,
-  type PrepSnapshotRefresh,
+  PREP_REFRESHABLE_PROVIDERS,
 } from "@/src/lib/server/integration-sync";
 import { getNowIso } from "@/src/lib/server/services/mtos-ai";
 import { rewriteTouchPerformancePanels } from "@/src/lib/server/services/monthly-touch-prep-service";
@@ -47,7 +47,7 @@ const PROVIDER_LABEL: Record<string, string> = {
   "google-search-console": "Google Search Console",
   "rank-tracker": "Rank Tracker",
   "map-checkins": "Map Check-ins",
-  gohighlevel: "GoHighLevel",
+  gohighlevel: "GoHighLevel workspace snapshot",
   "google-ads": "Google Ads",
   "google-lsa": "Google Local Services Ads",
   "meta-ads": "Meta Ads",
@@ -79,7 +79,13 @@ export async function refreshClientPerformance(
       locations: 0,
       detail: error instanceof Error ? error.message : "The Business Profile refresh failed.",
     })),
-    refreshSnapshotsForPrep(context, { freshWithinMs: 0 }).catch(() => [] as PrepSnapshotRefresh[]),
+    refreshSnapshotsForPrep(context, { freshWithinMs: 0 }).catch(() =>
+      PREP_REFRESHABLE_PROVIDERS.map((providerId) => ({
+        providerId,
+        status: "failed" as const,
+        detail: "The shared snapshot refresh did not complete. Check this source before using its numbers.",
+      })),
+    ),
     refreshGhlLeadsForClient(context, clientId, client.name).catch((error: unknown) => ({
       status: "failed" as const,
       detail: error instanceof Error ? error.message : "The GoHighLevel refresh failed.",
@@ -88,7 +94,7 @@ export async function refreshClientPerformance(
 
   const sources: ClientPerformanceRefresh["sources"] = [
     { label: "Google Business Profile", status: gbp.status, detail: gbp.detail },
-    { label: "GoHighLevel", status: ghl.status, detail: ghl.detail },
+    { label: "GoHighLevel client leads", status: ghl.status, detail: ghl.detail },
     ...snapshots.map((entry) => ({
       label: PROVIDER_LABEL[entry.providerId] || entry.providerId,
       status: entry.status,

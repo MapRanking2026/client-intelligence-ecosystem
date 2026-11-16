@@ -655,24 +655,21 @@ export async function syncClickUpClients(
       try {
         const client = serializeTaskToClient(task, managerName);
         const clientRef = db.doc(clientPath(context.tenantId, client.id));
-        const existingClientSnapshot = await clientRef.get();
-        const existingClient = existingClientSnapshot.exists
-          ? (existingClientSnapshot.data() as Partial<ClientRecord>)
-          : undefined;
-        await clientRef.set(
-          {
-            ...existingClient,
+        const existingClientSnapshot = await db.runTransaction(async (transaction) => {
+          const snapshot = await transaction.get(clientRef);
+          const existingClient = snapshot.data() as Partial<ClientRecord> | undefined;
+          const syncedClient = {
             ...client,
-          },
-          { merge: true },
-        );
-
-        const touchRef = db.doc(monthlyTouchPath(context.tenantId, client.touchId));
-        const existingTouchSnapshot = await touchRef.get();
-        const existingTouch = existingTouchSnapshot.exists
-          ? (existingTouchSnapshot.data() as Partial<MonthlyTouchRecord>)
-          : undefined;
-        await touchRef.set(buildMonthlyTouchRecord(task, client, existingTouch), { merge: true });
+            touchId: existingClient?.touchId || client.touchId,
+            ...(existingClient?.manualTouchStartAt && existingClient.touchDate ? { touchDate: existingClient.touchDate } : {}),
+          };
+          const touchRef = db.doc(monthlyTouchPath(context.tenantId, syncedClient.touchId));
+          const touchSnapshot = await transaction.get(touchRef);
+          const existingTouch = touchSnapshot.data() as Partial<MonthlyTouchRecord> | undefined;
+          transaction.set(clientRef, syncedClient, { merge: true });
+          transaction.set(touchRef, buildMonthlyTouchRecord(task, syncedClient, existingTouch), { merge: true });
+          return snapshot;
+        });
 
         const syncedClientRecord: SyncedClientRecord = {
           id: client.id,

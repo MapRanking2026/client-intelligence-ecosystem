@@ -117,31 +117,21 @@ check(
 // ---------------------------------------------------------------------------
 scenario("The write touches three panels and nothing else");
 
-check("it writes the business scorecard", rewriteBody.includes("businessScorecard:"));
-check("the SEO panel", rewriteBody.includes("seoPerformance:"));
-check("the paid-media panel", rewriteBody.includes("adsPerformance:"));
-check("and records when it ran", rewriteBody.includes("performanceRefreshedAt"));
 check(
-  "scoped with mergeFields, so an overlapping write cannot restore the rest of the document",
-  rewriteBody.includes('mergeFields: ["prepPack"]'),
+  "updates only the four nested performance fields",
+  rewriteBody.includes(".update(") &&
+    JSON.stringify([...rewriteBody.matchAll(/"prepPack\.([^"]+)":/g)].map((match) => match[1])) ===
+      JSON.stringify(["businessScorecard", "seoPerformance", "adsPerformance", "performanceRefreshedAt"]) &&
+    !rewriteBody.includes("...touch.prepPack"),
 );
-
-for (const field of [
-  "executiveBrief",
-  "agenda",
-  "talkingPoints",
-  "aiRecommendations",
-  "prepBrief",
-  "review",
-  "approval",
-  "leadVerification",
-]) {
-  check(
-    `it does not write \`${field}\``,
-    !new RegExp(`(^|[^.\\w])${field}:`, "m").test(rewriteBody),
-    "the refresh must leave everything the model and the account manager wrote alone",
-  );
-}
+check(
+  "refreshes server-rendered panels without discarding the provider status list",
+  component.includes("router.refresh()") && !component.includes("location.reload()"),
+);
+check(
+  "reports a failed snapshot batch for every affected provider",
+  orchestrator.includes("PREP_REFRESHABLE_PROVIDERS.map") && orchestrator.includes('status: "failed"'),
+);
 
 // ---------------------------------------------------------------------------
 scenario("A button means now");

@@ -104,6 +104,7 @@ export function FollowThroughRecap({
     try {
       const data = await post({ action: "save_recap", recap: state });
       if (data?.recap) setState(data.recap);
+      window.location.assign("?step=finish#finish");
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "The recap was not saved.");
     } finally {
@@ -224,7 +225,7 @@ export function FollowThroughRecap({
       <div className="flex flex-wrap items-center gap-2">
         <button type="button" className="btn btn-primary" disabled={Boolean(busy)} onClick={() => void save()}>
           <Save />
-          {busy === "save" ? "Saving…" : "Save the recap"}
+          {busy === "save" ? "Saving…" : "Save recap and continue to finish"}
         </button>
         {confirmRebuild ? (
           <>

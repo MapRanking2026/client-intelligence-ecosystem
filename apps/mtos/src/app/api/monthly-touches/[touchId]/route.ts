@@ -2,7 +2,10 @@ import { NextResponse, after } from "next/server";
 import { z } from "zod";
 
 import { resolveTenantContext } from "@/src/lib/auth/resolve-tenant-context";
+import { getMtosDataSource } from "@/src/lib/server/data/seed-mtos-data-source";
 import { monthlyTouchWorkspaceResponse } from "@/src/lib/api/mtos-query";
+import { deletePreviousTestTouch, startNewMonthlyTouch } from "@/src/lib/server/services/monthly-touch-service";
+import { persistGeneratedFollowThroughDraft } from "@/src/lib/server/services/follow-through-drafts-service";
 import { prepareMonthlyTouch } from "@/src/lib/server/services/monthly-touch-prep-service";
 import { runResearchStage } from "@/src/lib/server/services/prep-workflow-service";
 import { generatePresentation } from "@/src/lib/server/services/presentation-service";
@@ -28,7 +31,7 @@ import {
   attachTouchTranscript,
   watchTouchTranscript,
 } from "@/src/lib/server/services/transcript-watch-service";
-import { GOAL_STATUSES } from "@/src/lib/contracts/follow-through-notes";
+import { GOAL_STATUSES, hasMeetingNotes } from "@/src/lib/contracts/follow-through-notes";
 import {
   CANCEL_SPLIT_CATEGORIES,
   TICKET_PRIORITIES,
@@ -351,12 +354,28 @@ const touchRequestSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("confirm_score_gate"), gate: scoreGateSchema }),
   z.object({ action: z.literal("reopen_score_gate") }),
   // Drafting is its own action and overwrites the AM's edits, so the screen warns before it.
-  z.object({ action: z.literal("draft_notes") }),
+  z.object({ action: z.literal("draft_notes"), manual: z.boolean().optional() }),
+  z.object({ action: z.literal("prepare_follow_through") }),
+  z.object({
+    action: z.literal("start_new_touch"),
+    scheduledAt: z.iso.datetime(),
+    timeZone: z.string().max(100).refine((name) => {
+      try {
+        new Intl.DateTimeFormat("en-US", { timeZone: name });
+        return true;
+      } catch {
+        return false;
+      }
+    }, "Choose a valid meeting time zone."),
+    deletePrevious: z.boolean().optional(),
+  }),
+  z.object({ action: z.literal("delete_test_touch") }),
   z.object({ action: z.literal("save_notes"), notes: notesDraftSchema }),
   // Building keeps every item the AM has already decided on; only new action lines get a form.
   z.object({ action: z.literal("build_items") }),
   z.object({ action: z.literal("build_tracker_cards") }),
   z.object({ action: z.literal("build_recap") }),
+  z.object({ action: z.literal("prepare_recap") }),
   // The one action in the whole touch that writes outward. Everything it does was approved item
   // by item on the screen first, and every step of it is idempotent.
   z.object({ action: z.literal("process_follow_through") }),
@@ -546,10 +565,39 @@ export async function POST(
         : { ...rawPayload, action: "prepare_and_generate" },
     );
     const { touchId } = await params;
+    const touch = await getMtosDataSource(context).getMonthlyTouchById(touchId);
+    if (!touch) {
+      return NextResponse.json({ error: "Monthly touch not found" }, { status: 404 });
+    }
 
     let result: unknown;
 
     switch (payload.action) {
+      case "start_new_touch":
+        result = await startNewMonthlyTouch(context, touch, payload);
+        break;
+      case "delete_test_touch":
+        result = await deletePreviousTestTouch(context, touch);
+        break;
+      case "prepare_follow_through": {
+        const existing = touch.followThrough?.notes;
+        const draft = hasMeetingNotes(existing)
+          ? { notes: existing }
+          : await draftFollowThroughNotes(context, touchId);
+        if ("note" in draft && draft.note) throw new Error(draft.note);
+        const notes = hasMeetingNotes(existing) ? existing :
+          await persistGeneratedFollowThroughDraft(context, touchId, "notes", draft.notes);
+        if (!touch.followThrough?.items) {
+          const { items } = await buildFollowThroughItems(context, touchId);
+          await persistGeneratedFollowThroughDraft(context, touchId, "items", items);
+        }
+        if (!touch.followThrough?.trackerCards) {
+          const { cards } = await buildTrackerCards(context, touchId);
+          await persistGeneratedFollowThroughDraft(context, touchId, "trackerCards", cards);
+        }
+        result = { notes };
+        break;
+      }
       case "prepare":
         result = await prepareMonthlyTouch(context, touchId, { includeClaude: false });
         break;
@@ -604,7 +652,7 @@ export async function POST(
         result = { gate: await reopenScoreGate(context, touchId) };
         break;
       case "draft_notes":
-        result = await draftFollowThroughNotes(context, touchId);
+        result = await draftFollowThroughNotes(context, touchId, payload.manual);
         break;
       case "save_notes":
         result = { notes: await saveFollowThroughNotes(context, touchId, payload.notes) };
@@ -627,6 +675,14 @@ export async function POST(
             }
           });
         }
+        break;
+      }
+      case "prepare_recap": {
+        if (!touch.followThrough?.recap) {
+          const { recap } = await buildFollowThroughRecap(context, touchId);
+          await persistGeneratedFollowThroughDraft(context, touchId, "recap", recap);
+        }
+        result = { ready: true };
         break;
       }
       case "build_recap":

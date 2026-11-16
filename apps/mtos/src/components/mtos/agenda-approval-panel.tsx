@@ -3,6 +3,7 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import { AlertTriangle, Check, CheckCircle2, Loader2, Mail, Presentation, Rocket, Send, Undo2, X } from "lucide-react";
 
+import { agendaEmailHasBody, isAgendaRecipient, sanitizeAgendaEmailHtml } from "@/src/lib/contracts/agenda-email";
 import { useTouchAutosave } from "@/src/components/mtos/use-touch-autosave";
 import {
   APPROVAL_STEPS,
@@ -50,6 +51,7 @@ const TOOLBAR: { command: string; label: string; title: string }[] = [
 export interface AgendaApprovalPanelProps {
   touchId: string;
   email: TouchAgendaEmailState;
+  freshTemplateHtml?: string;
   /** True when the stored HTML is what the client already received; the card then locks. */
   sent: boolean;
   /** Addresses the cc preference would copy, and whether it is on. */
@@ -68,6 +70,7 @@ export interface AgendaApprovalPanelProps {
 export function AgendaApprovalPanel({
   touchId,
   email,
+  freshTemplateHtml,
   sent,
   availableCc,
   ccEnabled,
@@ -79,6 +82,9 @@ export function AgendaApprovalPanel({
 }: AgendaApprovalPanelProps) {
   const autosave = useTouchAutosave(touchId);
   const [subject, setSubject] = useState(email.subject);
+  const [recipientEdit, setRecipientEdit] = useState<string>();
+  const [editedHtml, setEditedHtml] = useState<string>();
+  const recipient = recipientEdit ?? email.recipient ?? "";
   const [declinedEmail, setDeclinedEmail] = useState(Boolean(email.declined));
   const [format, setFormat] = useState<LiveCallFormat>(initialFormat);
   const [makeDefault, setMakeDefault] = useState(false);
@@ -96,7 +102,10 @@ export function AgendaApprovalPanel({
   const alreadySent =
     sent || sendOutcome?.status === "sent" || sendOutcome?.status === "already_sent";
   const locked = alreadySent || Boolean(approval?.finishedAt);
-  const blocking = email.blockingGaps || [];
+  const blocking = editedHtml === undefined
+    ? (email.blockingGaps || []).filter((gap) => !/email address in To\./i.test(gap))
+    : agendaEmailHasBody(editedHtml) ? [] : ["Write the email body before sending."];
+  if (!isAgendaRecipient(recipient)) blocking.push("Enter a valid email address in To.");
 
   const plan = useMemo(
     () =>
@@ -105,11 +114,11 @@ export function AgendaApprovalPanel({
         declined,
         sendingEmail: !declinedEmail,
         ...(alreadySent ? { alreadySent: true } : {}),
-        recipient: email.recipient || "",
+        recipient,
         format,
         pageName,
       }),
-    [alreadySent, approving, declined, declinedEmail, email.recipient, format, pageName],
+    [alreadySent, approving, declined, declinedEmail, recipient, format, pageName],
   );
 
   const toggleDecline = useCallback(() => {
@@ -203,6 +212,12 @@ export function AgendaApprovalPanel({
     <div className="flex flex-col gap-4">
       <EmailCard
         email={email}
+        {...(freshTemplateHtml ? { freshTemplateHtml } : {})}
+        recipient={recipient}
+        onRecipient={(value) => {
+          setRecipientEdit(value);
+          autosave.save({ agendaEmail: { recipient: value } });
+        }}
         subject={subject}
         onSubject={onSubject}
         declined={declinedEmail}
@@ -212,7 +227,11 @@ export function AgendaApprovalPanel({
         availableCc={availableCc}
         ccEnabled={ccEnabled}
         blocking={blocking}
-        onHtml={(html) => autosave.save({ agendaEmail: { html } })}
+        onHtml={(html) => {
+          const clean = sanitizeAgendaEmailHtml(html) || "<p><br></p>";
+          setEditedHtml(clean);
+          autosave.save({ agendaEmail: { html: clean } });
+        }}
         onSend={send}
         sending={sending}
         {...(sendOutcome ? { outcome: sendOutcome } : {})}
@@ -284,6 +303,9 @@ function whenLabel(iso: string): string {
 
 function EmailCard({
   email,
+  freshTemplateHtml,
+  recipient,
+  onRecipient,
   subject,
   onSubject,
   declined,
@@ -299,6 +321,9 @@ function EmailCard({
   outcome,
 }: {
   email: TouchAgendaEmailState;
+  freshTemplateHtml?: string;
+  recipient: string;
+  onRecipient: (value: string) => void;
   subject: string;
   onSubject: (value: string) => void;
   declined: boolean;
@@ -314,17 +339,19 @@ function EmailCard({
   outcome?: AgendaSendOutcome;
 }) {
   const bodyRef = useRef<HTMLDivElement | null>(null);
+  const [htmlSource, setHtmlSource] = useState<string>();
+  const [previewOverride, setPreviewOverride] = useState<string>();
   // The initial HTML is written in once, by ref, and never again: re-rendering a `contentEditable`
   // from state puts the caret back at the start of the document on every keystroke.
   const attach = useCallback(
     (node: HTMLDivElement | null) => {
       bodyRef.current = node;
       if (node && !node.dataset.loaded) {
-        node.innerHTML = email.html;
+        node.innerHTML = previewOverride ?? email.html;
         node.dataset.loaded = "1";
       }
     },
-    [email.html],
+    [email.html, previewOverride],
   );
 
   const command = useCallback(
@@ -347,6 +374,15 @@ function EmailCard({
   );
 
   const editable = !locked && !declined;
+
+  function replaceTemplate(html: string) {
+    if (!window.confirm("Replace the current email body? Existing body edits will be replaced.")) return;
+    const clean = sanitizeAgendaEmailHtml(html) || "<p><br></p>";
+    if (bodyRef.current) bodyRef.current.innerHTML = clean;
+    if (htmlSource !== undefined) setHtmlSource(clean);
+    setPreviewOverride(clean);
+    onHtml(clean);
+  }
 
   return (
     <div className="card" style={declined ? { borderColor: "var(--risk)" } : undefined}>
@@ -376,7 +412,9 @@ function EmailCard({
         </dd>
         <dt className="eyebrow muted">To</dt>
         <dd style={{ color: "var(--text-2)" }}>
-          {email.recipient || <span className="muted">— no address on file</span>}
+          {editable ? (
+            <input className="input" type="email" aria-label="To" value={recipient} onChange={(event) => onRecipient(event.target.value)} />
+          ) : recipient || <span className="muted">No address on file</span>}
           <div className="muted mt-0.5 text-[0.78rem]">{email.recipientSource}</div>
         </dd>
         <dt className="eyebrow muted">Copy</dt>
@@ -427,7 +465,25 @@ function EmailCard({
 
       {editable ? (
         <div className="mt-3 flex flex-wrap gap-1">
-          {TOOLBAR.map((button) => (
+          <button type="button" className="btn btn-ghost btn-sm" onClick={() => {
+            if (htmlSource === undefined) {
+              setHtmlSource(bodyRef.current?.innerHTML ?? email.html);
+            } else {
+              setPreviewOverride(sanitizeAgendaEmailHtml(htmlSource) || "<p><br></p>");
+              setHtmlSource(undefined);
+            }
+          }}>
+            {htmlSource === undefined ? "Edit full template (HTML)" : "Return to visual editor"}
+          </button>
+          {freshTemplateHtml ? (
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => replaceTemplate(freshTemplateHtml)}>
+              Use latest meeting template
+            </button>
+          ) : null}
+          <button type="button" className="btn btn-ghost btn-sm" onClick={() => replaceTemplate("")}>
+            Start with a blank body
+          </button>
+          {htmlSource === undefined ? TOOLBAR.map((button) => (
             <button
               key={button.command}
               type="button"
@@ -438,10 +494,18 @@ function EmailCard({
             >
               {button.label}
             </button>
-          ))}
+          )) : null}
         </div>
       ) : null}
 
+      {editable && htmlSource !== undefined ? (
+        <textarea className="textarea mt-3 font-mono" aria-label="Full email template HTML" rows={16}
+          value={htmlSource} onChange={(event) => {
+            setHtmlSource(event.target.value);
+            onHtml(event.target.value);
+          }}
+        />
+      ) : (
       <div
         ref={attach}
         contentEditable={editable}
@@ -459,6 +523,7 @@ function EmailCard({
           opacity: declined ? 0.45 : 1,
         }}
       />
+      )}
 
       <p className="muted mt-2 text-[0.78rem]">
         {declined
@@ -512,8 +577,10 @@ function EmailCard({
           </button>
           <span className="muted text-[0.8rem]">
             {blocking.length
-              ? "Fix the item above first — there is nowhere to send it."
-              : `Goes to ${email.recipient || "the client"} now. If you don't, the approval sends it.`}
+              ? !isAgendaRecipient(recipient)
+                ? "Enter a valid address in To."
+                : "Review the email and resolve the items listed above."
+              : `Goes to ${recipient} now. If you don't send it here, the approval sends it.`}
           </span>
         </div>
       ) : null}

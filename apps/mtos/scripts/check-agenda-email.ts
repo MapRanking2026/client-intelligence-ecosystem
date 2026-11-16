@@ -125,19 +125,9 @@ check("a sentence with no keyword gets no emoji", agendaTopic("Something else en
 check("a leading separator is not treated as a split", agendaTopic("— stray").title === "— stray");
 
 // ---------------------------------------------------------------------------
-scenario("A complete draft blocks only on the time zone MTOS does not hold");
-
+scenario("Current calendar facts are sufficient when the time includes its zone");
 const full = buildAgendaEmailDraft(agendaEmail(), SOURCE);
-
-check(
-  "a complete touch has exactly one gap: the unknown client zone",
-  full.blockingGaps.length === 1,
-  full.blockingGaps.join(" | "),
-);
-check(
-  "and that gap names what the AM must confirm",
-  /confirm the client reads that hour/i.test(full.blockingGaps[0] || ""),
-);
+check("a complete draft has no send blockers", full.blockingGaps.length === 0, full.blockingGaps.join(" | "));
 check("the date reads in the AM's zone", full.facts.dateLabel === "Thu, November 5", full.facts.dateLabel);
 check(
   "the time reads in the AM's zone",
@@ -229,7 +219,7 @@ check(
 const noSignoff = buildAgendaEmailDraft(agendaEmail({ signoff: "" }), SOURCE);
 check(
   "no sign-off falls back to the AM's name",
-  noSignoff.facts.signoff.join(" / ") === "Talk soon, / Javier / Map Ranking",
+  noSignoff.facts.signoff.join(" / ") === "Best regards, / Javier / Map Ranking",
   noSignoff.facts.signoff.join(" / "),
 );
 check("and that fallback raises no gap", !noSignoff.blockingGaps.some((gap) => /unsigned/i.test(gap)));
@@ -241,7 +231,7 @@ const anonymous = buildAgendaEmailDraft(agendaEmail({ signoff: "" }), {
 });
 check(
   "no sign-off and no name blocks the send rather than ending unsigned",
-  anonymous.blockingGaps.some((gap) => /end unsigned/i.test(gap)),
+  anonymous.blockingGaps.some((gap) => /signature/i.test(gap)),
   anonymous.blockingGaps.join(" | "),
 );
 
@@ -255,18 +245,16 @@ check(
 );
 
 // ---------------------------------------------------------------------------
-scenario("The preparation's own gaps are listed first and never merged away");
+scenario("Current meeting facts and user settings take precedence");
 
-const bothGaps = buildAgendaEmailDraft(
-  agendaEmail({ blockingGaps: ["The client never confirmed the new contact address."] }),
-  { ...SOURCE, scheduledAt: undefined },
+const refreshed = buildAgendaEmailDraft(
+  agendaEmail({ link: "https://meet.google.com/old-meet-ing", length: "90 min", blockingGaps: ["Meeting link missing"] }),
+  { ...SOURCE, signoff: "Best regards,\nFrancisco Quintero\nSenior Account Manager | Map Ranking" },
 );
-check("the agent's gap comes first", bothGaps.blockingGaps[0] === "The client never confirmed the new contact address.");
-check("ours are appended, not substituted", bothGaps.blockingGaps.length >= 2, bothGaps.blockingGaps.join(" | "));
-check(
-  "and ours is still the date gap",
-  bothGaps.blockingGaps.slice(1).some((gap) => /no date and time/i.test(gap)),
-);
+check("a prep warning does not block a known meeting", refreshed.blockingGaps.length === 0);
+check("the join button uses the saved meeting", refreshed.facts.meetingUrl === SOURCE.meetingUrl);
+check("the calendar length replaces the old prep estimate", refreshed.facts.lengthLabel === "About 40 min");
+check("the configured signature replaces the prep signature", refreshed.facts.signoff[1] === "Francisco Quintero");
 
 // ---------------------------------------------------------------------------
 scenario("Every interpolated value is escaped on the way into the HTML");

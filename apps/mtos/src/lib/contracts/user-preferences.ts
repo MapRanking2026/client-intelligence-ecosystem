@@ -322,9 +322,9 @@ export const PREFERENCE_GROUPS: PreferenceGroup[] = [
       },
       {
         key: "emailSignoff",
-        label: "Email sign-off",
+        label: "Email signature",
         kind: "textarea",
-        hint: "Closes the agenda email and the recap email. One line per line, as you would type it.",
+        hint: "Used in new confirmation and recap drafts. Enter the closing, your name and title on separate lines.",
       },
       {
         key: "clientEmailsSendThrough",

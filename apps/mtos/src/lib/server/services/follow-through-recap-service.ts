@@ -105,7 +105,11 @@ export async function buildFollowThroughRecap(
       metLabel: dayLabel(touch.scheduledAt, timeZone),
       nextCheckInLabel: dayLabel(next?.scheduledAt, timeZone),
       nextCheckInUrl: "",
-      signoff: preferences.emailSignoff || "",
+      signoff: preferences.emailSignoff?.trim() || (
+        preferences.jobTitle?.trim() && (profile.name || client.accountManager)
+          ? `Best regards,\n${profile.name || client.accountManager}\n${preferences.jobTitle.trim()} | Map Ranking`
+          : ""
+      ),
       accountManagerName: profile.name || client.accountManager || "",
       ...(env.appUrl ? { appUrl: env.appUrl } : {}),
       wins,

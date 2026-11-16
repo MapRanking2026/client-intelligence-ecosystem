@@ -1,3 +1,4 @@
+import { emailSignatureLines } from "@/src/lib/contracts/agenda-email";
 import { nanoid } from "nanoid";
 
 import type { TenantContext } from "@/src/lib/contracts/mtos";
@@ -60,6 +61,22 @@ function isInternalAddress(address: string): boolean {
   return /@(mapranking|maprankings)\./i.test(address);
 }
 
+/** Use the contact-name field on the synced Health Tracker when the stored contact is blank. */
+export function resolveConfirmationContact(client: ClientRecord): string {
+  const isName = (value: string) => Boolean(value.trim()) && !value.includes("@") &&
+    !/^(unknown|n\/?a|none|-)$/i.test(value.trim());
+  const saved = client.contact?.trim() || "";
+  if (isName(saved)) return saved;
+  const raw = client.rawPayload?.custom_fields;
+  const fields = Array.isArray(raw) ? raw as Record<string, unknown>[] : [];
+  const named = fields.find((field) =>
+    /^(primary contact(?: name)?|client contact(?: name)?|contact name|decision maker|client name)$/i.test(
+      String(field.name ?? "").replace(/^[^\p{L}]+/u, "").trim(),
+    ) && typeof field.value === "string" && isName(field.value),
+  );
+  return typeof named?.value === "string" ? named.value.trim() : "";
+}
+
 /**
  * Find the client's email address in what we already hold.
  *
@@ -76,7 +93,12 @@ export function resolveRecipient(
     const fields = Array.isArray((payload as Record<string, unknown>).custom_fields)
       ? ((payload as Record<string, unknown>).custom_fields as Record<string, unknown>[])
       : [];
-    for (const field of fields) {
+    const contactFields = fields.filter((field) => /email|contact/i.test(String(field.name ?? "")));
+    const ranked = [...contactFields].sort((a, b) => {
+      const rank = (name: string) => /⭐.*email|primary.*email|client.*email/i.test(name) ? 0 : /email/i.test(name) ? 1 : 2;
+      return rank(String(a.name ?? "")) - rank(String(b.name ?? ""));
+    });
+    for (const field of ranked) {
       const name = String(field.name ?? "").toLowerCase();
       const value = typeof field.value === "string" ? field.value : "";
       if (!value) continue;
@@ -147,6 +169,10 @@ export interface GenerateConfirmationEmailOptions {
   timeZone?: string;
   /** The AM can supply the address when MTOS has none on file. */
   recipient?: string;
+  accountManagerName?: string;
+  signature?: string;
+  meetingUrl?: string;
+  scheduledAt?: string;
 }
 
 /**
@@ -163,7 +189,12 @@ export async function generateConfirmationEmail(
   const generatedAt = getNowIso();
   const env = getServerEnv();
   const { timeZone, timeZoneSource } = resolveTimeZone(options.timeZone);
-  const scheduledAt = touch.scheduledAt || touch.prepPack?.schedule.scheduledAt;
+  const scheduledAt = options.scheduledAt || touch.scheduledAt || touch.prepPack?.schedule.scheduledAt;
+  const link = options.meetingUrl || touch.googleMeeting?.meetingUrl || "";
+  const joinLine = /^https:\/\//i.test(link) ? `Join meeting: ${link}` : "";
+  const signature = emailSignatureLines(options.signature, options.accountManagerName || client.accountManager);
+  const contact = resolveConfirmationContact(client);
+  const greeting = contact || "there";
   const meetingWhen = formatMeetingWhen(scheduledAt, timeZone);
   const resolved = resolveRecipient(client, touch);
   const recipient = options.recipient?.trim() || resolved.recipient;
@@ -212,7 +243,7 @@ export async function generateConfirmationEmail(
       ...base,
       subject: `Agenda for our check-in — ${meetingWhen}`,
       body: [
-        `Hi ${client.contact || "there"},`,
+        `Hi ${greeting},`,
         "",
         `Looking forward to our check-in on ${meetingWhen}. Here is what I would like to cover:`,
         "",
@@ -220,8 +251,8 @@ export async function generateConfirmationEmail(
         "",
         "If you can, bring your number of calls, booked jobs and approximate revenue this month — it helps us set the right goal for next quarter.",
         "",
-        "Talk soon,",
-        client.accountManager || "",
+        ...(joinLine ? [joinLine, ""] : []),
+        ...signature,
       ]
         .filter((line) => line !== undefined)
         .join("\n"),
@@ -234,9 +265,9 @@ export async function generateConfirmationEmail(
 
   const userText = [
     `Client business: ${client.name}`,
-    `Client contact: ${client.contact || "unknown — open with a neutral greeting"}`,
+    `Client contact: ${contact || "unknown — open with a neutral greeting"}`,
     `Industry: ${client.industry}`,
-    `Account manager (signs the email): ${client.accountManager || "unknown — leave the signature off"}`,
+    "Leave out the closing, signature, and join link. MTOS adds these from account settings and the selected meeting.",
     `Meeting date and time, exactly as you must state it: ${meetingWhen}`,
     `Channel this will be sent through: ${channel}`,
     "",
@@ -270,13 +301,13 @@ export async function generateConfirmationEmail(
     if (!subject || !body) {
       throw new Error("the model returned an empty subject or body");
     }
-    return { ...base, subject, body, model, provider };
+    return { ...base, subject, body: [body, joinLine, signature.join("\n")].filter(Boolean).join("\n\n"), model, provider };
   } catch (error) {
     return {
       ...base,
       subject: `Agenda for our check-in — ${meetingWhen}`,
       body: [
-        `Hi ${client.contact || "there"},`,
+        `Hi ${greeting},`,
         "",
         `Looking forward to our check-in on ${meetingWhen}. Here is what I would like to cover:`,
         "",
@@ -284,8 +315,8 @@ export async function generateConfirmationEmail(
         "",
         "If you can, bring your number of calls, booked jobs and approximate revenue this month — it helps us set the right goal for next quarter.",
         "",
-        "Talk soon,",
-        client.accountManager || "",
+        ...(joinLine ? [joinLine, ""] : []),
+        ...signature,
       ].join("\n"),
       status: "draft",
       gaps: [

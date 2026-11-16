@@ -590,6 +590,7 @@ export default async function MonthlyTouchRunSheetPage({
             <AgendaApprovalPanel
               touchId={touch.id}
               email={agendaEmail.state}
+              {...(agendaEmail.freshTemplateHtml ? { freshTemplateHtml: agendaEmail.freshTemplateHtml } : {})}
               sent={agendaEmail.sent}
               availableCc={agendaEmail.availableCc}
               ccEnabled={agendaEmail.ccEnabled}

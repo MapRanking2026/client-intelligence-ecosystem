@@ -204,11 +204,6 @@ export function buildAgendaEmailDraft(
       "This touch has no date and time, so the email cannot tell the client when the call is. Set the meeting time first.",
     );
   }
-  if (scheduled && !source.timeZoneIsClients) {
-    gaps.push(
-      "The date and time are stated in Map Ranking's working time zone because MTOS has no zone on file for this client. Confirm the client reads that hour the same way before it goes out.",
-    );
-  }
 
   const dateLabel = scheduled
     ? formatInZone(scheduled, source.timeZone, { weekday: "short", month: "long", day: "numeric" })
@@ -227,35 +222,24 @@ export function buildAgendaEmailDraft(
     );
   }
 
-  const meetingUrl = safeUrl(email?.link || source.meetingUrl || "");
+  const meetingUrl = safeUrl(source.meetingUrl || "");
   if (!meetingUrl) {
     gaps.push(
       "There is no Google Meet link on this touch, so the email has no join button. Pick the meeting in MTOS, or add the link yourself.",
     );
   }
 
-  const lengthLabel = email?.length?.trim()
-    ? email.length.trim()
-    : source.lengthMinutes
-      ? `About ${source.lengthMinutes} min`
-      : "";
+  const lengthLabel = source.lengthMinutes
+    ? `About ${source.lengthMinutes} min`
+    : email?.length?.trim() || "";
 
-  const signoff = (email?.signoff || source.signoff || "")
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean);
+  const signoff = emailSignatureLines(source.signoff, source.accountManagerName);
   if (!signoff.length) {
-    const fallback = [source.accountManagerName, "Map Ranking"].filter(Boolean) as string[];
-    if (fallback.length > 1) {
-      signoff.push("Talk soon,", ...fallback);
-    } else {
-      gaps.push(
-        "There is no sign-off on your profile and MTOS does not know your name, so the email would end unsigned. Set your sign-off in Settings.",
-      );
-    }
+    gaps.push("Add your email signature in Settings or write a signature in the draft.");
   }
 
-  const contactFirstName = firstName(source.contactName || "");
+  const contactName = source.contactName?.trim() || "";
+  const contactFirstName = /^(unknown|n\/?a|none|-)$/i.test(contactName) ? "" : firstName(contactName);
   const logoUrl = source.appUrl?.startsWith("https://")
     ? `${source.appUrl.replace(/\/+$/, "")}/brand/mapranking-mark.png`
     : "";
@@ -284,9 +268,8 @@ export function buildAgendaEmailDraft(
     subject,
     html: buildAgendaEmailHtml(facts),
     facts,
-    // The agent's own blocking gaps come first: it saw the evidence, and its reasons are written
-    // for the AM. Ours are appended rather than merged, so neither list is silently lost.
-    blockingGaps: [...(email?.blockingGaps || []), ...gaps],
+    // Prep output can be older than the current meeting or recipient. Validate current facts.
+    blockingGaps: gaps,
   };
 }
 
@@ -443,4 +426,15 @@ export interface AgendaSendOutcome {
   sentAt?: string;
   /** True when MTOS cannot send at all and the AM should send it from their own inbox. */
   sendItYourself?: boolean;
+}
+
+/** The user's saved signature is used verbatim apart from empty lines. */
+export function emailSignatureLines(signature?: string, name?: string): string[] {
+  const lines = (signature || "").split("\n").map((line) => line.trim()).filter(Boolean);
+  if (lines.length) return lines;
+  return name?.trim() ? ["Best regards,", name.trim(), "Map Ranking"] : [];
+}
+
+export function isAgendaRecipient(address: string): boolean {
+  return /^[^\s@,;<>]+@[^\s@,;<>]+\.[^\s@,;<>]+$/.test(address.trim());
 }

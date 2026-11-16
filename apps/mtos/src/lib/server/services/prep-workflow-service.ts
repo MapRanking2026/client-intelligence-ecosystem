@@ -1,3 +1,6 @@
+import { getAccountManagerPreferences, getAccountManagerProfile } from "@/src/lib/server/services/user-service";
+import { readAgendaMeeting } from "@/src/lib/server/services/google-meet-service";
+import { isTimeZone } from "@/src/lib/contracts/user-preferences";
 import type { TenantContext } from "@/src/lib/contracts/mtos";
 import {
   emptyPrepWorkflowState,
@@ -487,7 +490,24 @@ export async function generateConfirmationEmailStage(
     };
   }
 
-  const email = await generateConfirmationEmail(touch, client, options);
+  const eventId = touch.googleMeeting?.calendarEventId || touch.calendarEventId;
+  const [profile, preferences, meeting] = await Promise.all([
+    getAccountManagerProfile(context),
+    getAccountManagerPreferences(context),
+    eventId ? readAgendaMeeting(context, eventId).catch(() => undefined) : undefined,
+  ]);
+  const name = profile.name || client.accountManager || "";
+  const title = preferences.jobTitle?.trim();
+  const signature = preferences.emailSignoff?.trim() || (name && title ? `Best regards,\n${name}\n${title} | Map Ranking` : "");
+  const meetingZone = meeting?.timeZone;
+  const email = await generateConfirmationEmail(touch, client, {
+    ...options,
+    timeZone: options.timeZone || (isTimeZone(meetingZone) ? meetingZone : profile.timeZone),
+    accountManagerName: name,
+    signature,
+    ...(meeting?.scheduledAt ? { scheduledAt: meeting.scheduledAt } : {}),
+    ...(meeting?.meetingUrl ? { meetingUrl: meeting.meetingUrl } : {}),
+  });
   const workflow: PrepWorkflowState = {
     ...before,
     confirmationEmail: email,

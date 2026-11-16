@@ -1,12 +1,17 @@
+import { callLengthMinutes } from "@/src/lib/contracts/live-call";
+import { isTimeZone } from "@/src/lib/contracts/user-preferences";
+import { readAgendaMeeting } from "@/src/lib/server/services/google-meet-service";
 import type { TenantContext } from "@/src/lib/contracts/mtos";
 import {
+  agendaEmailHasBody,
   buildAgendaEmailDraft,
+  isAgendaRecipient,
   sanitizeAgendaEmailHtml,
   type AgendaEmailDraft,
 } from "@/src/lib/contracts/agenda-email";
 import type { ClientRecord, MonthlyTouchRecord, TouchAgendaEmailState } from "@/src/lib/mtos-data";
 import { getServerEnv } from "@/src/lib/server/env";
-import { resolveRecipient } from "@/src/lib/server/services/confirmation-email-service";
+import { resolveConfirmationContact, resolveRecipient } from "@/src/lib/server/services/confirmation-email-service";
 import { getNowIso } from "@/src/lib/server/services/mtos-ai";
 import {
   getAccountManagerPreferences,
@@ -48,6 +53,7 @@ export function officeContacts(client: ClientRecord, recipient: string): string[
 export interface AgendaEmailView {
   /** What the card renders and what the send uses. */
   state: TouchAgendaEmailState;
+  freshTemplateHtml?: string;
   /** True when the stored HTML is what the client already received. */
   sent: boolean;
   /** The addresses the preference would copy, whether or not the preference is on. */
@@ -67,11 +73,13 @@ export async function readAgendaEmail(
   touch: MonthlyTouchRecord,
   client: ClientRecord,
 ): Promise<AgendaEmailView> {
-  const [profile, preferences] = await Promise.all([
+  const stored = touch.agendaEmail;
+  const eventId = touch.googleMeeting?.calendarEventId || touch.calendarEventId;
+  const [profile, preferences, meeting] = await Promise.all([
     getAccountManagerProfile(context),
     getAccountManagerPreferences(context),
+    !stored?.sentAt && eventId ? readAgendaMeeting(context, eventId).catch(() => undefined) : undefined,
   ]);
-  const stored = touch.agendaEmail;
 
   const resolved = resolveRecipient(client, touch);
   const recipient = stored?.recipient?.trim() || resolved.recipient;
@@ -90,18 +98,21 @@ export async function readAgendaEmail(
     };
   }
 
-  const draft = draftFor(touch, client, profile.timeZone, preferences, profile.name);
-  const gaps = [...draft.blockingGaps];
-  if (!recipient) {
+  const draft = draftFor(touch, client, profile.timeZone, preferences, profile.name, meeting);
+  const html = stored?.html?.trim() || draft.html;
+  const gaps = stored?.html?.trim()
+    ? agendaEmailHasBody(html) ? [] : ["Write the email body before sending."]
+    : [...draft.blockingGaps];
+  if (!isAgendaRecipient(recipient)) {
     gaps.push(
-      "MTOS has no email address for this client, so there is nobody to send to. Type the address you use for them.",
+      recipient ? "Enter a valid email address in To." : "Enter the client's email address in To.",
     );
   }
 
   return {
     state: {
       subject: stored?.subject?.trim() || draft.subject,
-      html: stored?.html?.trim() || draft.html,
+      html,
       recipient,
       recipientSource,
       ...(ccEnabled && availableCc.length ? { cc: availableCc.join(", ") } : {}),
@@ -110,6 +121,7 @@ export async function readAgendaEmail(
       ...(stored?.savedAt ? { savedAt: stored.savedAt } : {}),
     },
     sent: false,
+    freshTemplateHtml: draft.html,
     availableCc,
     ccEnabled,
   };
@@ -121,19 +133,23 @@ function draftFor(
   timeZone: string,
   preferences: AccountManagerPreferences,
   accountManagerName: string,
+  meeting: Awaited<ReturnType<typeof readAgendaMeeting>>,
 ): AgendaEmailDraft {
   const env = getServerEnv();
+  const name = accountManagerName || client.accountManager || "";
+  const title = preferences.jobTitle?.trim();
+  const signature = preferences.emailSignoff?.trim() || (name && title ? `Best regards,\n${name}\n${title} | Map Ranking` : "");
+  const meetingZone = meeting?.timeZone;
   return buildAgendaEmailDraft(touch.prepBrief?.clientAgendaEmail, {
     businessName: client.name,
-    contactName: client.contact,
-    scheduledAt: touch.scheduledAt || touch.prepPack?.schedule.scheduledAt,
-    timeZone,
-    // MTOS holds no client time zone. Saying so is the point: the AM is the only one who can
-    // confirm the client reads that hour the same way, and the gap list tells them to.
+    contactName: resolveConfirmationContact(client),
+    scheduledAt: meeting?.scheduledAt || touch.scheduledAt || touch.prepPack?.schedule.scheduledAt,
+    timeZone: isTimeZone(meetingZone) ? meetingZone : timeZone,
     timeZoneIsClients: false,
-    meetingUrl: touch.googleMeeting?.meetingUrl,
-    ...(preferences.emailSignoff ? { signoff: preferences.emailSignoff } : {}),
-    accountManagerName: accountManagerName || client.accountManager || "",
+    meetingUrl: meeting?.meetingUrl || touch.googleMeeting?.meetingUrl,
+    lengthMinutes: meeting?.lengthMinutes || callLengthMinutes(preferences.callLengthMinutes),
+    signoff: signature,
+    accountManagerName: name,
     appUrl: env.appUrl,
   });
 }

@@ -17,7 +17,7 @@ const SUPPORT = "support@mapranking.com";
 type Json = Record<string, unknown>;
 interface CalendarEvent {
   id: string; summary?: string; status?: string; hangoutLink?: string;
-  start?: { dateTime?: string }; end?: { dateTime?: string };
+  start?: { dateTime?: string; timeZone?: string }; end?: { dateTime?: string };
   attendees?: { email?: string }[];
   conferenceData?: { entryPoints?: { entryPointType?: string; uri?: string }[] };
 }
@@ -48,15 +48,31 @@ async function tokenFor(context: TenantContext) {
   return token;
 }
 
-async function google<T>(token: string, url: string, method = "GET", body?: unknown): Promise<T> {
+async function google<T>(token: string, url: string, method = "GET", body?: unknown, timeoutMs = 25_000): Promise<T> {
   const response = await fetch(url, {
-    method, cache: "no-store", signal: AbortSignal.timeout(25_000),
+    method, cache: "no-store", signal: AbortSignal.timeout(timeoutMs),
     headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(payload.error?.message || `Google request failed (${response.status}).`);
   return payload as T;
+}
+
+/** Read the exact calendar event already linked to the touch. */
+export async function readAgendaMeeting(context: TenantContext, eventId: string) {
+  const token = await tokenFor(context);
+  const event = await google<CalendarEvent>(token, `${CALENDAR}/calendars/primary/events/${encodeURIComponent(eventId)}`, "GET", undefined, 5_000);
+  if (event.status === "cancelled") return undefined;
+  const start = event.start?.dateTime;
+  const end = event.end?.dateTime;
+  const minutes = start && end ? Math.round((Date.parse(end) - Date.parse(start)) / 60_000) : 0;
+  return {
+    scheduledAt: start,
+    timeZone: event.start?.timeZone,
+    lengthMinutes: minutes > 0 ? minutes : undefined,
+    meetingUrl: eventUrl(event),
+  };
 }
 
 async function pages<T>(token: string, endpoint: string, field: string): Promise<T[]> {

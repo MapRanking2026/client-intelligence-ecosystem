@@ -1,4 +1,4 @@
-import { sanitizeAgendaEmailHtml } from "@/src/lib/contracts/agenda-email";
+import { emailSignatureLines, sanitizeAgendaEmailHtml } from "@/src/lib/contracts/agenda-email";
 import {
   approvedItems,
   itemTitle,
@@ -156,20 +156,8 @@ export function buildRecapEmailDraft(
     ...(action.tentative ? { tentative: true } : {}),
   }));
 
-  const signoff = source.signoff
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean);
-  if (!signoff.length) {
-    const fallback = [source.accountManagerName, "Map Ranking"].filter(Boolean);
-    if (fallback.length > 1) {
-      signoff.push("Talk soon,", ...fallback);
-    } else {
-      gaps.push(
-        "There is no sign-off on your profile and MTOS does not know your name, so the email would end unsigned. Set your sign-off in Settings.",
-      );
-    }
-  }
+  const signoff = emailSignatureLines(source.signoff, source.accountManagerName);
+  if (!signoff.length) gaps.push("Add your email signature in Settings.");
 
   if (!notes.summary.trim()) {
     gaps.push("The notes have no summary, so there is nothing to open the email with.");

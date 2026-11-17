@@ -1,3 +1,4 @@
+import { loomEvidence } from "@/src/lib/contracts/no-show";
 import { readTouchTranscriptPayload } from "@/src/lib/server/services/transcript-watch-service";
 import { generateClientIntelligence } from "@/src/lib/server/services/client-intelligence-service";
 import { getServerEnv } from "@/src/lib/server/env";
@@ -185,15 +186,17 @@ export async function buildTrackerCards(
   const legacy = touch.postMeeting;
   const newerTranscript = touch.transcript?.foundAt &&
     touch.transcript.foundAt > (legacy?.analyzedAt || "");
-  let intelligence = newerTranscript ? undefined : legacy?.clientIntelligence;
+  const alternative = loomEvidence(touch);
+  if (touch.noShow?.resolution === "loom" && !alternative) throw new Error("Send the approved Loom update before drafting trackers.");
+  let intelligence = alternative || newerTranscript ? undefined : legacy?.clientIntelligence;
   let intelligenceError: string | undefined;
   const env = getServerEnv();
   if (notes && !intelligence?.stakeholderMap && !touch.followThrough?.trackerCards?.length && hasAnyLlmProvider(env)) {
     try {
-      const transcript = await readTouchTranscriptPayload(context, touchId, touch.postMeeting?.transcript);
+      const transcript = alternative ? undefined : await readTouchTranscriptPayload(context, touchId, touch.postMeeting?.transcript);
       intelligence = await generateClientIntelligence(context, env, touch, client, {
         ...(transcript ? { transcript } : {}),
-        recapSummary: notes.summary,
+        recapSummary: alternative ? `${notes.summary}\n\n${alternative}` : notes.summary,
         extractedCommitments: notes.clientActions.map((action) => action.what),
         draftTickets: notes.departments.flatMap((group) => group.actions.map((action) => ({
           title: action.what,

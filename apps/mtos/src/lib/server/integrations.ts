@@ -466,6 +466,7 @@ const providerDefinitions: ProviderDefinition[] = [
         "https://www.googleapis.com/auth/drive",
         "https://www.googleapis.com/auth/meetings.space.readonly",
         "https://www.googleapis.com/auth/meetings.space.created",
+        "https://www.googleapis.com/auth/calendar.events",
         "https://www.googleapis.com/auth/userinfo.profile",
         "https://www.googleapis.com/auth/documents.readonly",
       ],
@@ -1120,7 +1121,8 @@ export function getMissingIntegrationScopes(
     return [];
   }
   const granted = new Set(record.scopes || []);
-  return required.filter((scope) => !granted.has(scope));
+  // Calendar writes are optional for existing normal-meeting connections.
+  return required.filter((scope) => !granted.has(scope) && !(providerId === "google-meet" && scope === "https://www.googleapis.com/auth/calendar.events"));
 }
 
 function toProviderView(

@@ -8,6 +8,7 @@ import { ClientHint } from "@/src/components/mtos/client-hint";
 import { QcAmCoaching } from "@/src/components/mtos/qc-am-coaching";
 import { QcAppealReview } from "@/src/components/mtos/qc-appeal-review";
 import { QcQueue } from "@/src/components/mtos/qc-queue";
+import { LoomSupportingMaterials } from "@/src/components/mtos/loom-supporting-materials";
 import { QcScoring } from "@/src/components/mtos/qc-scoring";
 import { resolveTenantContext } from "@/src/lib/auth/resolve-tenant-context";
 import {
@@ -181,6 +182,7 @@ export default async function QaPage({
 
       return (
         <AppShell>
+          <LoomSupportingMaterials touch={view.touch} />
           {params.appeal ? (
             <QcAppealReview {...shared} />
           ) : (

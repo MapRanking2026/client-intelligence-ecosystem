@@ -102,20 +102,23 @@ async function persist(
   touchId: string,
   state: TouchTranscriptState,
   payload?: string,
+  expectedScheduledAt?: string,
 ): Promise<TranscriptWatchResult> {
   const db = getFirebaseAdminDb();
   if (db) {
     // `mergeFields` so a poll can never touch anything else on the touch: the live notes autosave
     // and the preparation both write this document, and a whole-document merge from here would
     // restore whatever this request happened to have read.
-    await db.doc(monthlyTouchPath(context.tenantId, touchId)).set({ transcript: state }, {
-      mergeFields: ["transcript"],
+    const ref = db.doc(monthlyTouchPath(context.tenantId, touchId));
+    await db.runTransaction(async (tx) => {
+      const current = (await tx.get(ref)).data() as MonthlyTouchRecord | undefined;
+      if (!current) throw new Error("Monthly touch not found");
+      if (expectedScheduledAt && current.scheduledAt !== expectedScheduledAt) throw new Error("This meeting was rescheduled while its transcript was being fetched. Reload the touch.");
+      if (current.noShow?.resolution === "loom") throw new Error("The Loom update uses supporting documents instead of a meeting transcript.");
+      if (current.noShow?.rescheduledAt && !current.live?.callEndedAt) throw new Error("Wait until the rescheduled call ends before attaching or fetching its transcript.");
+      tx.set(ref, { transcript: state }, { mergeFields: ["transcript"] });
+      if (payload) tx.set(db.doc(monthlyTouchArtifactPath(context.tenantId, touchId, TRANSCRIPT_ARTIFACT_ID)), { payload, savedAt: new Date().toISOString() });
     });
-    if (payload) {
-      await db
-        .doc(monthlyTouchArtifactPath(context.tenantId, touchId, TRANSCRIPT_ARTIFACT_ID))
-        .set({ payload, savedAt: new Date().toISOString() });
-    }
   }
   return { transcript: state, ...(payload ? { payload } : {}) };
 }
@@ -139,6 +142,7 @@ export async function watchTouchTranscript(
   }
 
   const checkedAt = new Date().toISOString();
+  const persistForAttempt = (state: TouchTranscriptState, payload?: string) => persist(context, touchId, state, payload, touch.scheduledAt);
   const previous = touch.transcript;
 
   // A transcript the AM attached by hand is the AM's decision, and a poll must not overrule it.
@@ -154,7 +158,7 @@ export async function watchTouchTranscript(
 
   const calendarEventId = touch.googleMeeting?.calendarEventId || touch.calendarEventId;
   if (!calendarEventId) {
-    return persist(context, touchId, {
+    return persistForAttempt({
       ...base,
       status: "none",
       note:
@@ -166,7 +170,7 @@ export async function watchTouchTranscript(
   if (!token.ok) {
     // The reason from the integration layer says exactly what to reconnect, so it is passed
     // through verbatim rather than restated more vaguely here.
-    return persist(context, touchId, { ...base, status: "none", note: token.lookup.reason });
+    return persistForAttempt({ ...base, status: "none", note: token.lookup.reason });
   }
 
   const eventUrl = new URL(
@@ -174,7 +178,7 @@ export async function watchTouchTranscript(
   );
   const eventResult = await googleGet(eventUrl.toString(), token.accessToken);
   if (!eventResult.ok) {
-    return persist(context, touchId, {
+    return persistForAttempt({
       ...base,
       status: eventResult.status === 404 ? "none" : "waiting",
       note:
@@ -188,7 +192,7 @@ export async function watchTouchTranscript(
     (eventResult.payload as { attachments?: CalendarAttachment[] }).attachments,
   );
   if (!attachments.length) {
-    return persist(context, touchId, {
+    return persistForAttempt({
       ...base,
       note:
         "The calendar event has no notes Doc attached yet. Gemini usually attaches it a few minutes after the call ends.",
@@ -202,6 +206,10 @@ export async function watchTouchTranscript(
   for (const attachment of orderNotesDocs(attachments, language).slice(0, MAX_DOCS)) {
     const read = await readNotesDoc(token.accessToken, attachment.docId);
     if (read.kind === "ok") {
+      if (touch.noShow?.rescheduledAt && touch.scheduledAt && (!read.doc.createdTime || Date.parse(read.doc.createdTime) < Date.parse(touch.scheduledAt) - 30 * 60000)) {
+        unreadable.push({ docId: read.doc.id, name: read.doc.title || attachment.name, url: read.doc.url, decision: "ignored", reason: "This document predates the rescheduled meeting, or its creation time could not be verified. Historical meeting notes are preserved separately.", chars: 0 });
+        continue;
+      }
       reads.push({
         docId: read.doc.id,
         // Drive's name rather than the attachment title: the attachment title is a label Google
@@ -234,7 +242,7 @@ export async function watchTouchTranscript(
     // A Doc with a summary and no dialogue is finished and will not grow a transcript: that call
     // was not transcribed. A Doc with neither is Gemini still writing, so the wait continues.
     const summaryOnly = reads.some((read) => read.fullNotes.trim() && read.transcript.trim().length < 40);
-    return persist(context, touchId, {
+    return persistForAttempt({
       ...base,
       status: summaryOnly ? "none" : "waiting",
       files,
@@ -245,9 +253,7 @@ export async function watchTouchTranscript(
     });
   }
 
-  return persist(
-    context,
-    touchId,
+  return persistForAttempt(
     {
       status: "found",
       docIds: selection.usedDocIds,
@@ -305,6 +311,7 @@ export async function attachTouchTranscript(
       note: "Attached by you, so MTOS has stopped looking.",
     },
     payload,
+    touch.scheduledAt,
   );
 }
 

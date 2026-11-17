@@ -66,6 +66,7 @@ export async function sendAgendaEmailNow(
   touchId: string,
 ): Promise<AgendaSendOutcome> {
   const { touch, client } = await loadTouch(context, touchId);
+  if (touch.noShow?.standbyUntil && Date.parse(touch.noShow.standbyUntil) > Date.now()) throw new Error("This rescheduled touch is on standby until 48 hours before the new meeting.");
   const [profile, preferences] = await Promise.all([
     getAccountManagerProfile(context),
     getAccountManagerPreferences(context),

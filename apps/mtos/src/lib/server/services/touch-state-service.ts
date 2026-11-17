@@ -1,3 +1,4 @@
+import { loomReady } from "@/src/lib/contracts/no-show";
 import type { TenantContext } from "@/src/lib/contracts/mtos";
 import type { TouchDraftPatch } from "@/src/lib/contracts/touch-draft";
 import {
@@ -77,6 +78,8 @@ export async function advanceTouchProgress(
       throw new Error("Monthly touch not found");
     }
     const current = snapshot.data() as Partial<MonthlyTouchRecord>;
+    if (current.noShow?.resolution === "loom" && (step === "follow" || step === "qa") && !loomReady(current)) throw new Error("Send the approved Loom update before proceeding.");
+    if (current.noShow?.standbyUntil && Date.parse(current.noShow.standbyUntil) > Date.now() && step !== "prep") throw new Error("This rescheduled touch is on standby until 48 hours before the meeting.");
     const progress = advanceProgress(current.progress, step);
     tx.set(
       ref,
@@ -148,6 +151,7 @@ export async function saveTouchDraft(
 
     let dueAt = current.followThrough?.dueAt;
     if (patch.live) {
+      if (current.noShow?.rescheduledAt && current.progress === "prep") throw new Error("This meeting attempt was rescheduled. Reload before editing the call.");
       const next: TouchLiveState = {
         format: "guide",
         notes: {},

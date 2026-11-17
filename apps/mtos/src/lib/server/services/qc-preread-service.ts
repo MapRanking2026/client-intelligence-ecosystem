@@ -17,6 +17,7 @@ import { getPromptText } from "@/src/lib/server/prompt-store";
 import { getFirebaseAdminDb } from "@/src/lib/server/firebase/admin";
 import { monthlyTouchPath, qcItemPath } from "@/src/lib/server/firebase/collections";
 import { callLlmForJson, getNowIso, hasAnyLlmProvider } from "@/src/lib/server/services/mtos-ai";
+import { loomEvidence } from "@/src/lib/contracts/no-show";
 import { readTouchTranscriptPayload } from "@/src/lib/server/services/transcript-watch-service";
 
 /**
@@ -148,7 +149,8 @@ export async function generateQcPreread(
     return { status: "skipped", reason: "The touch has already been scored." };
   }
 
-  const transcript = await readTouchTranscriptPayload(context, touchId);
+  const alternative = loomEvidence(touch);
+  const transcript = alternative || await readTouchTranscriptPayload(context, touchId);
   if (!transcript) {
     return { status: "skipped", reason: "There is no transcript for this call." };
   }
@@ -164,6 +166,7 @@ export async function generateQcPreread(
   });
 
   const userText = [
+    ...(alternative ? ["For this Loom path, absence of a transcript, client attendance, live answers or new client NPS is not a QA failure. Apply all other criteria to available evidence. Do not claim to have watched the video: leave video-dependent judgments for the human reviewer."] : []),
     // Evidence only. The answer's keys, the scale and the criterion list are the engine row's
     // contract, resolved above.
     "Follow-through evidence, gathered when the account manager finished their post-call work:",
@@ -179,7 +182,7 @@ export async function generateQcPreread(
       postTouchNotes: touch.followThrough?.notes ? renderNotesMarkdown(touch.followThrough.notes) : undefined,
     }),
     "",
-    "Transcript:",
+    alternative ? "No-show / Loom supporting documentation. Assess available evidence only; the human reviewer must watch the recording:" : "Transcript:",
     transcript,
   ].join("\n");
 

@@ -19,6 +19,7 @@ import { getPromptText } from "@/src/lib/server/prompt-store";
 import { getFirebaseAdminDb } from "@/src/lib/server/firebase/admin";
 import { monthlyTouchPath } from "@/src/lib/server/firebase/collections";
 import { callLlmForJson, getNowIso, hasAnyLlmProvider } from "@/src/lib/server/services/mtos-ai";
+import { loomReady } from "@/src/lib/contracts/no-show";
 import { readTouchTranscriptPayload } from "@/src/lib/server/services/transcript-watch-service";
 
 /**
@@ -143,6 +144,8 @@ export async function analyzeScoreGate(
   const clientName = client?.name || "this client";
 
   const env = getServerEnv();
+  if (loomReady(touch)) return { findings: [], justifications: {}, note: "No-show / Loom update: no client conversation or new client NPS exists. Review account evidence and explicitly record no score or justify your assessment." };
+  if (touch.noShow?.resolution === "loom") throw new Error("Send the approved Loom update before reviewing Follow-Through health.");
   const transcript = await readTouchTranscriptPayload(context, touchId, touch.postMeeting?.transcript);
 
   const legacy = touch.postMeeting?.clientIntelligence?.healthSuggestion;

@@ -1,3 +1,4 @@
+import { loomReady } from "@/src/lib/contracts/no-show";
 import type { MonthlyTouchRecord } from "@/src/lib/mtos-data";
 
 /**
@@ -70,6 +71,7 @@ export function followThroughChecklist(touch: MonthlyTouchRecord): ChecklistRow[
   const agendaSentAt = touch.agendaEmail?.sentAt;
   const bookPage = touch.approval?.clientBook;
   const transcript = touch.transcript;
+  const isLoom = touch.noShow?.resolution === "loom";
   const notes = touch.followThrough?.notes;
   const ticketCount = Object.keys(touch.followThrough?.ticketIds || {}).length;
 
@@ -95,8 +97,8 @@ export function followThroughChecklist(touch: MonthlyTouchRecord): ChecklistRow[
       ok: Boolean(bookPage?.pageId || bookPage?.pageUrl),
     },
     {
-      label: "Transcript",
-      detail:
+      label: isLoom ? "No-show / Loom documentation" : "Transcript",
+      detail: isLoom ? `Loom: ${touch.noShow?.url || "missing"}. Email: ${touch.noShow?.sendStatus || "not sent"}. Review the recording and supporting materials.` :
         transcript?.status === "found" || transcript?.status === "attached"
           ? `${transcript.status === "attached" ? "Attached by hand" : "Found on the calendar event"}${
               transcript.docIds?.length
@@ -104,7 +106,7 @@ export function followThroughChecklist(touch: MonthlyTouchRecord): ChecklistRow[
                 : ""
             }.`
           : "Not in yet. The notes below are drafted from it, so anything written before it arrives is yours, not the call's.",
-      ok: transcript?.status === "found" || transcript?.status === "attached",
+      ok: isLoom ? loomReady(touch) : transcript?.status === "found" || transcript?.status === "attached",
     },
     {
       label: "Post-touch notes",

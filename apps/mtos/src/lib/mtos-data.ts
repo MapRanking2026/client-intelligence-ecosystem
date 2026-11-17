@@ -1405,6 +1405,8 @@ export interface TouchTranscriptState {
 
 /** The follow-through, and the one deadline in the whole touch. */
 export interface TouchFollowThroughState {
+  bookingReminderId?: string;
+  bookingReminderStatus?: "creating" | "created" | "failed" | "unknown";
   /** 24 business hours after the call ended, on the AM's own clock. */
   dueAt?: string;
   startedAt?: string;
@@ -1453,6 +1455,8 @@ export interface TouchFollowThroughState {
 }
 
 export interface MonthlyTouchRecord {
+  noShow?: import("@/src/lib/contracts/no-show").NoShowState;
+  noShowHistory?: { at: string; by: string; resolution: "reschedule" | "loom"; detail: string }[];
   /** A test attempt removed from the working history. */
   deletedAt?: string;
   /**

@@ -34,7 +34,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ touc
     return NextResponse.json({ error: "Monthly touch not found" }, { status: 404 });
   }
 
-  const presentation = touch.presentation;
+  const presentation = touch.noShow?.resolution === "loom" ? touch.noShow.presentation : touch.presentation;
   if (!presentation || presentation.status !== "generated" || !presentation.slides?.length) {
     return NextResponse.json(
       { error: "No presentation has been generated for this touch yet." },

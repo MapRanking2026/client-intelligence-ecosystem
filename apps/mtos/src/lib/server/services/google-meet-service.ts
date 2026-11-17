@@ -19,7 +19,24 @@ interface CalendarEvent {
   id: string; summary?: string; status?: string; hangoutLink?: string;
   start?: { dateTime?: string; timeZone?: string }; end?: { dateTime?: string };
   attendees?: { email?: string }[];
+  transparency?: string;
   conferenceData?: { entryPoints?: { entryPointType?: string; uri?: string }[] };
+}
+
+export async function readRescheduleAvailability(context: TenantContext, touchId: string) {
+  const source = getMtosDataSource(context);
+  const touch = await source.getMonthlyTouchById(touchId);
+  if (!touch || !await source.getClientById(touch.clientId) || !touch.calendarEventId) throw new Error("A visible touch with a linked event is required.");
+  const token = await tokenFor(context);
+  const event = await google<CalendarEvent>(token, `${CALENDAR}/calendars/primary/events/${encodeURIComponent(touch.calendarEventId)}`);
+  const durationMinutes = (Date.parse(event.end?.dateTime || "") - Date.parse(event.start?.dateTime || "")) / 60000;
+  if (!(durationMinutes > 0)) throw new Error("The linked meeting has no valid duration.");
+  const from = new Date();
+  const until = new Date(from.getTime() + 30 * 86400_000);
+  const query = new URLSearchParams({ timeMin: from.toISOString(), timeMax: until.toISOString(), singleEvents: "true", maxResults: "2500" });
+  const events = await google<{ items?: CalendarEvent[]; nextPageToken?: string; timeZone?: string }>(token, `${CALENDAR}/calendars/primary/events?${query}`);
+  if (events.nextPageToken) throw new Error("Too many calendar events to verify availability. Choose a shorter calendar range with your calendar administrator.");
+  return { durationMinutes, until: until.toISOString(), timeZone: events.timeZone || "UTC", busy: (events.items || []).filter((item) => item.id !== touch.calendarEventId && item.status !== "cancelled" && item.transparency !== "transparent").map((item) => ({ start: item.start?.dateTime || (item.start as { date?: string })?.date, end: item.end?.dateTime || (item.end as { date?: string })?.date })) };
 }
 interface NativeArtifact {
   name: string; state: string;
@@ -46,6 +63,24 @@ async function tokenFor(context: TenantContext) {
   const token = getIntegrationCredentials(connection).accessToken;
   if (!token) throw new Error("Reconnect Google Meet: no usable access token.");
   return token;
+}
+
+/** Patch the linked event only; retain attendees, conference and all other event fields. */
+export async function rescheduleLinkedEvent(context: TenantContext, eventId: string, scheduledAt: string) {
+  const connection = await getIntegrationConnection(context, "google-meet");
+  if (!connection?.scopes?.includes("https://www.googleapis.com/auth/calendar.events")) {
+    throw new Error("Reconnect Google Meet in Settings > Integrations and grant Calendar event write access before rescheduling.");
+  }
+  const token = await tokenFor(context);
+  const endpoint = `${CALENDAR}/calendars/primary/events/${encodeURIComponent(eventId)}`;
+  const event = await google<CalendarEvent>(token, endpoint);
+  if (event.status === "cancelled" || !event.start?.dateTime || !event.end?.dateTime) throw new Error("The linked event must be an active timed meeting.");
+  if (Date.parse(event.start.dateTime) === Date.parse(scheduledAt)) return;
+  const duration = Date.parse(event.end.dateTime) - Date.parse(event.start.dateTime);
+  if (!(duration > 0)) throw new Error("The linked meeting has no valid duration.");
+  await google(token, `${endpoint}?sendUpdates=all`, "PATCH", {
+    start: { dateTime: scheduledAt }, end: { dateTime: new Date(Date.parse(scheduledAt) + duration).toISOString() },
+  });
 }
 
 async function google<T>(token: string, url: string, method = "GET", body?: unknown, timeoutMs = 25_000): Promise<T> {

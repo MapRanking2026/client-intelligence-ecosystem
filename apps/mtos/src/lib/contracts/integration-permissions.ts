@@ -55,10 +55,10 @@ export const INTEGRATION_PERMISSIONS: IntegrationPermission[] = [
     label: "Book meetings on your calendar",
     provider: "google-meet",
     scope: "https://www.googleapis.com/auth/calendar.events",
-    purpose: "Puts the next Monthly Touch on your calendar and the client's when you finish the follow-through.",
+    purpose: "Reschedules the existing Monthly Touch event after a client no-show.",
     fallback:
       "The booking is skipped and a “Finish post-touch actions” ticket is created, due at the 24-hour deadline, so the booking does not evaporate.",
-    usedBy: "Follow-through, step 7",
+    usedBy: "No-show rescheduling; follow-through permission reporting",
   },
   {
     id: "calendar-read",

@@ -1,3 +1,5 @@
+import { loomReady } from "@/src/lib/contracts/no-show";
+import { LoomSupportingMaterials } from "@/src/components/mtos/loom-supporting-materials";
 import { canDeleteTestTouch } from "@/src/lib/contracts/touch-progress";
 import { hasMeetingNotes } from "@/src/lib/contracts/follow-through-notes";
 import { StartNewMonthlyTouch } from "@/src/components/mtos/start-new-monthly-touch";
@@ -57,7 +59,7 @@ export default async function FollowThroughPage({
   const hasNotes = Boolean(touch.followThrough?.notes);
   const hasTranscript = Boolean(touch.postMeeting?.transcript || touch.postMeeting?.recapSummary) ||
     touch.transcript?.status === "attached" || touch.transcript?.status === "found";
-  const hasCapture = Object.values(touch.live?.notes || {}).some((note) => note.trim()) ||
+  const hasCapture = loomReady(touch) || Object.values(touch.live?.notes || {}).some((note) => note.trim()) ||
     touch.liveSession?.segments.some((segment) => segment.notes.trim()) || Boolean(touch.liveSession?.closeNotes.trim());
   const hasUsableNotes = hasMeetingNotes(touch.followThrough?.notes);
   const autoPrepare = hasUsableNotes
@@ -98,7 +100,8 @@ export default async function FollowThroughPage({
       ) : null}
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_280px]">
         <div className="min-w-0">
-      {touch.postMeeting?.transcript && !touch.transcript ? (
+      <LoomSupportingMaterials touch={touch} />
+      {touch.noShow?.resolution === "loom" ? null : touch.postMeeting?.transcript && !touch.transcript ? (
         <p className="muted mb-3 text-[0.8rem]">Transcript available from the earlier post-meeting screen.</p>
       ) : (
         <TranscriptWaitPanel

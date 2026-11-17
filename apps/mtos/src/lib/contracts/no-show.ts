@@ -1,0 +1,63 @@
+import type { MonthlyTouchRecord, Presentation } from "@/src/lib/mtos-data";
+
+export interface NoShowState {
+  resolution: "reschedule" | "loom";
+  selectedAt: string;
+  selectedBy: string;
+  script?: string;
+  url?: string;
+  presentation?: Presentation;
+  email?: { subject: string; html: string; recipient: string };
+  sendStatus?: "sending" | "sent" | "failed" | "unknown";
+  sendError?: string;
+  conversationId?: string;
+  sentAt?: string;
+  rescheduledAt?: string;
+  standbyUntil?: string;
+}
+
+export interface RescheduleAvailability {
+  durationMinutes: number;
+  until: string;
+  timeZone?: string;
+  busy: { start?: string; end?: string }[];
+}
+
+export function calendarSlotAvailable(startIso: string, availability: RescheduleAvailability, now: number): boolean {
+  const start = Date.parse(startIso);
+  const end = start + availability.durationMinutes * 60000;
+  if (!Number.isFinite(start) || start <= now || end > Date.parse(availability.until)) return false;
+  const localDay = (instant: number) => new Intl.DateTimeFormat("en-CA", { timeZone: availability.timeZone || "UTC", year: "numeric", month: "2-digit", day: "2-digit" }).format(instant);
+  return !availability.busy.some((period) => {
+    if (!period.start || !period.end) return true;
+    if (period.start.length === 10) return localDay(start) < period.end && localDay(end - 1) >= period.start;
+    return start < Date.parse(period.end) && end > Date.parse(period.start);
+  });
+}
+
+export function usableLoomUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" && !url.username && !url.password &&
+      ["loom.com", "www.loom.com"].includes(url.hostname) && /^\/share\/[a-zA-Z0-9]+\/?$/.test(url.pathname);
+  } catch { return false; }
+}
+
+export function loomReady(touch: Pick<MonthlyTouchRecord, "noShow" | "prepPack" | "review">): boolean {
+  const loom = touch.noShow;
+  return Boolean(loom?.resolution === "loom" && loom.sendStatus === "sent" && loom.sentAt &&
+    loom.conversationId && usableLoomUrl(loom.url || "") && loom.script?.trim() &&
+    loom.presentation?.status === "generated" && touch.prepPack && touch.review?.approvedAt && loom.email);
+}
+
+/** Alternative evidence, never a fabricated transcript or client statement. */
+export function loomEvidence(touch: MonthlyTouchRecord): string | undefined {
+  if (!loomReady(touch)) return undefined;
+  return [
+    "NO-SHOW / LOOM VIDEO UPDATE. No live meeting took place; no transcript exists.",
+    "Use the following supporting materials. Do not invent client feedback, quotes, agreement, NPS, or video observations. The URL is a reference, not evidence that you watched the video.",
+    JSON.stringify({ preparation: touch.prepPack, brief: touch.prepBrief, review: touch.review,
+      recommendations: touch.aiRecommendations, opportunities: touch.opportunities,
+      risks: touch.risks, commitments: touch.commitments, loom: touch.noShow }, null, 2),
+  ].join("\n\n");
+}

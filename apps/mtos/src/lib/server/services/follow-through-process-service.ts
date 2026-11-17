@@ -1,3 +1,5 @@
+import { loomReady } from "@/src/lib/contracts/no-show";
+import { FieldValue } from "firebase-admin/firestore";
 import type { TenantContext } from "@/src/lib/contracts/mtos";
 import type { ClientRecord, MonthlyTouchRecord } from "@/src/lib/mtos-data";
 import {
@@ -312,7 +314,12 @@ async function fileNotes(state: StepContext): Promise<StepResult> {
     .filter((item) => state.ticketUrls[item.id])
     .map((item) => ({ title: itemTitle(item), url: state.ticketUrls[item.id] }));
 
-  const markdown = renderNotesMarkdown(filtered, { ticketLinks, createdTickets });
+  const loomHeader = state.touch.noShow?.resolution === "loom" ? `No-Show / Loom Video Update
+Loom recording: ${state.touch.noShow.url}
+Client email: ${state.touch.noShow.sendStatus} (${state.touch.noShow.conversationId})
+
+` : "";
+  const markdown = loomHeader + renderNotesMarkdown(filtered, { ticketLinks, createdTickets });
 
   // The approval step created the "Monthly Touch (date)" page and recorded it. That page IS the
   // parent these notes go under, so its id is handed over as the prep page rather than letting
@@ -586,38 +593,31 @@ async function postBrief(state: StepContext): Promise<StepResult> {
 /**
  * Book the next Monthly Touch, or say plainly why it was not booked.
  *
- * Today this always takes the fallback, and the "calendar-write" permission reports why: MTOS
- * does not request the calendar write scope anywhere, so no AM can grant it by reconnecting and
- * no token in the system can create an event. Adding the request is a change to the Google app,
- * not a code change. Rather than fail silently or pretend, this asks what it is actually allowed
- * to do, warns, and creates the reminder ticket so the booking does not simply evaporate.
+ * Calendar write access supports the explicit no-show reschedule only. Next-touch booking
+ * retains the reminder fallback, including after a user grants the new write scope.
  */
 async function bookNextTouch(state: StepContext): Promise<StepResult> {
+  const isLoom = state.touch.noShow?.resolution === "loom";
+  const reminder = state.touch.followThrough;
+  if (isLoom && reminder?.bookingReminderId) return step("booking", "warning", `The next-meeting reminder already exists (${reminder.bookingReminderId}). Book the meeting yourself; no duplicate reminder was created.`);
+  if (isLoom && (reminder?.bookingReminderStatus === "creating" || reminder?.bookingReminderStatus === "unknown")) return step("booking", "warning", "The next-meeting reminder outcome is unresolved. Check ClickUp before creating another reminder.");
   // Asked of the shared permission read rather than by comparing a scope string here, so this
   // step and the Settings screen can never disagree about whether booking is allowed.
   const canWrite = await hasPermission(state.context, "calendar-write");
 
-  if (canWrite) {
-    // Deliberately not implemented past the permission check. The scope has never been granted
-    // to this app, so an event-creation path here would be code no one has ever run against
-    // Google, shipped as if it worked.
-    return step(
-      "booking",
-      "warning",
-      "Calendar write access is granted but MTOS has no booking path built against it yet. Book the next touch yourself and the reminder ticket below will cover it.",
-    );
-  }
-
   const token = await clickUpToken(state.context);
   const listId = process.env.CLICKUP_GROWTH_PILOT_LIST_ID;
   const due = state.touch.followThrough?.dueAt;
-  const base = "MTOS cannot create calendar events: the connected Google account granted read-only calendar access.";
+  const base = canWrite
+    ? "Calendar write access supports rescheduling existing events; automatic next-touch booking is not implemented."
+    : "MTOS cannot create calendar events: the connected Google account granted read-only calendar access.";
 
   if (!token || !listId) {
     return step("booking", "warning", `${base} Book the next Monthly Touch yourself — no reminder ticket could be created either, because ClickUp is not available.`);
   }
 
   try {
+    if (isLoom) await persistProgress(state.context, state.touch.id, { bookingReminderStatus: "creating" });
     const response = await fetch(`${CLICKUP_API}/list/${listId}/task`, {
       method: "POST",
       headers: { authorization: token, "content-type": "application/json" },
@@ -627,13 +627,21 @@ async function bookNextTouch(state: StepContext): Promise<StepResult> {
         ...(due ? { due_date: new Date(due).getTime() } : {}),
       }),
     });
-    const payload = (await response.json().catch(() => ({}))) as { url?: string };
+    const payload = (await response.json().catch(() => ({}))) as { id?: string; url?: string };
+    if (isLoom) {
+      if (!response.ok || !payload.id) {
+        await persistProgress(state.context, state.touch.id, { bookingReminderStatus: response.ok || response.status >= 500 ? "unknown" : "failed" });
+        return step("booking", "warning", `ClickUp did not confirm a reminder task (${response.status}). Check ClickUp before retrying.`);
+      }
+      await persistProgress(state.context, state.touch.id, { bookingReminderId: payload.id, bookingReminderStatus: "created" });
+    }
     return step(
       "booking",
       "warning",
       `${base} A reminder ticket was created instead${payload.url ? `: ${payload.url}` : ""}.`,
     );
   } catch {
+    if (isLoom) await persistProgress(state.context, state.touch.id, { bookingReminderStatus: "unknown" });
     return step("booking", "warning", `${base} Book the next Monthly Touch yourself.`);
   }
 }
@@ -655,6 +663,26 @@ export async function processFollowThrough(
   context: TenantContext,
   touchId: string,
 ): Promise<ProcessingResult> {
+  const touch = await getMtosDataSource(context).getMonthlyTouchById(touchId);
+  if (touch?.noShow?.resolution !== "loom") return processFollowThroughRun(context, touchId);
+  if (!loomReady(touch)) throw new Error("Send the approved Loom update before processing Follow-Through.");
+  const db = getFirebaseAdminDb();
+  if (!db) throw new Error("MTOS storage is unavailable.");
+  const ref = db.doc(monthlyTouchPath(context.tenantId, touchId));
+  const claim = new Date().toISOString();
+  await db.runTransaction(async (tx) => {
+    const current = (await tx.get(ref)).data() as { noShowProcessingAt?: string };
+    if (current?.noShowProcessingAt && Date.now() - Date.parse(current.noShowProcessingAt) < 10 * 60000) throw new Error("Loom Follow-Through is already processing. Wait before retrying.");
+    tx.update(ref, { noShowProcessingAt: claim });
+  });
+  try { return await processFollowThroughRun(context, touchId); }
+  finally { await ref.update({ noShowProcessingAt: FieldValue.delete() }); }
+}
+
+async function processFollowThroughRun(
+  context: TenantContext,
+  touchId: string,
+): Promise<ProcessingResult> {
   const dataSource = getMtosDataSource(context);
   const touch = await dataSource.getMonthlyTouchById(touchId);
   if (!touch) {
@@ -669,6 +697,7 @@ export async function processFollowThrough(
     throw new Error("This touch already has follow-up filed from the earlier screen. Open that screen to review what was sent.");
   }
 
+  if (touch.noShow?.resolution === "loom" && !loomReady(touch)) throw new Error("Complete and approve the Loom email before processing Follow-Through.");
   const follow = touch.followThrough;
   const notes = follow?.notes;
   const cards = follow?.trackerCards || [];

@@ -68,6 +68,7 @@ export async function getMonthlyTouchWorkspaceView(context: TenantContext, touch
   return {
     context,
     touch: touchWithLeadMix,
+    standby: Boolean(touch.noShow?.standbyUntil && Date.parse(touch.noShow.standbyUntil) > Date.now()),
     client,
     commitments,
     opportunities,

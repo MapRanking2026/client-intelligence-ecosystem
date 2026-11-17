@@ -34,9 +34,11 @@ import type { Presentation } from "@/src/lib/mtos-data";
 export function PresentationViewer({
   touchId,
   presentation,
+  readOnly = false,
 }: {
   touchId: string;
   presentation?: Presentation;
+  readOnly?: boolean;
 }) {
   const [index, setIndex] = useState(0);
   const [showNotes, setShowNotes] = useState(true);
@@ -190,7 +192,7 @@ export function PresentationViewer({
               </a>
             </>
           ) : null}
-          <button
+          {!readOnly ? <button
             type="button"
             onClick={generate}
             disabled={ai.isRunning}
@@ -198,7 +200,7 @@ export function PresentationViewer({
           >
             <Sparkles className="h-4 w-4" />
             {presentation?.status === "generated" ? "Regenerate presentation" : "Generate presentation"}
-          </button>
+          </button> : null}
         </div>
       </div>
 

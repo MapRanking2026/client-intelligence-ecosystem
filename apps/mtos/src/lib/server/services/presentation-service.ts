@@ -123,6 +123,7 @@ async function recentFormats(
 export async function generatePresentation(
   context: TenantContext,
   touchId: string,
+  delivery: "live" | "loom" = "live",
 ): Promise<{ touch: MonthlyTouchRecord }> {
   const db = getFirebaseAdminDb();
   if (!db) {
@@ -154,6 +155,7 @@ export async function generatePresentation(
   const system = await getPromptText("monthly_touch_presentation_prompt");
   const userText = [
     "Build the client-facing deck for this Monthly Touch.",
+    ...(delivery === "loom" ? ["This is a recorded Loom update after a client no-show. Write presenterNotes as a complete speaking script for asynchronous delivery. Use only active services and verified relevant metrics in the reviewed evidence. Do not ask live questions, imply client attendance, invent client feedback, or expose internal coaching. Cover supported performance highlights, completed work, challenges, recommendations and next steps. Invite questions by email."] : []),
     "",
     `Give every content slide a sectionId -- the brief section it presents, one of ${BRIEF_SECTION_IDS.join(", ")}.`,
     "Leave sectionId off the cover, the agenda and the closing slides. It is how a section the",

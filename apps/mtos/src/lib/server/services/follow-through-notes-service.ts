@@ -1,3 +1,4 @@
+import { loomEvidence } from "@/src/lib/contracts/no-show";
 import { z } from "zod";
 
 import type { TenantContext } from "@/src/lib/contracts/mtos";
@@ -193,7 +194,7 @@ export async function draftFollowThroughNotes(
   const base = emptyDraft(touch, client, amName, month, date);
   if (manual) return { notes: base };
   const legacy = touch.postMeeting;
-  if (!touch.transcript?.foundAt || (legacy?.analyzedAt && legacy.analyzedAt >= touch.transcript.foundAt)) {
+  if (touch.noShow?.resolution !== "loom" && (!touch.transcript?.foundAt || (legacy?.analyzedAt && legacy.analyzedAt >= touch.transcript.foundAt))) {
     const departments = new Map<string, NotesDraft["departments"][number]>();
     for (const ticket of legacy?.draftTickets || []) {
       const department = ticket.department;
@@ -207,7 +208,9 @@ export async function draftFollowThroughNotes(
   }
 
   const env = getServerEnv();
-  const transcript = await readTouchTranscriptPayload(context, touchId, legacy?.transcript);
+  const alternative = loomEvidence(touch);
+  if (touch.noShow?.resolution === "loom" && !alternative) throw new Error("Send the approved Loom update before drafting Follow-Through notes.");
+  const transcript = alternative || await readTouchTranscriptPayload(context, touchId, legacy?.transcript);
 
   const captured = [
     ...Object.values(touch.live?.notes || {}),
@@ -258,7 +261,7 @@ export async function draftFollowThroughNotes(
       2,
     ),
     "",
-    "Transcript:",
+    alternative ? "No-show / Loom supporting documentation (not a transcript):" : "Transcript:",
     transcript || "(unavailable)",
     "",
     "Account manager notes:",

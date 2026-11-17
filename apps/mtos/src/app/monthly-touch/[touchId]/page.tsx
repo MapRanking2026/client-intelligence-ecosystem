@@ -10,6 +10,7 @@ import { AppShell } from "@/src/components/mtos/app-shell";
 import { DataError } from "@/src/components/mtos/data-error";
 import { Linkified } from "@/src/components/mtos/annotate";
 import { JoinMeetButton, LiveModeLauncher } from "@/src/components/mtos/live-mode";
+import { NoShowPanel } from "@/src/components/mtos/no-show-panel";
 import { LiveCallStep } from "@/src/components/mtos/live-call-step";
 import { TranscriptWaitPanel } from "@/src/components/mtos/transcript-wait-panel";
 import { PrepStagePanel } from "@/src/components/mtos/prep-stage-panel";
@@ -496,6 +497,7 @@ export default async function MonthlyTouchRunSheetPage({
         because the brief under it is fifteen sections long and an indicator nobody can see while
         they work is exactly what led to it being duplicated inside the preparation panel.
       */}
+      {payload.standby && touch.noShow?.standbyUntil ? <p className="card mt-4" role="status">Rescheduled Monthly Touch: Preparation is on standby until {wallClockLabel(touch.noShow.standbyUntil, profile.timeZone)}. Previous preparation and meeting history are preserved.</p> : null}
       <TouchProgressRail
         touchId={touch.id}
         progress={progress}
@@ -639,7 +641,8 @@ export default async function MonthlyTouchRunSheetPage({
             <ApprovalStatusCard touchId={touch.id} approval={touch.approval} />
           ) : null}
 
-          <LiveCallStep
+          <NoShowPanel touchId={touch.id} initial={touch.noShow} />
+          {touch.noShow?.resolution !== "loom" ? <LiveCallStep
             touchId={touch.id}
             clientId={client.id}
             clientName={client.name}
@@ -652,21 +655,21 @@ export default async function MonthlyTouchRunSheetPage({
             {...(touch.presentation ? { presentation: touch.presentation } : {})}
             {...(touch.review?.declinedSections ? { declinedSections: touch.review.declinedSections } : {})}
             showQaChips={preferences.qaChipsInPresenterView ?? true}
-          />
+          /> : null}
 
           {/*
             After "End call" the AM stays here, and this is what they wait on. Sticky at the bottom
             of the content column rather than a separate screen: the guide and their own capture
             notes are what they re-read while the transcript is being published.
           */}
-          <TranscriptWaitPanel
+          {touch.noShow?.resolution !== "loom" ? <TranscriptWaitPanel
             touchId={touch.id}
             {...(touch.live?.callEndedAt ? { callEndedAt: touch.live.callEndedAt } : {})}
             {...(touch.transcript ? { transcript: touch.transcript } : {})}
             followThroughHref={`/monthly-touch/${touch.id}/follow-through`}
-          />
+          /> : null}
 
-          <div className="card mt-4">
+          {touch.noShow?.resolution !== "loom" ? <><div className="card mt-4">
             <div className="card-head">
               <div className="card-title">The call itself</div>
             </div>
@@ -700,14 +703,14 @@ export default async function MonthlyTouchRunSheetPage({
               callGuide={touch.callGuide}
               screenOverrides={touch.callGuideScreens}
             />
-          </Section>
+          </Section></> : null}
 
           <Section
             eyebrow="Live meeting"
             title="Client presentation"
             subtitle="The client-facing deck, built from the same preparation, with private presenter notes. On the call it opens in its own window, which is the window you share."
           >
-            <PresentationViewer touchId={touch.id} presentation={touch.presentation} />
+            <PresentationViewer touchId={touch.id} presentation={touch.noShow?.presentation || touch.presentation} readOnly={touch.noShow?.resolution === "loom"} />
           </Section>
         </>
       ) : null}

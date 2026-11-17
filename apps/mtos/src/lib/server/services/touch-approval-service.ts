@@ -104,6 +104,7 @@ export async function sendAgendaEmailNow(
     recipient: email.recipient || "",
     cc: view.ccEnabled ? view.availableCc : [],
     blockedTaskTitles: blockedTaskTitles(touch),
+    clientName: client.name,
     subject: email.subject,
     html: email.html,
 

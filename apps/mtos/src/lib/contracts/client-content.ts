@@ -8,7 +8,7 @@ export function completedStatus(status: unknown): boolean {
 }
 
 /** Validate rendered content by paragraph/list/table row, never CSS, links or HTML comments. */
-export function clientContentViolations(text: string, blockedTitles: string[] = []): { text: string; reason: string }[] {
+export function clientContentViolations(text: string, blockedTitles: string[] = [], clientName?: string): { text: string; reason: string }[] {
   const visible = /<\/?[a-z][^>]*>/i.test(text)
     ? htmlToMarkdown(text.replace(/<!--[\s\S]*?-->/g, "").replace(/<(style|script)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, "").replace(/&#x([0-9a-f]+);/gi, (_, code) => {
         const point = parseInt(code, 16); return point > 0 && point <= 0x10ffff ? String.fromCodePoint(point) : "";
@@ -27,7 +27,10 @@ export function clientContentViolations(text: string, blockedTitles: string[] = 
     const progress = /\b(?:working on|underway|under review|needs to be (?:done|fixed|completed))\b/i.test(plain) && /\b(?:task|ticket|report|scan|website|page|schema|citation|project|deliverable|fix)\b/i.test(plain);
     const proposal = /\bproposed\b/i.test(plain) && /\b(?:task|ticket|scan|refresh|fix|deliverable|project)\b/i.test(plain);
     const openTask = /\b(?:open|outstanding)\b.{0,45}\b(?:tasks?|tickets?|items?|promises?|commitments?)\b|\b(?:tasks?|tickets?|items?|promises?|commitments?)\b.{0,45}\b(?:open|outstanding)\b/i.test(plain);
-    const named = specificTitles.some((title) => plain.toLowerCase().includes(title.toLowerCase()));
+    // Account names can also be ClickUp task titles; identity alone is not unfinished work.
+    const identity = clientName?.trim().toLowerCase();
+    const accountHeading = identity && plain.toLowerCase() === `your check-in agenda, ${identity}`;
+    const named = !accountHeading && specificTitles.some((title) => title.toLowerCase() !== identity && plain.toLowerCase().includes(title.toLowerCase()));
     if (internal || unfinished || delivery || progress || proposal || openTask || named || (task && !/\b(?:completed?|delivered|done|finished|shipped)\b/i.test(plain))) {
       return [{ text: plain.slice(0, 180), reason: named ? "Named unfinished work" : "Unfinished task details" }];
     }

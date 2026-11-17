@@ -23,7 +23,7 @@ async function main(){try{
  let view=await readAgendaEmail(ctx,touch,client);
  assert.match(view.state.html,/5:00 PM PST/);assert.doesNotMatch(view.state.html,/EST|November 18/);assert.match(view.state.html,/Custom completed/);
  assert.match(view.state.subject,/5:00 PM PST/);
- let result=await sendClientEmail(ctx,{recipient:'client@example.test',subject:'Agenda',html:'<p>Here is what we will cover: Google Ads performance.</p><!-- pending task -->',blockedTaskTitles:['Google Ads'],idempotencyKey:'synthetic'});
+ let result=await sendClientEmail(ctx,{recipient:'client@example.test',subject:'Agenda',html:'<div>Your check-in agenda, Sparkle Plumbing</div><p>Here is what we will cover: Google Ads performance.</p><!-- pending task -->',clientName:'Sparkle Plumbing',blockedTaskTitles:['Sparkle Plumbing','check-in agenda','Google Ads'],idempotencyKey:'synthetic'});
  assert.equal(result.sent,true); assert.equal(sent.length,1);
  result=await sendClientEmail(ctx,{recipient:'client@example.test',subject:'Agenda',html:'<p>Pending task: fix schema.</p>',idempotencyKey:'synthetic-2'});
  assert.equal(result.sent,false);assert.match(result.detail,/Pending task: fix schema/);assert.equal(sent.length,1);

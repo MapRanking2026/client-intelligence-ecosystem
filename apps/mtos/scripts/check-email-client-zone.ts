@@ -33,3 +33,9 @@ assert.deepEqual(clientContentViolations(clean,["Google Ads","Monthly Touch","Re
 for(const text of ['<p>Overdue tasks: refresh the scan</p>','<p>Bi-weekly Google Ads report</p>','<p>Scan refresh — proposed</p>','<p>Open action items</p>','<p>We will complete the schema fix.</p>','<p>Pen&#x64;ing task</p>']) assert.ok(clientContentViolations(text,["Bi-weekly Google Ads report"]).length,text);
 assert.match(clientContentViolations('<div>Everything completed.</div><p>Overdue task: schema fix</p>')[0].text,/Overdue task/);
 console.log("PASS client-zone resolution, winter/summer clocks, date boundary, saved-template refresh, idempotence, unknown-zone block and visible email privacy guard");
+
+assert.deepEqual(clientContentViolations("<div>Your check-in agenda, Sparkle Plumbing</div>", ["Sparkle Plumbing", "check-in agenda"], "Sparkle Plumbing"), []);
+assert.deepEqual(clientContentViolations("Sparkle Plumbing performance", ["Sparkle Plumbing"], "Sparkle Plumbing"), []);
+assert.ok(clientContentViolations("Pending task: Sparkle Plumbing schema fix", ["Sparkle Plumbing"], "Sparkle Plumbing").length);
+assert.ok(clientContentViolations("Sparkle Plumbing schema fix", ["Sparkle Plumbing schema fix"], "Sparkle Plumbing").length);
+console.log("PASS reported heading/account-name collision; real unfinished task details remain blocked");

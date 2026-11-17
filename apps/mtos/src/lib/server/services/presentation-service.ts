@@ -1,3 +1,4 @@
+import { CLIENT_CONTENT_RULE, clientPresentation } from "@/src/lib/contracts/client-content";
 import { z } from "zod";
 
 import type { TenantContext } from "@/src/lib/contracts/mtos";
@@ -155,6 +156,7 @@ export async function generatePresentation(
   const system = await getPromptText("monthly_touch_presentation_prompt");
   const userText = [
     "Build the client-facing deck for this Monthly Touch.",
+    CLIENT_CONTENT_RULE,
     ...(delivery === "loom" ? ["This is a recorded Loom update after a client no-show. Write presenterNotes as a complete speaking script for asynchronous delivery. Use only active services and verified relevant metrics in the reviewed evidence. Do not ask live questions, imply client attendance, invent client feedback, or expose internal coaching. Cover supported performance highlights, completed work, challenges, recommendations and next steps. Invite questions by email."] : []),
     "",
     `Give every content slide a sectionId -- the brief section it presents, one of ${BRIEF_SECTION_IDS.join(", ")}.`,
@@ -190,9 +192,11 @@ export async function generatePresentation(
     provider: result.provider,
   };
 
+  const safePresentation = clientPresentation(presentation, touch)!;
+  if (!safePresentation.slides.some((slide) => !["cover", "agenda", "closing"].includes(slide.layout))) throw new Error("The generated presentation contained no client-safe account results or completed work. Review the evidence and regenerate it.");
   const updatedTouch: MonthlyTouchRecord = stripUndefinedDeep({
     ...touch,
-    presentation,
+    presentation: safePresentation,
     updatedAt: getNowIso(),
   });
 

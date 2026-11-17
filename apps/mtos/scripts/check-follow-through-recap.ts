@@ -96,8 +96,8 @@ check("a denied item is not promised", !draft.html.includes("Rewrite the homepag
 check("an undecided item is not promised either", !draft.html.includes("Add the new service area"));
 
 check("every client action becomes an ask", draft.facts.asks.length === 2);
-check("a tentative date is marked as roughly", draft.html.includes("(we said roughly)"));
-check("a firm date is not", draft.html.includes("by Fri 7 Nov</span>") || draft.html.includes("by Fri 7 Nov"));
+check("tentative client task dates stay internal", !draft.html.includes("(we said roughly)"));
+check("firm client task dates stay internal", !draft.html.includes("by Fri 7 Nov"));
 
 check("the summary opens the email", draft.facts.intro === notes.summary);
 check("the goal is carried into the facts row", draft.facts.goalLabel === "40 booked implant consults a month");
@@ -135,8 +135,8 @@ check("the header says it is a recap", draft.html.includes("✅ Monthly check-in
 check("the facts row carries Met", draft.html.includes("🤝 Met"));
 check("and the next check-in", draft.html.includes("🗓️ Next check-in"));
 check("and the goal", draft.html.includes("🎯 Goal"));
-check("the ask box is there", draft.html.includes("📋 What we need from you"));
-check("the numbered list is there", draft.html.includes("What Map Ranking will do"));
+check("unfinished client asks are not rendered", !draft.html.includes("📋 What we need from you"));
+check("unfinished team commitments are not rendered", !draft.html.includes("What Map Ranking will do"));
 check("the next check-in is a button when there is a link", draft.html.includes("https://calendar.google.com/event?eid=abc"));
 check("the follow-up channel is named", draft.html.includes("reply to this email"));
 check("the sign-off is the AM's own", draft.html.includes("Ana<br>Map Ranking"));
@@ -203,7 +203,7 @@ check(
 // ---------------------------------------------------------------------------
 
 const unsigned = buildRecapEmailDraft({ ...source, signoff: "", accountManagerName: "" }, notes, []);
-check("no sign-off and no name is a blocking gap", unsigned.blockingGaps.some((gap) => gap.includes("unsigned")));
+check("no sign-off and no name is a blocking gap", unsigned.blockingGaps.some((gap) => /signature|unsigned/i.test(gap)));
 const fallbackSigned = buildRecapEmailDraft({ ...source, signoff: "" }, notes, []);
 check("a known name produces a sign-off rather than a gap", fallbackSigned.facts.signoff.includes("Ana"));
 check("and no gap", !fallbackSigned.blockingGaps.some((gap) => gap.includes("unsigned")));

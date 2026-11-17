@@ -8,7 +8,7 @@ export function LoomSupportingMaterials({ touch }: { touch: MonthlyTouchRecord }
     <h2 className="h3">No-Show / Loom Video Update</h2>
     <p>No live meeting took place. Review the recording and supporting documents; no transcript is required for this path. All other Follow-Through and QA reviews still apply.</p>
     {usableLoomUrl(loom.url || "") ? <a href={loom.url} target="_blank" rel="noreferrer">Watch Loom recording</a> : <p>Loom recording is missing.</p>}
-    <p>Email status: {loom.sendStatus || "not sent"}{loom.conversationId ? ` · Intercom ${loom.conversationId}` : ""}</p>
+    <p>Email status: {loom.sendStatus || "not sent"}{loom.gmailMessageId ? ` · Gmail ${loom.gmailMessageId}` : loom.conversationId ? ` · Intercom (legacy) ${loom.conversationId}` : ""}</p>
     <details><summary>Client email</summary><h3>{loom.email?.subject}</h3><p>To: {loom.email?.recipient}</p><pre className="whitespace-pre-wrap">{loom.email?.html}</pre></details>
     <details><summary>Presentation and reviewed speaking script</summary><pre className="whitespace-pre-wrap">{loom.script}</pre><pre className="whitespace-pre-wrap">{JSON.stringify(loom.presentation, null, 2)}</pre></details>
     <details><summary>Finalized preparation and account evidence</summary><pre className="whitespace-pre-wrap">{JSON.stringify({ prepBrief: touch.prepBrief, prepPack: touch.prepPack, review: touch.review }, null, 2)}</pre></details>

@@ -81,7 +81,7 @@ export interface UserPreferences {
   timeZone?: string;
   /** The sign-off at the end of a client email, newline-separated as they type it. */
   emailSignoff?: string;
-  /** Which Intercom admin client email goes out as. Their own address, as Intercom knows it. */
+  /** Legacy sender override retained for compatibility; Gmail delivery uses the user’s connected account. */
   clientEmailsSendThrough?: string;
   theme?: ThemeChoice;
   startPage?: StartPage;
@@ -325,12 +325,6 @@ export const PREFERENCE_GROUPS: PreferenceGroup[] = [
         label: "Email signature",
         kind: "textarea",
         hint: "Used in new confirmation and recap drafts. Enter the closing, your name and title on separate lines.",
-      },
-      {
-        key: "clientEmailsSendThrough",
-        label: "Client emails send through",
-        kind: "text",
-        hint: "The Intercom admin address client email is sent as. Blank sends as the address on your sign-in.",
       },
     ],
   },

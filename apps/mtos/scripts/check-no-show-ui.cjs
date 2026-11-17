@@ -10,7 +10,7 @@ const assert = require('node:assert/strict');
 (async () => {
   const output = path.resolve('.next/no-show-ui-check');
   fs.mkdirSync(output, { recursive: true });
-  const bundle = await build({ stdin: { contents: 'import React from "react"; import {createRoot} from "react-dom/client"; import {NoShowPanel} from "./src/components/mtos/no-show-panel"; createRoot(document.getElementById("root")).render(<NoShowPanel touchId="test-touch"/>);', resolveDir: process.cwd(), loader: 'tsx' }, bundle: true, write: false, jsx: 'automatic', plugins: [{ name: 'mock-next-router', setup(builder) { builder.onResolve({ filter: /^next\/navigation$/ }, () => ({ path: 'router', namespace: 'mock' })); builder.onLoad({ filter: /.*/, namespace: 'mock' }, () => ({ contents: 'export function useRouter(){return {push(value){window.lastNavigation=value},refresh(){}}}' })); } }] });
+  const bundle = await build({ stdin: { contents: 'import React from "react"; import {createRoot} from "react-dom/client"; import {NoShowPanel} from "./src/components/mtos/no-show-panel"; import {AgendaApprovalPanel} from "./src/components/mtos/agenda-approval-panel"; createRoot(document.getElementById("root")).render(window.location.pathname === "/agenda" ? <AgendaApprovalPanel touchId="test-touch" email={{subject:"Synthetic agenda",html:"<p>Verified account performance and completed work.</p><p>Regards, AM</p>",recipient:"client@example.test",blockingGaps:[]}} sent={false} availableCc={["office@example.test"]} ccEnabled={true} format="guide" approving={14} declined={[]} pageName="Synthetic Monthly Touch"/> : <NoShowPanel touchId="test-touch"/>);', resolveDir: process.cwd(), loader: 'tsx' }, bundle: true, write: false, jsx: 'automatic', plugins: [{ name: 'mock-next-router', setup(builder) { builder.onResolve({ filter: /^next\/navigation$/ }, () => ({ path: 'router', namespace: 'mock' })); builder.onLoad({ filter: /.*/, namespace: 'mock' }, () => ({ contents: 'export function useRouter(){return {push(value){window.lastNavigation=value},refresh(){}}}' })); } }] });
   const server = http.createServer((req, res) => {
     res.setHeader('content-type', req.url === '/bundle.js' ? 'application/javascript' : 'text/html');
     res.end(req.url === '/bundle.js' ? bundle.outputFiles[0].text : '<!doctype html><html><head><title>No-show acceptance harness</title></head><body><div id="root"></div><script src="/bundle.js"></script></body></html>');
@@ -85,11 +85,29 @@ const assert = require('node:assert/strict');
     await page.getByLabel('Loom recording URL').fill('https://www.loom.com/share/abc123');
     await page.getByRole('button', { name: 'Generate Email Update' }).click();
     await page.getByRole('button', { name: 'Approve & Send' }).click();
-    await page.getByRole('button', { name: 'Check existing email in Intercom' }).waitFor();
+    await page.getByRole('button', { name: 'Check existing email' }).waitFor();
     assert.equal(await page.getByRole('button', { name: 'Approve & Send' }).isDisabled(), true);
-    await page.getByRole('button', { name: 'Check existing email in Intercom' }).click();
+    await page.getByRole('button', { name: 'Check existing email' }).click();
     await page.waitForFunction(() => window.lastNavigation?.endsWith('/follow-through'));
     assert.equal(actions.filter((action) => action.action === 'send').length, 1);
     console.log('PASS uncertain send displays persisted state, disables resend and offers read-only reconciliation');
+    let agendaSends = 0;
+    await page.route('**/api/monthly-touches/test-touch', async (route) => {
+      const body = route.request().postDataJSON();
+      if (body.action === 'send_agenda_email') { agendaSends++; return route.fulfill({ json: { data: { status: 'sent', detail: 'Gmail accepted the approved email from support@mapranking.com.', sentVia: 'Gmail (am@example.test; From support@mapranking.com)', sentAt: new Date().toISOString() } } }); }
+      return route.fulfill({ json: { data: { savedAt: new Date().toISOString() } } });
+    });
+    await page.goto(address + '/agenda');
+    const beforeSendText = await page.locator('body').innerText();
+    assert.ok(beforeSendText.includes('connected Gmail account'));
+    assert.ok(!beforeSendText.includes('through your own Intercom'));
+    assert.ok(beforeSendText.includes('office@example.test'));
+    assert.equal(agendaSends, 0);
+    await page.getByRole('button', { name: 'Approve and Send', exact: true }).click();
+    await page.getByText('Gmail accepted the approved email from support@mapranking.com.', { exact: true }).waitFor();
+    assert.equal(agendaSends, 1);
+    assert.deepEqual(errors, []);
+    console.log('PASS screenshot agenda uses Gmail/shared sender, preserves CC and requires explicit approval before sending');
+
   } finally { await browser?.close(); await new Promise((resolve) => server.close(resolve)); }
 })().catch((error) => { console.error(error); process.exitCode = 1; });

@@ -1,6 +1,7 @@
+import { CLIENT_CONTENT_RULE, clientCallGuide, clientEvidence } from "@/src/lib/contracts/client-content";
 import { z } from "zod";
 
-import { BRIEF_SECTIONS, approvedBriefMarkdown } from "@/src/lib/contracts/prep-brief";
+import { BRIEF_SECTIONS } from "@/src/lib/contracts/prep-brief";
 import type { BriefSectionId } from "@/src/lib/contracts/prep-brief";
 import { normalizeChips, rankTrackerChip } from "@/src/lib/contracts/brief-sources";
 import type { TenantContext } from "@/src/lib/contracts/mtos";
@@ -109,20 +110,6 @@ function formatScorecardMetric(metric?: ScorecardMetric) {
  * built on the approval, and a deck quietly built from text nobody signed off is the failure the
  * single approval button exists to prevent.
  */
-function approvedBrief(touch: MonthlyTouchRecord): { markdown: string; declined: string[] } | undefined {
-  if (!touch.prepBrief || !touch.review?.approvedAt) return undefined;
-  const callLabel = touch.scheduledAt || touch.prepPack?.schedule.scheduledAt || "";
-  return {
-    markdown: approvedBriefMarkdown(touch.prepBrief, touch.review, {
-      // The touch carries a clientId and a prose summary, never a client name, and this
-      // bundle is already scoped to one touch. The title goes without it rather than
-      // guessing a name out of the summary text.
-      clientName: "",
-      callLabel,
-    }),
-    declined: touch.review.declinedSections || [],
-  };
-}
 
 /**
  * The evidence bundle a downstream module reasons over: everything the prep pack
@@ -131,84 +118,7 @@ function approvedBrief(touch: MonthlyTouchRecord): { markdown: string; declined:
  * apart, the deck and the guide would describe different months.
  */
 export function buildTouchEvidence(touch: MonthlyTouchRecord) {
-  const prepPack = touch.prepPack;
-  const approved = approvedBrief(touch);
-  return {
-    // The approved brief when the AM has been through the review step, and nothing when they have
-    // not. Both the guide and the deck are built from the APPROVED sections, so a section the AM
-    // declined must not reach either -- and `declinedSections` says which ones, because a model
-    // given only the remaining text has no way to know something was deliberately left out.
-    approvedBrief: approved?.markdown ?? null,
-    declinedSections: approved?.declined ?? null,
-    agenda: touch.agenda,
-    wins: touch.wins,
-    risks: touch.risks,
-    talkingPoints: touch.talkingPoints,
-    executiveBrief: touch.executiveBrief,
-    commitments: touch.commitments,
-    opportunities: touch.opportunities,
-    // Vetted leads and calls from GoHighLevel, reconciled against Google Ads and
-    // GBP, so the lead-quality section quotes real verified numbers rather than
-    // only the scorecard totals.
-    leadVerification: touch.leadVerification ?? null,
-    // The full evidence bundle: every connected source that fed the prep pack.
-    prepPack: prepPack
-      ? {
-          clientSummary: prepPack.clientSummary,
-          schedule: prepPack.schedule,
-          focusAreas: prepPack.focusAreas,
-          keyFacts: prepPack.keyFacts,
-          openCommitments: prepPack.openCommitments,
-          activeOpportunities: prepPack.activeOpportunities,
-          businessScorecard: prepPack.businessScorecard,
-          seoPerformance: prepPack.seoPerformance
-            ? {
-                // Drop raw pin arrays -- the AM reads those off the heatmap, not the guide.
-                profiles: (prepPack.seoPerformance.profiles || []).map((profile) => ({
-                  businessName: profile.business.businessName,
-                  address: profile.business.address,
-                  rating: profile.business.rating,
-                  reviews: profile.business.reviews,
-                  status: profile.status,
-                  statusNote: profile.statusNote,
-                  keywordScans: profile.keywordScans,
-                  heatmapSummary: profile.heatmapComparisons.map((comparison) => ({
-                    keyword: comparison.keyword,
-                    current: {
-                      scanDate: comparison.current.scanDate,
-                      averageRankPosition: comparison.current.averageRankPosition,
-                      shareOfLocalVoicePercent: comparison.current.shareOfLocalVoicePercent,
-                      top3Percent: comparison.current.top3Percent,
-                      topCompetitors: comparison.current.topCompetitors,
-                    },
-                    previous: comparison.previous
-                      ? {
-                          scanDate: comparison.previous.scanDate,
-                          averageRankPosition: comparison.previous.averageRankPosition,
-                          shareOfLocalVoicePercent: comparison.previous.shareOfLocalVoicePercent,
-                        }
-                      : null,
-                  })),
-                })),
-                gbpPerformance: prepPack.seoPerformance.gbpPerformance,
-                gbpProfiles: prepPack.seoPerformance.gbpProfiles,
-                checkinBusinesses: prepPack.seoPerformance.checkinBusinesses,
-                notes: prepPack.seoPerformance.notes,
-              }
-            : null,
-          adsPerformance: prepPack.adsPerformance,
-          strategicAction: prepPack.strategicAction,
-          clientParticipation: prepPack.clientParticipation,
-          issuesAndSolutions: prepPack.issuesAndSolutions,
-          leadQualityQuestions: prepPack.leadQualityQuestions,
-          recapQuestions: prepPack.recapQuestions,
-          dataGaps: prepPack.dataGaps,
-          integrationSources: prepPack.integrationSources,
-          // Client's Book intelligence + recent project chat, pulled live from ClickUp.
-          clickupContext: prepPack.clickupContext,
-        }
-      : null,
-  }
+  return clientEvidence(touch);
 }
 
 /**
@@ -228,29 +138,8 @@ function buildDeterministicSections(touch: MonthlyTouchRecord): CallGuideSection
   // What we promised last time and did not deliver, owned before the client raises it. First,
   // and only when there is something to own: a part that says "nothing outstanding" wastes the
   // opening minutes of the call.
-  const missed = (touch.prepBrief?.promises || []).filter((promise) => promise.status === "not_delivered");
-  if (missed.length) {
-    sections.push({
-      title: "What I owe you",
-      minutes: 5,
-      sectionId: "1",
-      goal: "Own the miss before she raises it, with a new date and how she will hear about it.",
-      talkingPoints: missed.map((promise) => `${promise.what} (promised ${promise.byWhen}) — ${promise.howToOwnIt}`),
-      points: missed.map((promise) => ({
-        text: `${promise.what} (promised ${promise.byWhen}) — ${promise.howToOwnIt}`,
-        ...(promise.chips?.length ? { chips: normalizeChips(promise.chips) } : {}),
-      })),
-      clientPrompts: ["Is that date workable for you, and how would you like to hear about progress?"],
-      ifSays: [
-        {
-          says: "This should have been done weeks ago.",
-          response: "Agree with her and do not defend it. Give the new date and the update you will send until it is done.",
-        },
-      ],
-      qaChips: ["Risk transparency", "Commitment clarity"],
-      next: "Then move to the month's results.",
-    });
-  }
+  const completed = [...(prepPack?.completedCommitments || []).map((item) => item.title), ...(touch.prepBrief?.promises || []).filter((item) => item.status === "delivered").map((item) => item.what)];
+  if (completed.length) sections.push({ title: "Completed work", minutes: 5, sectionId: "8", talkingPoints: completed, clientPrompts: ["What impact have these results had for your business?"], goal: "Review verified completed work." });
 
   // Scorecard first -- the SOP leads with business numbers, not services.
   const scorecard = prepPack?.businessScorecard;
@@ -307,7 +196,7 @@ function buildDeterministicSections(touch: MonthlyTouchRecord): CallGuideSection
 
   // Strategic action implementation %.
   const strategicAction = prepPack?.strategicAction;
-  if (strategicAction) {
+  if (strategicAction && strategicAction.implementationPercent === 100) {
     sections.push({
       title: "Strategic action review",
       minutes: 8,
@@ -319,9 +208,9 @@ function buildDeterministicSections(touch: MonthlyTouchRecord): CallGuideSection
         ? [
             `"${strategicAction.title}" is ${strategicAction.implementationPercent}% implemented.`,
             strategicAction.resultsSoFar || "Results so far are not documented yet.",
-            strategicAction.nextSteps,
+
           ].filter(Boolean)
-        : [strategicAction.nextSteps],
+        : [],
       clientPrompts: ["Does that next step still line up with your priorities?"],
     });
   }
@@ -329,11 +218,11 @@ function buildDeterministicSections(touch: MonthlyTouchRecord): CallGuideSection
   // Issues, each already carrying a proposed solution and owner.
   const issuePoints = (prepPack?.issuesAndSolutions || [])
     .slice(0, 3)
-    .map((item) => `${item.issue} -- ${item.businessImpact} Fix: ${item.solution} (${item.owner}, due ${item.dueDate})`);
+    .map((item) => `${item.issue} -- ${item.businessImpact}`);
   const risks = issuePoints.length ? issuePoints : touch.risks.slice(0, 3);
   if (risks.length) {
     sections.push({
-      title: "Issues and what we're already doing",
+      title: "Account performance challenges",
       minutes: 10,
       sectionId: "9",
       goal: "Name every issue yourself, each one arriving with a plan, an owner and a date.",
@@ -369,11 +258,9 @@ function buildDeterministicSections(touch: MonthlyTouchRecord): CallGuideSection
     title: "Recap and close",
     minutes: 6,
     sectionId: "14",
-    goal: "Every action has an owner and a date, and the next touch is booked on this call.",
-    talkingPoints: (prepPack?.recapQuestions || []).map((item) => item.question).length
-      ? (prepPack?.recapQuestions || []).map((item) => item.question)
-      : ["Restate what was agreed, with owners and dates."],
-    clientPrompts: ["Can you give me a tentative date for the items on your side?"],
+    goal: "Recap verified performance and completed work, then confirm the next meeting.",
+    talkingPoints: ["Summarize verified results and completed work."],
+    clientPrompts: ["What questions do you have about these results?"],
     ifSays: [
       {
         says: "She cannot commit to a date for the next touch.",
@@ -400,6 +287,7 @@ async function generateClaudeSections(
   });
 
   const userText = [
+    CLIENT_CONTENT_RULE,
     // Evidence only. The shape of `sections`, the optional per-part fields and the source-chip
     // rules are the engine row's contract, resolved above. BRIEF_SECTION_IDS reaches it as a
     // variable, because the brief's section ids are code the renderer shares.
@@ -455,22 +343,7 @@ async function generatePresentationAids(
     return {};
   }
 
-  const prepPack = touch.prepPack;
-  const evidence = JSON.stringify(
-    {
-      clientSummary: prepPack?.clientSummary,
-      businessScorecard: prepPack?.businessScorecard,
-      wins: touch.wins,
-      risks: touch.risks,
-      issuesAndSolutions: prepPack?.issuesAndSolutions,
-      strategicAction: prepPack?.strategicAction,
-      adsPerformance: prepPack?.adsPerformance,
-      gbpPerformance: prepPack?.seoPerformance?.gbpPerformance,
-      gbpProfiles: prepPack?.seoPerformance?.gbpProfiles,
-    },
-    null,
-    2,
-  );
+  const evidence = `${CLIENT_CONTENT_RULE}\n${JSON.stringify(buildTouchEvidence(touch), null, 2)}`;
 
   // The Michelin standard shapes wording everywhere. Fetch the raw body once and
   // append it as a tone directive (getPromptRecord avoids re-nesting the global
@@ -578,9 +451,11 @@ export async function generateLiveCallGuide(context: TenantContext, touchId: str
     // The aids are additive; the timed guide stands on its own.
   }
 
+  const safeGuide = clientCallGuide(callGuide, touch)!;
+  if (!safeGuide.sections.length) safeGuide.sections = clientCallGuide({ status: "generated", sections: deterministicSections }, touch)?.sections || [];
   const updatedTouch: MonthlyTouchRecord = stripUndefinedDeep({
     ...touch,
-    callGuide,
+    callGuide: safeGuide,
     updatedAt: getNowIso(),
   });
 

@@ -502,6 +502,7 @@ export async function runNotificationsForUser(
 
     if (profile.email) {
       const outcome = await sendGmailText(context, {
+        idempotencyKey: `notification-digest:${id}`,
         to: profile.email,
         subject,
         body: digestBody({

@@ -134,7 +134,7 @@ export const PROCESSING_STEPS: ProcessingStep[] = [
     label: "Update the Health Tracker and Stakeholder Map",
     detail: "The approved row changes, and nothing that was not approved.",
   },
-  { id: "recap", label: "Send the recap email", detail: "Through your own Intercom, to the client contact." },
+  { id: "recap", label: "Send the recap email", detail: "Through your connected Gmail account, from support@mapranking.com." },
   {
     id: "channel",
     label: "Post the brief in the client channel",

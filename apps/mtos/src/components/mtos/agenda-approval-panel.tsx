@@ -161,13 +161,13 @@ export function AgendaApprovalPanel({
       setSendOutcome(
         body.data ?? {
           status: "failed",
-          detail: body.error || "The send could not be completed. Nothing was sent.",
+          detail: body.error || "The send result could not be confirmed. Check Gmail Sent; retrying checks the recorded delivery first.",
         },
       );
     } catch (error) {
       setSendOutcome({
         status: "failed",
-        detail: `The send request did not reach MTOS (${error instanceof Error ? error.message : "unknown error"}). Nothing was sent. Try again.`,
+        detail: `The send request returned no result (${error instanceof Error ? error.message : "unknown error"}). Delivery may have completed. Check Gmail Sent; retrying checks the recorded delivery first.`,
       });
     } finally {
       setSending(false);
@@ -201,7 +201,7 @@ export function AgendaApprovalPanel({
       }
     } catch (error) {
       setMessage(
-        `The approval request did not reach MTOS (${error instanceof Error ? error.message : "unknown error"}). Nothing was sent. Try again.`,
+        `The approval request returned no result (${error instanceof Error ? error.message : "unknown error"}). Some actions may have completed. Reload the touch before retrying.`,
       );
     } finally {
       setRunning(false);
@@ -407,8 +407,7 @@ function EmailCard({
       <dl className="grid gap-1 text-[0.82rem] sm:grid-cols-[72px_minmax(0,1fr)] sm:gap-x-3">
         <dt className="eyebrow muted">From</dt>
         <dd style={{ color: "var(--text-2)" }}>
-          support@mapranking.com, through your own Intercom — the client&apos;s reply comes back to your Intercom
-          inbox.
+          {email.sentAt && email.sentVia ? `support@mapranking.com · ${email.sentVia}` : "support@mapranking.com, through your connected Gmail account. The shared sender must be verified in Gmail / Hiver; replies go to support@mapranking.com."}
         </dd>
         <dt className="eyebrow muted">To</dt>
         <dd style={{ color: "var(--text-2)" }}>

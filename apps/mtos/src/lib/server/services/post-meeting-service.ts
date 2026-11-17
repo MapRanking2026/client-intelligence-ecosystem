@@ -1,4 +1,5 @@
 import { nanoid } from "nanoid";
+import { CLIENT_CONTENT_RULE, clientText } from "@/src/lib/contracts/client-content";
 import { z } from "zod";
 
 import type { TenantContext } from "@/src/lib/contracts/mtos";
@@ -367,7 +368,7 @@ async function analyzeWithClaude(
   // The analysis emits a recap, up to 10 commitments, up to 8 draft tickets
   // (title + description + department each), plus a full client email subject
   // and body -- 1800 truncated the JSON mid-array, which then fails to parse.
-  const result = await callLlmForJson({ env, system, userText, maxTokens: 8000 });
+  const result = await callLlmForJson({ env, system: `${system}\n\n${CLIENT_CONTENT_RULE}`, userText, maxTokens: 8000 });
   // Normalize before validating so the model returning objects-as-commitments or
   // overshooting the item caps degrades gracefully instead of failing schema validation.
   const analysis = analysisSchema.parse(normalizePostMeetingAnalysis(result.data));
@@ -535,7 +536,7 @@ async function analyzePostMeetingTranscriptUnlocked(context: TenantContext, touc
     draftTickets,
     clientEmail: {
       subject: analysis.clientEmailSubject,
-      body: analysis.clientEmailBody,
+      body: clientText(analysis.clientEmailBody),
       status: "pending",
     },
     clientIntelligence,
@@ -1218,7 +1219,7 @@ export async function applyPostMeetingDecisions(
 
   const clientEmail: ClientEmailDraft = {
     subject: toPlainLine(decisions.email.subject),
-    body: toPlainEmail(decisions.email.body),
+    body: clientText(toPlainEmail(decisions.email.body)),
     status: decisions.email.approve ? "approved" : "pending",
   };
 

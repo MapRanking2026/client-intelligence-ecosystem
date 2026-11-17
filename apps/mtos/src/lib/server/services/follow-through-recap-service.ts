@@ -1,3 +1,4 @@
+import { blockedTaskTitles, clientText, internalTaskText } from "@/src/lib/contracts/client-content";
 import type { TenantContext } from "@/src/lib/contracts/mtos";
 import {
   buildRecapEmailDraft,
@@ -114,8 +115,8 @@ export async function buildFollowThroughRecap(
       ...(env.appUrl ? { appUrl: env.appUrl } : {}),
       wins,
     },
-    notes,
-    touch.followThrough?.items || [],
+    { ...notes, summary: clientText(notes.summary, blockedTaskTitles(touch)), clientActions: [], pending: [], departments: notes.departments.map((group) => ({ ...group, actions: [] })) },
+    [],
   );
 
   return {
@@ -137,6 +138,7 @@ export async function saveFollowThroughRecap(
   // Cleaned on the way in, so the stored draft is exactly what the client would receive. The AM
   // wrote it, so this is not defence against an attacker -- it is defence against what lands in
   // a contentEditable when someone pastes from a web page.
+  if (internalTaskText(`${recap.subject} ${recap.html}`)) throw new Error("Client recaps may include completed work only. Keep unfinished task details in internal notes.");
   const cleaned: RecapEmailState = { ...recap, html: sanitizeRecapEmailHtml(recap.html) };
   const db = getFirebaseAdminDb();
   if (db) {

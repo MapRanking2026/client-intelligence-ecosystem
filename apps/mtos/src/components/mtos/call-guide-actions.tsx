@@ -1,5 +1,6 @@
 "use client";
 
+import { clientCallGuide } from "@/src/lib/contracts/client-content";
 import { useState } from "react";
 import { LoaderCircle, Sparkles, MonitorPlay, ArrowUpRight } from "lucide-react";
 
@@ -129,8 +130,9 @@ export function CallGuideActions({ touchId, clientId, callGuide, screenOverrides
 
       {callGuide?.status === "generated" ? (
         <div className="space-y-3">
-          {callGuide.sections.map((section, index) => {
-            const key = (overrides[String(index)] as ScreenKey) || suggestScreenKey(section);
+          {(clientCallGuide(callGuide)?.sections || []).map((section, index) => {
+            const sourceIndex = section.generatedIndex ?? index;
+            const key = (overrides[String(sourceIndex)] as ScreenKey) || suggestScreenKey(section);
             return (
               <div key={`${section.title}-${index}`} className="panel">
                 <div className="flex items-center justify-between gap-3">
@@ -157,7 +159,7 @@ export function CallGuideActions({ touchId, clientId, callGuide, screenOverrides
                     <span className="hidden sm:inline">change screen</span>
                     <select
                       value={key}
-                      onChange={(e) => void setScreen(index, e.target.value as ScreenKey)}
+                      onChange={(e) => void setScreen(sourceIndex, e.target.value as ScreenKey)}
                       className="select"
                     >
                       {SCREEN_KEYS.map((k) => (

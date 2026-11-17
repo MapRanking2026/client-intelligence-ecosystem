@@ -406,6 +406,8 @@ export interface MonthlyTouchPrepPack {
   focusAreas: string[];
   keyFacts: string[];
   openCommitments: PrepPackCommitmentItem[];
+  /** Explicitly completed work; approval or a due date is not completion evidence. */
+  completedCommitments?: PrepPackCommitmentItem[];
   activeOpportunities: PrepPackOpportunityItem[];
   integrationSources: PrepPackSourceItem[];
   businessScorecard: BusinessScorecard;
@@ -590,6 +592,8 @@ export interface CallGuideResponse {
  * source chips rather than the content.
  */
 export interface CallGuideSection {
+  /** Original generation position, retained when internal content is filtered out. */
+  generatedIndex?: number;
   title: string;
   minutes: number;
   talkingPoints: string[];
@@ -694,6 +698,8 @@ export interface PresentationItem {
 }
 
 export interface PresentationSlide {
+  /** Original generation position for saved AM capture notes; display numbering stays contiguous. */
+  generatedIndex?: number;
   layout: PresentationLayout;
   /**
    * Which brief section this slide presents, when it presents one.
@@ -1328,7 +1334,7 @@ export interface TouchCoachingChoice {
   reason?: string;
 }
 
-/** The client-facing agenda email: written before the call, sent through the AM's own Intercom. */
+/** The client-facing agenda email, sent using the AM's connected Gmail account. */
 export interface TouchAgendaEmailState {
   subject: string;
   html: string;
@@ -1347,6 +1353,9 @@ export interface TouchAgendaEmailState {
   sentVia?: string;
   /** Stored so a retry can never send the agenda twice. */
   intercomConversationId?: string;
+  gmailMessageId?: string;
+  gmailThreadId?: string;
+  emailProvider?: "gmail" | "intercom";
   savedAt?: string;
 }
 

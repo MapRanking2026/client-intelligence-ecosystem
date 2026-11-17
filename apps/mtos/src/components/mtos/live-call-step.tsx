@@ -309,7 +309,7 @@ export function LiveCallStep({
     [slideSectionId, parts],
   );
 
-  const noteKey = isDeck ? `slide-${slideIndex + 1}` : part?.key || "part-1";
+  const noteKey = isDeck ? `slide-${(slide?.generatedIndex ?? slideIndex) + 1}` : part?.key || "part-1";
 
   const saveNote = useCallback(
     (key: string, value: string) => {

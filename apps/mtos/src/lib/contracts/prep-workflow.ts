@@ -115,6 +115,9 @@ export interface ConfirmationEmailState {
   sentAt?: string;
   /** What actually carried it ("Gmail API", "sent by the account manager"). */
   sentVia?: string;
+  gmailMessageId?: string;
+  gmailThreadId?: string;
+  deliveryUncertain?: boolean;
   deliveryAttempts: number;
   lastError?: string;
   /** Set only when `status` is "skipped": when the AM chose to proceed without the email. */

@@ -1,3 +1,4 @@
+import { blockedTaskTitles } from "@/src/lib/contracts/client-content";
 import type { TenantContext } from "@/src/lib/contracts/mtos";
 import { agendaEmailHasBody, type AgendaSendOutcome } from "@/src/lib/contracts/agenda-email";
 import { approvalSummary, approvedBriefMarkdown } from "@/src/lib/contracts/prep-brief";
@@ -16,7 +17,7 @@ import { getFirebaseAdminDb } from "@/src/lib/server/firebase/admin";
 import { monthlyTouchPath } from "@/src/lib/server/firebase/collections";
 import { readAgendaEmail } from "@/src/lib/server/services/agenda-email-service";
 import { filePrepNotesToClientBook } from "@/src/lib/server/services/client-book-service";
-import { sendAgendaEmailViaIntercom } from "@/src/lib/server/services/intercom-send-service";
+import { sendClientEmail } from "@/src/lib/server/services/client-email-service";
 import { generateLiveCallGuide } from "@/src/lib/server/services/live-call-guide-service";
 import { generatePresentation } from "@/src/lib/server/services/presentation-service";
 import { getNowIso } from "@/src/lib/server/services/mtos-ai";
@@ -67,10 +68,6 @@ export async function sendAgendaEmailNow(
 ): Promise<AgendaSendOutcome> {
   const { touch, client } = await loadTouch(context, touchId);
   if (touch.noShow?.standbyUntil && Date.parse(touch.noShow.standbyUntil) > Date.now()) throw new Error("This rescheduled touch is on standby until 48 hours before the new meeting.");
-  const [profile, preferences] = await Promise.all([
-    getAccountManagerProfile(context),
-    getAccountManagerPreferences(context),
-  ]);
   const view = await readAgendaEmail(context, touch, client);
   const email = view.state;
 
@@ -81,9 +78,9 @@ export async function sendAgendaEmailNow(
     };
   }
 
-  // The idempotency check. `sent` is this touch's own record; the conversation id is Intercom's
-  // proof, and it survives a write that landed after the response was lost.
-  if (view.sent || email.intercomConversationId) {
+  // Preserve legacy Intercom receipts and new Gmail receipts. The Gmail sender also owns
+  // a transactional per-user delivery ledger, including recovery after a lost response.
+  if (view.sent || email.intercomConversationId || email.gmailMessageId) {
     return {
       status: "already_sent",
       detail: `Already sent${email.sentAt ? ` ${email.sentAt}` : ""}. Nothing was sent again.`,
@@ -102,14 +99,14 @@ export async function sendAgendaEmailNow(
     };
   }
 
-  const sent = await sendAgendaEmailViaIntercom(context, {
-    // Their own preference when they set one, else the address they sign in with.
-    accountManagerEmail: preferences.clientEmailsSendThrough?.trim() || profile.email,
+  const sent = await sendClientEmail(context, {
+    idempotencyKey: `monthly-touch:${touchId}:agenda`,
     recipient: email.recipient || "",
     cc: view.ccEnabled ? view.availableCc : [],
+    blockedTaskTitles: blockedTaskTitles(touch),
     subject: email.subject,
     html: email.html,
-    ...(email.intercomConversationId ? { existingConversationId: email.intercomConversationId } : {}),
+
   });
 
   if (!sent.sent) {
@@ -128,7 +125,9 @@ export async function sendAgendaEmailNow(
         ...email,
         sentAt,
         sentVia: sent.sentVia,
-        intercomConversationId: sent.conversationId,
+        emailProvider: "gmail",
+        gmailMessageId: sent.messageId,
+        ...(sent.threadId ? { gmailThreadId: sent.threadId } : {}),
       },
     },
     { mergeFields: ["agendaEmail"] },

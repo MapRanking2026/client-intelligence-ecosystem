@@ -105,8 +105,8 @@ export const BRIEF_SECTIONS: BriefSectionMeta[] = [
   {
     id: "7",
     n: "7",
-    title: "Open items",
-    purpose: "Who owes what — get a date for every client item.",
+    title: "Open items — internal team only",
+    purpose: "Internal backlog and ownership. Never include these items in client-visible materials.",
     declinable: true,
   },
   { id: "8", n: "8", title: "Wins", purpose: "Results, with what they mean for the business.", declinable: true },

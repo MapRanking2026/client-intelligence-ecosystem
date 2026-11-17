@@ -211,9 +211,9 @@ check(
     .meetingUrl === "",
 );
 check(
-  "the agent's link wins over the touch's",
+  "the verified touch link wins over a model-written link",
   buildAgendaEmailDraft(agendaEmail({ link: "https://meet.google.com/from-agent" }), SOURCE).facts.meetingUrl ===
-    "https://meet.google.com/from-agent",
+    SOURCE.meetingUrl,
 );
 
 const noSignoff = buildAgendaEmailDraft(agendaEmail({ signoff: "" }), SOURCE);

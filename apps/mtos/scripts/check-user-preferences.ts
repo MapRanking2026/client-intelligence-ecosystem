@@ -182,9 +182,9 @@ check(
   ),
 );
 check(
-  "every stored preference is on the screen",
+  "every active preference is on the screen; the legacy sender override is inactive",
   Object.keys(DEFAULT_PREFERENCES)
-    .filter((key) => key !== "notifications")
+    .filter((key) => key !== "notifications" && key !== "clientEmailsSendThrough")
     .every((key) => fields.some((field) => field.key === key)),
 );
 check(

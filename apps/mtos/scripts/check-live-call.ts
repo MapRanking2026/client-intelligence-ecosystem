@@ -227,15 +227,15 @@ const SECTIONS: CallGuideSection[] = [
     points: [{ text: "Let her talk for a minute.", chips: [{ kind: "mtos", label: "MTOS" }] }],
     clientPrompts: ["How was your month overall?"],
     qaChips: ["Client engagement"],
-    next: "Before results — one thing I owe you.",
+    next: "Before results — one completed improvement.",
   },
   {
-    title: "What I owe you",
+    title: "What we completed",
     minutes: 5,
     sectionId: "1",
-    talkingPoints: ["The mobile form is still not fixed."],
-    clientPrompts: ["Is a Monday email the right way to keep you posted?"],
-    ifSays: [{ says: "This should have been fixed weeks ago.", response: "Agree. Do not defend it." }],
+    talkingPoints: ["The mobile form fix is completed."],
+    clientPrompts: ["What impact has the completed form fix had?"],
+    ifSays: [{ says: "How did the completed form change help?", response: "Compare the measured conversion counts." }],
   },
   {
     title: "June results",
@@ -248,8 +248,8 @@ const SECTIONS: CallGuideSection[] = [
     title: "Recap and close",
     minutes: 4,
     sectionId: "14",
-    talkingPoints: ["Restate what was agreed, with owners and dates."],
-    clientPrompts: ["Can you give me a date for the items on your side?"],
+    talkingPoints: ["Recap the verified results and completed work."],
+    clientPrompts: ["Any questions about the results we reviewed?"],
   },
 ];
 
@@ -349,7 +349,7 @@ scenario("A part carries what the AM reads, and an older guide still reads");
   check("the client prompts are the asks", parts[0].ask[0] === "How was your month overall?");
   check("the pushback rows come through", parts[1].ifSays.length === 1);
   check("the QA chips come through", parts[0].qaChips[0] === "Client engagement");
-  check("so does the bridge into the next part", parts[0].next.includes("one thing I owe you"));
+  check("so does the bridge into the next part", parts[0].next.includes("completed improvement"));
 
   // A guide generated before the richer part existed: talking points, no `points`.
   const older = buildGuideParts({
@@ -366,7 +366,7 @@ scenario("A part carries what the AM reads, and an older guide still reads");
 const SLIDES: PresentationSlide[] = [
   { layout: "cover", title: "Monthly check-in" },
   { layout: "agenda", title: "What we will cover" },
-  { layout: "bullets", title: "What we owe you", sectionId: "1" },
+  { layout: "bullets", title: "What we completed", sectionId: "1" },
   { layout: "stat_callouts", title: "June results", sectionId: "8" },
   { layout: "closing", title: "Thank you" },
 ];

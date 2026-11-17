@@ -80,12 +80,12 @@ export const INTEGRATION_PERMISSIONS: IntegrationPermission[] = [
   },
   {
     id: "gmail-send",
-    label: "Send email as you from Gmail",
+    label: "Send email through your Gmail account",
     provider: "gmail",
     scope: "https://www.googleapis.com/auth/gmail.send",
-    purpose: "An alternative to Intercom for the agenda and recap emails, sent from your own address.",
-    fallback: "Client email goes through Intercom instead, which is how MTOS sends it today.",
-    usedBy: "Agenda email, recap email",
+    purpose: "Sends approved client emails through your connected Gmail account using the verified support@mapranking.com sender.",
+    fallback: "Email remains unsent. Connect Gmail with sending permission and verify support@mapranking.com under Send mail as.",
+    usedBy: "Confirmation, agenda, recap, Loom updates and notification emails",
   },
   {
     id: "gmail-read",
@@ -93,7 +93,7 @@ export const INTEGRATION_PERMISSIONS: IntegrationPermission[] = [
     provider: "gmail",
     scope: "https://www.googleapis.com/auth/gmail.readonly",
     purpose: "Checks what was actually sent and answered before the brief says an email went unanswered.",
-    fallback: "The brief reports email evidence from Intercom only, and says so.",
+    fallback: "The brief reports available Intercom evidence only. Gmail sending remains blocked until sender verification and sent-message recovery can be performed.",
     usedBy: "Review brief, section 5",
   },
   {

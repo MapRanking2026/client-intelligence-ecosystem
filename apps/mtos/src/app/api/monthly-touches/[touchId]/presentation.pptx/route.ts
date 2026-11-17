@@ -1,3 +1,4 @@
+import { clientPresentation } from "@/src/lib/contracts/client-content";
 import fs from "fs";
 import path from "path";
 
@@ -34,7 +35,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ touc
     return NextResponse.json({ error: "Monthly touch not found" }, { status: 404 });
   }
 
-  const presentation = touch.noShow?.resolution === "loom" ? touch.noShow.presentation : touch.presentation;
+  const presentation = clientPresentation(touch.noShow?.resolution === "loom" ? touch.noShow.presentation : touch.presentation, touch);
   if (!presentation || presentation.status !== "generated" || !presentation.slides?.length) {
     return NextResponse.json(
       { error: "No presentation has been generated for this touch yet." },

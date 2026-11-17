@@ -1,5 +1,6 @@
 "use client";
 
+import { blockedTaskTitles, internalTaskText, clientCallGuide, clientText } from "@/src/lib/contracts/client-content";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   CheckCircle2,
@@ -89,7 +90,7 @@ function formatClock(totalSeconds: number): string {
  * a section of the guide the AM was going to present would be worse than an uneven agenda.
  */
 function buildSegments(touch: MonthlyTouchRecord): LiveSegment[] {
-  const guideSections = touch.callGuide?.sections ?? [];
+  const guideSections = clientCallGuide(touch.callGuide, touch)?.sections ?? [];
   const prepPack = touch.prepPack;
 
   const base: LiveSegment[] = [
@@ -97,7 +98,7 @@ function buildSegments(touch: MonthlyTouchRecord): LiveSegment[] {
       key: "q1",
       title: "1. What happened?",
       purpose: "Open with their month in their words, then show the results.",
-      talkingPoints: touch.wins,
+      talkingPoints: touch.wins.map((line) => clientText(line)).filter(Boolean),
       questions: [
         "How was your month overall?",
         "How many new leads or inquiries came in?",
@@ -108,7 +109,7 @@ function buildSegments(touch: MonthlyTouchRecord): LiveSegment[] {
       key: "q2",
       title: "2. What caused it?",
       purpose: "Connect the numbers to the reasons, and name the issues before the client does.",
-      talkingPoints: touch.risks,
+      talkingPoints: touch.risks.map((line) => clientText(line)).filter(Boolean),
       questions: [
         "Anything that felt off this month — calls that did not convert, jobs you felt you should have closed?",
         "What is sitting in your pipeline right now?",
@@ -119,7 +120,7 @@ function buildSegments(touch: MonthlyTouchRecord): LiveSegment[] {
       title: "3. What are we doing about it?",
       purpose: "Every issue already has a plan, an owner and a date.",
       talkingPoints: (prepPack?.issuesAndSolutions ?? []).map(
-        (item) => `${item.issue} → ${item.solution} (${item.owner}, ${item.dueDate})`,
+        (item) => clientText(`${item.issue} — ${item.businessImpact}`),
       ),
       questions: prepPack?.leadQualityQuestions ?? [],
     },
@@ -127,7 +128,7 @@ function buildSegments(touch: MonthlyTouchRecord): LiveSegment[] {
       key: "q4",
       title: "4. What is next?",
       purpose: "The goal number, the next 30 days, and the growth move worth making.",
-      talkingPoints: [...touch.opportunities, ...touch.commitments],
+      talkingPoints: touch.wins.map((line) => clientText(line)).filter(Boolean),
       questions: [
         "What is the number you want to hit by the end of the quarter — jobs, revenue or calls?",
         ...(prepPack?.decisionsTogether ?? []).map((decision) => decision.question),
@@ -172,8 +173,8 @@ function buildSegments(touch: MonthlyTouchRecord): LiveSegment[] {
   // Strip empties so a segment never shows a bullet with nothing in it.
   return base.map((segment) => ({
     ...segment,
-    talkingPoints: segment.talkingPoints.filter((point) => point && point.trim()),
-    questions: segment.questions.filter((question) => question && question.trim()),
+    talkingPoints: segment.talkingPoints.filter((point) => point && point.trim() && !internalTaskText(point, blockedTaskTitles(touch))),
+    questions: segment.questions.filter((question) => question && question.trim() && !internalTaskText(question, blockedTaskTitles(touch))),
   }));
 }
 

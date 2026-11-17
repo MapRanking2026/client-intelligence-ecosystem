@@ -1,3 +1,4 @@
+import { blockedTaskTitles } from "@/src/lib/contracts/client-content";
 import { getAccountManagerPreferences, getAccountManagerProfile } from "@/src/lib/server/services/user-service";
 import { readAgendaMeeting } from "@/src/lib/server/services/google-meet-service";
 import { isTimeZone } from "@/src/lib/contracts/user-preferences";
@@ -500,6 +501,7 @@ export async function generateConfirmationEmailStage(
   const title = preferences.jobTitle?.trim();
   const signature = preferences.emailSignoff?.trim() || (name && title ? `Best regards,\n${name}\n${title} | Map Ranking` : "");
   const meetingZone = meeting?.timeZone;
+  if (before.confirmationEmail?.deliveryUncertain) throw new Error("The previous Gmail send has unresolved delivery. Retry the existing send to reconcile Gmail Sent before generating a new draft.");
   const email = await generateConfirmationEmail(touch, client, {
     ...options,
     timeZone: options.timeZone || (isTimeZone(meetingZone) ? meetingZone : profile.timeZone),
@@ -558,6 +560,7 @@ export async function approveConfirmationEmailStage(
     return { touch, workflow: before, message: "This email has already been sent." };
   }
 
+  if (email.deliveryUncertain) throw new Error("This Gmail send has unresolved delivery. Retry the existing send to check Gmail Sent before editing or approving a new version.");
   const subject = edits.subject.trim();
   const body = edits.body.trim();
   if (!subject || !body) {
@@ -685,7 +688,7 @@ export async function sendConfirmationEmailStage(
     );
   }
 
-  const result = await sendConfirmationEmail(context, email);
+  const result = await sendConfirmationEmail(context, email, blockedTaskTitles(touch));
   const workflow: PrepWorkflowState = {
     ...before,
     confirmationEmail: result.email,

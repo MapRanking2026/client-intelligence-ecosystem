@@ -1,5 +1,6 @@
 "use client";
 
+import { clientSlides } from "@/src/lib/contracts/client-content";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ChevronLeft,
@@ -50,7 +51,7 @@ export function PresentationViewer({
   const stageRef = useRef<HTMLDivElement | null>(null);
   const fullscreenRef = useRef<HTMLDivElement | null>(null);
 
-  const slides = presentation?.slides || [];
+  const slides = clientSlides(presentation?.slides);
   const count = slides.length;
   const current = slides[Math.min(index, Math.max(count - 1, 0))];
 

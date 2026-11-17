@@ -11,6 +11,9 @@ export interface NoShowState {
   sendStatus?: "sending" | "sent" | "failed" | "unknown";
   sendError?: string;
   conversationId?: string;
+  gmailMessageId?: string;
+  gmailThreadId?: string;
+  emailProvider?: "gmail" | "intercom";
   sentAt?: string;
   rescheduledAt?: string;
   standbyUntil?: string;
@@ -46,7 +49,7 @@ export function usableLoomUrl(value: string): boolean {
 export function loomReady(touch: Pick<MonthlyTouchRecord, "noShow" | "prepPack" | "review">): boolean {
   const loom = touch.noShow;
   return Boolean(loom?.resolution === "loom" && loom.sendStatus === "sent" && loom.sentAt &&
-    loom.conversationId && usableLoomUrl(loom.url || "") && loom.script?.trim() &&
+    (loom.gmailMessageId || loom.conversationId) && usableLoomUrl(loom.url || "") && loom.script?.trim() &&
     loom.presentation?.status === "generated" && touch.prepPack && touch.review?.approvedAt && loom.email);
 }
 

@@ -1,3 +1,4 @@
+import { blockedTaskTitles, internalTaskText } from "@/src/lib/contracts/client-content";
 import { FieldValue } from "firebase-admin/firestore";
 import type { TenantContext } from "@/src/lib/contracts/mtos";
 import { calendarSlotAvailable, loomReady, usableLoomUrl, type NoShowState } from "@/src/lib/contracts/no-show";
@@ -10,8 +11,9 @@ import { clientPath, monthlyTouchPath, monthlyTouchArtifactPath } from "@/src/li
 import { generatePresentation } from "./presentation-service";
 import { readRescheduleAvailability, rescheduleLinkedEvent } from "./google-meet-service";
 import { resolveRecipient } from "./confirmation-email-service";
-import { sendAgendaEmailViaIntercom, verifyLoomEmailAccepted } from "./intercom-send-service";
-import { clientEmailSenderAddress, getAccountManagerPreferences, getAccountManagerProfile } from "./user-service";
+import { sendClientEmail, verifyClientEmailAccepted } from "./client-email-service";
+import { verifyLoomEmailAccepted } from "./intercom-send-service";
+import { getAccountManagerPreferences, getAccountManagerProfile } from "./user-service";
 
 export type NoShowAction =
   | { action: "select"; resolution: "reschedule" | "loom" }
@@ -93,7 +95,7 @@ export async function runNoShowAction(context: TenantContext, touchId: string, a
     }
     if (state.resolution !== "loom") throw new Error("Select Loom Video Update first.");
     if (state.sendStatus === "sent") return state;
-    if (action.action !== "reconcile" && (state.sendStatus === "sending" || state.sendStatus === "unknown")) throw new Error("Email delivery is unresolved. Check Intercom before retrying to avoid a duplicate.");
+    if (action.action !== "reconcile" && (state.sendStatus === "sending" || state.sendStatus === "unknown")) throw new Error("Email delivery is unresolved. Check the sending mailbox before retrying to avoid a duplicate.");
     if (!current.prepPack || !current.review?.approvedAt) throw new Error("Finalize and approve the preparation before creating the Loom update.");
     if (action.action === "generate") {
       const generated = await generatePresentation(context, touchId, "loom");
@@ -103,6 +105,7 @@ export async function runNoShowAction(context: TenantContext, touchId: string, a
     }
     if (action.action === "generate") delete state.email;
     if (action.action === "save") {
+      if (internalTaskText(action.script, blockedTaskTitles(current)) || internalTaskText(`${action.subject || ""} ${action.html || ""}`, blockedTaskTitles(current))) throw new Error("Keep unfinished tasks in internal notes. The Loom script and client email may show completed work only.");
       if (action.url && !usableLoomUrl(action.url)) throw new Error("Paste an HTTPS Loom share URL, such as https://www.loom.com/share/recordingid.");
       const urlChanged = action.url !== state.url;
       state = { ...state, script: action.script, url: action.url,
@@ -122,18 +125,23 @@ export async function runNoShowAction(context: TenantContext, touchId: string, a
     if (action.action === "send" || action.action === "reconcile") {
       if (!state.email?.subject.trim() || !state.email.html.trim() || !usableLoomUrl(state.url || "") || !state.script?.trim() || !state.presentation) throw new Error("Complete the video and email draft before approving.");
       if (!state.email.html.includes(state.url!)) throw new Error("The approved email must include the saved Loom recording URL.");
-      if (action.action === "send") await ref.update({ noShow: { ...state, sendStatus: "sending" } });
+      const email = state.email;
+      if (action.action === "send") { state = { ...state, emailProvider: "gmail" }; await ref.update({ noShow: { ...state, sendStatus: "sending" } }); }
       const outcome = action.action === "reconcile"
-        ? { sent: true as const, conversationId: await verifyLoomEmailAccepted(context, { recipient: state.email.recipient, subject: state.email.subject, url: state.url!, selectedAt: state.selectedAt }) }
-        : await sendAgendaEmailViaIntercom(context, { accountManagerEmail: await clientEmailSenderAddress(context), ...state.email, label: "Loom video update" });
+        ? state.emailProvider === "gmail"
+          ? await verifyClientEmailAccepted(context, `monthly-touch:${touchId}:loom`)
+          : { sent: true as const, conversationId: await verifyLoomEmailAccepted(context, { recipient: email.recipient, subject: email.subject, url: state.url!, selectedAt: state.selectedAt }) }
+        : await sendClientEmail(context, { ...email, idempotencyKey: `monthly-touch:${touchId}:loom`, blockedTaskTitles: blockedTaskTitles(current), label: "Loom video update" });
       if (!outcome.sent) {
         await ref.update({ noShow: { ...state, sendStatus: outcome.deliveryUncertain ? "unknown" : "failed", sendError: outcome.detail } });
         throw new Error(outcome.detail);
       }
-      state = { ...state, sendStatus: "sent", sentAt: at, conversationId: outcome.conversationId };
+      const reference = "messageId" in outcome ? outcome.messageId : outcome.conversationId;
+      state = { ...state, sendStatus: "sent", sentAt: at, ...("messageId" in outcome ? { gmailMessageId: outcome.messageId, ...(outcome.threadId ? { gmailThreadId: outcome.threadId } : {}) } : { conversationId: outcome.conversationId }) };
+      delete state.sendError;
       await ref.update({ noShow: state, progress: "follow", progressUpdatedAt: at,
         "followThrough.dueAt": followThroughDueAt(at, (await getAccountManagerProfile(context)).timeZone),
-        noShowHistory: FieldValue.arrayUnion({ at, by: context.userId, resolution: "loom", detail: `Loom email accepted by Intercom: ${outcome.conversationId}` }) });
+        noShowHistory: FieldValue.arrayUnion({ at, by: context.userId, resolution: "loom", detail: `Loom email accepted by ${state.emailProvider === "gmail" ? "Gmail" : "Intercom (legacy)"}: ${reference}` }) });
       return state;
     }
     await ref.update({ noShow: state });

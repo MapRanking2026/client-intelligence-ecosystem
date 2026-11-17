@@ -86,11 +86,11 @@ export function NoShowPanel({ touchId, initial }: { touchId: string; initial?: N
           <label className="field">Email subject<input className="input" value={subject} disabled={busy} onChange={(e) => setSubject(e.target.value)} /></label>
           <label className="field">Email body (HTML)<textarea className="textarea" rows={10} value={html} disabled={busy} onChange={(e) => setHtml(e.target.value)} /></label>
           <div className="card" aria-label="Email preview" dangerouslySetInnerHTML={{ __html: state.email.html }} />
-          <p>Save changes to refresh the preview. Sending records Intercom acceptance; it does not confirm inbox delivery.</p>
+          <p>Save changes to refresh the preview. Sending records Gmail acceptance; it does not confirm inbox delivery or Hiver synchronization.</p>
           <button type="button" className="btn btn-primary" disabled={busy || state.sendStatus === "sent" || state.sendStatus === "unknown" || state.sendStatus === "sending"} onClick={() => void act({ action: "send", approved: true }, true)}>Approve &amp; Send</button>
         </> : null}
         {state?.sendStatus ? <p role="status">Email status: {state.sendStatus}. {state.sendError}</p> : null}
-        {state?.sendStatus === "unknown" || state?.sendStatus === "sending" ? <button type="button" className="btn" disabled={busy} onClick={() => void act({ action: "reconcile" })}>Check existing email in Intercom</button> : null}
+        {state?.sendStatus === "unknown" || state?.sendStatus === "sending" ? <button type="button" className="btn" disabled={busy} onClick={() => void act({ action: "reconcile" })}>Check existing email</button> : null}
       </>}
       {busy ? <p role="status">Saving…</p> : null}
       {error ? <p role="alert">{error}</p> : null}

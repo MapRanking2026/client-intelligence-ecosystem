@@ -1,3 +1,4 @@
+import { internalTaskText } from "@/src/lib/contracts/client-content";
 import type { ClientAgendaEmail } from "@/src/lib/contracts/prep-brief";
 
 /**
@@ -215,7 +216,7 @@ export function buildAgendaEmailDraft(
     ? formatInZone(scheduled, source.timeZone, { month: "long", year: "numeric" })
     : "";
 
-  const items = email?.items?.filter((item) => item.trim()) || [];
+  const items = email?.items?.filter((item) => item.trim() && !internalTaskText(item)) || [];
   if (!items.length) {
     gaps.push(
       "The preparation produced no agenda items for the client, so there is nothing to tell them you will cover. Re-run the preparation, or write the items yourself before sending.",
@@ -255,7 +256,7 @@ export function buildAgendaEmailDraft(
       ? `Looking forward to our check-in${dateLabel ? ` on ${dateLabel}` : ""}. Here's what we'll cover:`
       : "",
     topics: items.map(agendaTopic),
-    ask: email?.ask?.trim() || "",
+    ask: email?.ask && !internalTaskText(email.ask) ? email.ask.trim() : "",
     meetingUrl,
     signoff,
     logoUrl,

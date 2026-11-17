@@ -1,3 +1,4 @@
+import { CLIENT_CONTENT_RULE, blockedTaskTitles, clientText, internalTaskText } from "@/src/lib/contracts/client-content";
 import { emailSignatureLines } from "@/src/lib/contracts/agenda-email";
 import { nanoid } from "nanoid";
 
@@ -5,12 +6,7 @@ import type { TenantContext } from "@/src/lib/contracts/mtos";
 import type { ConfirmationEmailState } from "@/src/lib/contracts/prep-workflow";
 import type { ClientRecord, MonthlyTouchRecord } from "@/src/lib/mtos-data";
 import { getServerEnv } from "@/src/lib/server/env";
-import {
-  getIntegrationConnection,
-  getIntegrationCredentials,
-  getMissingIntegrationScopes,
-} from "@/src/lib/server/integrations";
-import { encodeRfc822 } from "@/src/lib/server/gmail";
+import { sendGmailMessage } from "@/src/lib/server/gmail";
 import { getPromptText } from "@/src/lib/server/prompt-store";
 import { callLlmForJson, getNowIso, hasAnyLlmProvider } from "@/src/lib/server/services/mtos-ai";
 
@@ -30,7 +26,7 @@ import { callLlmForJson, getNowIso, hasAnyLlmProvider } from "@/src/lib/server/s
  * Approving is never sending, and a failed send stays failed and retryable.
  */
 
-const GMAIL_SEND_SCOPE = "https://www.googleapis.com/auth/gmail.send";
+
 
 /** `Tue, Nov 5, 2026 at 2:00 PM PT` -- how the client reads it, in their own zone. */
 function formatMeetingWhen(iso: string | undefined, timeZone: string): string {
@@ -203,9 +199,9 @@ export async function generateConfirmationEmail(
     : resolved.recipientSource;
   const channel = resolveChannel(client, touch);
 
-  const agenda = touch.prepWorkflow?.research?.agenda?.length
+  const agenda = (touch.prepWorkflow?.research?.agenda?.length
     ? touch.prepWorkflow.research.agenda
-    : touch.agenda;
+    : touch.agenda).filter((item) => !internalTaskText(item, blockedTaskTitles(touch)));
 
   const gaps: string[] = [];
   if (!recipient) gaps.push("No client email address. Add the address you use for this client.");
@@ -274,13 +270,6 @@ export async function generateConfirmationEmail(
     "The agenda the preparation produced (the email must reflect these and nothing more):",
     ...agenda.map((item) => `- ${item}`),
     "",
-    "What the client cares about most, from the account review:",
-    ...(touch.prepPack?.focusAreas ?? []).map((item) => `- ${item}`),
-    "",
-    "Things we need from the client (pending items):",
-    ...(touch.prepPack?.openCommitments ?? [])
-      .filter((item) => item.category === "Client")
-      .map((item) => `- ${item.title} (due ${item.dueDate})`),
   ].join("\n");
 
   try {
@@ -291,7 +280,7 @@ export async function generateConfirmationEmail(
     const system = await getPromptText("client_confirmation_email_prompt");
     const { data, model, provider } = await callLlmForJson({
       env,
-      system,
+      system: `${system}\n\n${CLIENT_CONTENT_RULE}`,
       userText,
       maxTokens: 1200,
       temperature: 0.4,
@@ -301,7 +290,7 @@ export async function generateConfirmationEmail(
     if (!subject || !body) {
       throw new Error("the model returned an empty subject or body");
     }
-    return { ...base, subject, body: [body, joinLine, signature.join("\n")].filter(Boolean).join("\n\n"), model, provider };
+    return { ...base, subject, body: [clientText(body), joinLine, signature.join("\n")].filter(Boolean).join("\n\n"), model, provider };
   } catch (error) {
     return {
       ...base,
@@ -350,6 +339,7 @@ export interface SendConfirmationEmailResult {
 export async function sendConfirmationEmail(
   context: TenantContext,
   email: ConfirmationEmailState,
+  blockedTitles: string[] = [],
 ): Promise<SendConfirmationEmailResult> {
   if (email.status === "sent" || email.status === "sent_manually") {
     return {
@@ -359,6 +349,7 @@ export async function sendConfirmationEmail(
     };
   }
 
+  if (internalTaskText(`${email.subject} ${email.body}`, blockedTitles)) return { email: { ...email, status: "failed", lastError: "Keep unfinished tasks in internal notes. Client emails may include completed work only." }, sent: false, message: "Remove unfinished task details before approving this client email." };
   if (email.status !== "approved" && email.status !== "failed") {
     return {
       email,
@@ -381,102 +372,7 @@ export async function sendConfirmationEmail(
     };
   }
 
-  const connection = await getIntegrationConnection(context, "gmail");
-  const attempts = email.deliveryAttempts + 1;
-
-  if (!connection || connection.status !== "connected") {
-    return {
-      email: {
-        ...email,
-        status: "failed",
-        deliveryAttempts: attempts,
-        lastError: "Gmail is not connected in MTOS, so MTOS has no way to send this email.",
-      },
-      sent: false,
-      message:
-        "Gmail is not connected, so MTOS could not send this. Send it yourself from your usual inbox, then press \"I sent this myself\" so the record is accurate.",
-    };
-  }
-
-  const missingScopes = getMissingIntegrationScopes("gmail", connection);
-  if (missingScopes.includes(GMAIL_SEND_SCOPE) || !(connection.scopes || []).includes(GMAIL_SEND_SCOPE)) {
-    return {
-      email: {
-        ...email,
-        status: "failed",
-        deliveryAttempts: attempts,
-        lastError:
-          "The Gmail connection was authorized for reading only, so Google refuses a send on it. Reconnect Gmail in Settings to grant permission to send.",
-      },
-      sent: false,
-      message:
-        "Your Gmail connection can read mail but not send it. Reconnect Gmail in Settings → Integrations to grant sending, or send the email yourself and press \"I sent this myself\".",
-    };
-  }
-
-  const token = getIntegrationCredentials(connection).accessToken;
-  if (!token) {
-    return {
-      email: {
-        ...email,
-        status: "failed",
-        deliveryAttempts: attempts,
-        lastError: "The Gmail connection has no usable access token. Reconnect Gmail in Settings.",
-      },
-      sent: false,
-      message: "Reconnect Gmail in Settings → Integrations, then send again.",
-    };
-  }
-
-  const from = connection.externalAccountId || "me";
-  try {
-    const response = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/messages/send", {
-      method: "POST",
-      headers: {
-        authorization: `Bearer ${token}`,
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({
-        raw: encodeRfc822(from, email.recipient, email.subject, email.body),
-      }),
-    });
-
-    if (!response.ok) {
-      const detail = (await response.text()).slice(0, 300);
-      return {
-        email: {
-          ...email,
-          status: "failed",
-          deliveryAttempts: attempts,
-          lastError: `Gmail refused the send (${response.status}): ${detail}`,
-        },
-        sent: false,
-        message: "Gmail refused the send. The error is recorded above — fix it and send again, or send it yourself.",
-      };
-    }
-
-    return {
-      email: {
-        ...email,
-        status: "sent",
-        sentAt: getNowIso(),
-        sentVia: `Gmail (${from})`,
-        deliveryAttempts: attempts,
-        lastError: undefined,
-      },
-      sent: true,
-      message: `Sent to ${email.recipient}.`,
-    };
-  } catch (error) {
-    return {
-      email: {
-        ...email,
-        status: "failed",
-        deliveryAttempts: attempts,
-        lastError: `The send request failed: ${error instanceof Error ? error.message : "unknown error"}`,
-      },
-      sent: false,
-      message: "The send request failed. Try again, or send it yourself and press \"I sent this myself\".",
-    };
-  }
+  const outcome = await sendGmailMessage(context, { to: email.recipient, subject: email.subject, body: email.body, idempotencyKey: 'confirmation:' + email.idempotencyKey });
+  if (!outcome.sent) return { email: { ...email, status: "failed", deliveryAttempts: email.deliveryAttempts + 1, deliveryUncertain: Boolean(outcome.deliveryUncertain), lastError: outcome.detail }, sent: false, message: outcome.detail };
+  return { email: { ...email, status: "sent", sentAt: getNowIso(), sentVia: outcome.sentVia, gmailMessageId: outcome.messageId, ...(outcome.threadId ? { gmailThreadId: outcome.threadId } : {}), deliveryAttempts: email.deliveryAttempts + 1, deliveryUncertain: false, lastError: undefined }, sent: true, message: outcome.detail };
 }

@@ -1,3 +1,4 @@
+import { clientCallGuide, clientSlides } from "@/src/lib/contracts/client-content";
 /**
  * The live call: its three states, its clock, and how the approved brief becomes what the AM
  * actually reads while the client is talking.
@@ -299,9 +300,10 @@ export function buildGuideParts(options: {
   declinedSections?: string[];
 }): GuidePart[] {
   const declined = new Set(options.declinedSections || []);
-  const kept = (options.sections || [])
-    .map((section, generatedIndex) => ({ section, generatedIndex }))
-    .filter(({ section }) => !(section.sectionId && declined.has(section.sectionId)));
+  const kept = (options.sections || []).flatMap((section, generatedIndex) => {
+    const safe = clientCallGuide({ status: "generated", sections: [section] })?.sections[0];
+    return safe && !(safe.sectionId && declined.has(safe.sectionId)) ? [{ section: safe, generatedIndex: section.generatedIndex ?? generatedIndex }] : [];
+  });
 
   const total = kept.reduce((sum, { section }) => sum + Math.max(1, section.minutes || 1), 0);
   const planned = Math.max(1, Math.round(options.plannedMinutes));
@@ -350,7 +352,7 @@ export function visibleSlides(
   declinedSections?: string[],
 ): PresentationSlide[] {
   const declined = new Set(declinedSections || []);
-  return (slides || []).filter((slide) => !(slide.sectionId && declined.has(slide.sectionId)));
+  return clientSlides(slides).filter((slide) => !(slide.sectionId && declined.has(slide.sectionId)));
 }
 
 // ---------------------------------------------------------------------------

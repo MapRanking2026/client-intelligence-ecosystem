@@ -310,8 +310,9 @@ export function buildRecapEmailHtml(facts: RecapEmailFacts): string {
     `<p style="margin:18px 0 6px">${greeting}</p>`,
     facts.intro ? `<p style="margin:0 0 14px;color:${BODY}">${esc(facts.intro)}</p>` : "",
     winsBlock(facts.wins),
-    commitmentsBlock(facts.commitments),
-    asksBlock(facts.asks),
+    // Approved tickets and client asks are still unfinished work, so stay in internal notes.
+    commitmentsBlock([]),
+    asksBlock([]),
     facts.goalLabel
       ? `<p style="margin:18px 0 0;color:${BODY}">All of it points at the same thing: <span style="font-weight:700;color:${NAVY}">${esc(facts.goalLabel)}</span>.</p>`
       : "",
@@ -352,6 +353,9 @@ export function recapEmailHasBody(html: string): boolean {
 export type RecapDecision = "approved" | "denied" | "deleted";
 
 export interface RecapEmailState {
+  gmailMessageId?: string;
+  gmailThreadId?: string;
+  sentVia?: string;
   subject: string;
   html: string;
   decision?: RecapDecision;

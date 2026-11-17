@@ -248,7 +248,7 @@ export function FollowThroughRecap({
             Rebuild from notes
           </button>
         )}
-        <span className="muted text-[0.78rem]">It sends through your Intercom when you finish the follow-through.</span>
+        <span className="muted text-[0.78rem]">It sends through your connected Gmail account from support@mapranking.com when you finish the follow-through.</span>
       </div>
 
       {error ? (

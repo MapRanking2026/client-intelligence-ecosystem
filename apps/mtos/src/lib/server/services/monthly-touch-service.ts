@@ -1,3 +1,4 @@
+import { clientCallGuide, clientPresentation, clientText, blockedTaskTitles } from "@/src/lib/contracts/client-content";
 import { canDeleteTestTouch } from "@/src/lib/contracts/touch-progress";
 import { randomUUID } from "node:crypto";
 import type { MonthlyTouchRecord } from "@/src/lib/mtos-data";
@@ -67,7 +68,8 @@ export async function getMonthlyTouchWorkspaceView(context: TenantContext, touch
 
   return {
     context,
-    touch: touchWithLeadMix,
+    touch: { ...touchWithLeadMix, callGuide: clientCallGuide(touchWithLeadMix.callGuide, touchWithLeadMix), presentation: clientPresentation(touchWithLeadMix.presentation, touchWithLeadMix),
+      ...(touchWithLeadMix.noShow?.resolution === "loom" ? { noShow: { ...touchWithLeadMix.noShow, presentation: clientPresentation(touchWithLeadMix.noShow.presentation, touchWithLeadMix), script: clientText(touchWithLeadMix.noShow.script, blockedTaskTitles(touchWithLeadMix)) } } : {}) },
     standby: Boolean(touch.noShow?.standbyUntil && Date.parse(touch.noShow.standbyUntil) > Date.now()),
     client,
     commitments,

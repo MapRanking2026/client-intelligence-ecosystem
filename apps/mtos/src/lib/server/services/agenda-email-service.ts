@@ -1,3 +1,4 @@
+import { blockedTaskTitles, internalTaskText, clientText } from "@/src/lib/contracts/client-content";
 import { callLengthMinutes } from "@/src/lib/contracts/live-call";
 import { isTimeZone } from "@/src/lib/contracts/user-preferences";
 import { readAgendaMeeting } from "@/src/lib/server/services/google-meet-service";
@@ -140,7 +141,10 @@ function draftFor(
   const title = preferences.jobTitle?.trim();
   const signature = preferences.emailSignoff?.trim() || (name && title ? `Best regards,\n${name}\n${title} | Map Ranking` : "");
   const meetingZone = meeting?.timeZone;
-  return buildAgendaEmailDraft(touch.prepBrief?.clientAgendaEmail, {
+  const email = touch.prepBrief?.clientAgendaEmail;
+  const blocked = blockedTaskTitles(touch);
+  const safeEmail = email ? { ...email, items: email.items.filter((item) => !internalTaskText(item, blocked)), ask: clientText(email.ask, blocked), subject: clientText(email.subject, blocked) } : undefined;
+  return buildAgendaEmailDraft(safeEmail, {
     businessName: client.name,
     contactName: resolveConfirmationContact(client),
     scheduledAt: meeting?.scheduledAt || touch.scheduledAt || touch.prepPack?.schedule.scheduledAt,

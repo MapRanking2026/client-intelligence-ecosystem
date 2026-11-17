@@ -165,7 +165,7 @@ const plan = approvalPlan({
 check("one line per outward write", plan.length === 4, String(plan.length));
 check("it says how many sections are approved", plan[0].includes("all 14 brief sections"), plan[0]);
 check("it names who the email goes to", plan[1].includes("maya@oaklinedental.test"), plan[1]);
-check("it says the reply comes back to the AM", /reply comes back to you/i.test(plan[1]));
+check("it uses the connected Gmail account and shared reply address", /connected Gmail account/.test(plan[1]) && /replies addressed to support@mapranking.com/.test(plan[1]));
 check("it names the Client's Book page by name", plan[2].includes("Monthly Touch (11/5/2026)"), plan[2]);
 check(
   "and promises the empty write-up subpage inside it",

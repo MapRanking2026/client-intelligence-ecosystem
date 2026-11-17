@@ -172,6 +172,7 @@ export function ReviewBrief({
 
   return (
     <div className="mt-4 grid gap-5 lg:grid-cols-[200px_minmax(0,1fr)] xl:grid-cols-[220px_minmax(0,1fr)]">
+      <p className="card col-span-full" role="note"><strong>Internal team preparation.</strong> This brief includes open tasks, ownership, coaching and evidence gaps. Use the filtered client presentation or call guide when presenting; client-visible work summaries include completed tasks only.</p>
       <Toc sections={sections} />
 
       <div className="min-w-0">

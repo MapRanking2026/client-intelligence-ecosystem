@@ -139,7 +139,7 @@ export function approvalPlan(options: ApprovalPlanOptions): string[] {
     options.alreadySent
       ? `Not send the agenda email again — you already sent it${options.recipient ? ` to ${options.recipient}` : ""}, and it goes out once.`
       : options.sendingEmail
-        ? `Send the agenda email${options.recipient ? ` to ${options.recipient}` : ""} from support@mapranking.com through your own Intercom, so the reply comes back to you.`
+        ? `Send the agenda email${options.recipient ? ` to ${options.recipient}` : ""} from support@mapranking.com through your connected Gmail account, with replies addressed to support@mapranking.com.`
         : "Not send the agenda email — you moved forward without it, so the client is told nothing.",
     `Post the approved brief to the client's Client's Book in ClickUp, as "${options.pageName}" under Client Meetings Notes, and create the empty "Post Monthly Touch Notes" subpage inside it for the write-up after the call.`,
     options.format === "deck"

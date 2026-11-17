@@ -1,4 +1,6 @@
 import { nanoid } from "nanoid";
+import { completePrepBrief, PREP_BRIEF_DEPTH_RULE } from "@/src/lib/contracts/prep-brief-quality";
+import { CLIENT_CONTENT_RULE } from "@/src/lib/contracts/client-content";
 import { z } from "zod";
 
 import type { IntegrationSnapshotRecord } from "@/src/lib/contracts/integration-sync";
@@ -1735,7 +1737,7 @@ async function generateClaudeTouchOutput(
   // Append the editable meeting-variety instruction so the AI shapes this touch to
   // this month's format and never opens the same way as last time. Non-fatal if unset.
   const varietyPrompt = variety ? await getPromptText("meeting_variety_prompt").catch(() => "") : "";
-  const system = varietyPrompt ? `${basePrompt}\n\n---\n\n${varietyPrompt}` : basePrompt;
+  const system = [basePrompt, varietyPrompt, PREP_BRIEF_DEPTH_RULE, CLIENT_CONTENT_RULE].filter(Boolean).join("\n\n");
 
   const varietyDirective = variety
     ? [
@@ -1810,6 +1812,13 @@ async function generateClaudeTouchOutput(
               industry: client.industry,
               contact: client.contact,
               lifecycleStage: client.lifecycleStage,
+              location: client.location,
+              accountManager: client.accountManager,
+              mrr: client.mrr,
+              goals: client.goals,
+              contextNotes: client.contextNotes,
+              riskNote: client.riskNote,
+              tenure: client.tenure,
               healthScore: client.healthScore,
               relationshipScore: client.relationshipScore,
               growthReadiness: client.growthReadiness,
@@ -1839,7 +1848,7 @@ async function generateClaudeTouchOutput(
         // so did 8000 once the models started thinking before they answer and charging that thinking
         // to the same ceiling. The answer itself measures ~2000 tokens; the rest is headroom so that
         // a thoughtful run cannot cost us the JSON.
-        maxTokens: 16000,
+        maxTokens: 32000,
         temperature: 0.2,
   });
   const normalized = normalizeClaudeTouchPayload(llmResult.data);
@@ -2092,7 +2101,7 @@ async function buildPrepPack(
   opportunities: OpportunityRecord[],
   integrationSources: MonthlyTouchPrepPack["integrationSources"],
   rawSnapshots: Map<string, JsonRecord>,
-) {
+): Promise<MonthlyTouchPrepPack> {
   const snapshotMatches = extractMatchedBusinesses(rawSnapshots.get("rank-tracker"), client.id);
   // The pins travel with every Business Profile read below, so a listing pinned on the mapping
   // screen is in force for this preparation whether or not any sync or refresh has run since.
@@ -2163,14 +2172,14 @@ async function buildPrepPack(
     }),
     focusAreas: buildFocusAreas(client, openCommitments, opportunities),
     keyFacts: buildKeyFacts(client, touch, openCommitments, opportunities, integrationSources),
-    openCommitments: openCommitments.slice(0, 5).map((commitment) => ({
+    openCommitments: openCommitments.map((commitment) => ({
       title: commitment.title,
       owner: commitment.owner,
       dueDate: commitment.dueDate,
       status: commitment.status,
       category: commitment.category,
     })),
-    activeOpportunities: opportunities.slice(0, 5).map((opportunity) => ({
+    activeOpportunities: opportunities.map((opportunity) => ({
       title: opportunity.title,
       stage: opportunity.stage,
       value: opportunity.value,
@@ -2369,6 +2378,7 @@ export async function prepareMonthlyTouch(
 
   // The brief the AM reviews. Absent until a run of the v2 preparation prompt returns it; the
   // review screen then says which sections were not written rather than showing a blank page.
+  prepPack.completedCommitments = commitments.filter((item) => item.status === "Completed").map(({ title, owner, dueDate, status, category }) => ({ title, owner, dueDate, status, category }));
   let prepBrief: PrepBrief | undefined;
 
   if (options.includeClaude && hasAnyLlmProvider(env)) {
@@ -2417,6 +2427,7 @@ export async function prepareMonthlyTouch(
     );
   }
 
+  prepBrief = completePrepBrief(prepBrief, prepPack, client);
   const derivedOpportunities = buildOpportunities(client, opportunities);
   const derivedCommitments = buildCommitmentList(commitments);
 

@@ -1,3 +1,4 @@
+import { blockedTaskTitles } from "@/src/lib/contracts/client-content";
 import { loomReady } from "@/src/lib/contracts/no-show";
 import { FieldValue } from "firebase-admin/firestore";
 import type { TenantContext } from "@/src/lib/contracts/mtos";
@@ -38,9 +39,8 @@ import {
   getListMembers,
   matchOption,
 } from "@/src/lib/server/services/clickup-fields";
-import { sendAgendaEmailViaIntercom } from "@/src/lib/server/services/intercom-send-service";
+import { sendClientEmail } from "@/src/lib/server/services/client-email-service";
 import { getNowIso } from "@/src/lib/server/services/mtos-ai";
-import { clientEmailSenderAddress } from "@/src/lib/server/services/user-service";
 import { hasPermission } from "@/src/lib/server/services/integration-permissions-service";
 import { handTouchToQc } from "@/src/lib/server/services/qc-handoff-service";
 
@@ -316,7 +316,7 @@ async function fileNotes(state: StepContext): Promise<StepResult> {
 
   const loomHeader = state.touch.noShow?.resolution === "loom" ? `No-Show / Loom Video Update
 Loom recording: ${state.touch.noShow.url}
-Client email: ${state.touch.noShow.sendStatus} (${state.touch.noShow.conversationId})
+Client email: ${state.touch.noShow.sendStatus} (${state.touch.noShow.gmailMessageId || state.touch.noShow.conversationId})
 
 ` : "";
   const markdown = loomHeader + renderNotesMarkdown(filtered, { ticketLinks, createdTickets });
@@ -516,9 +516,10 @@ async function sendRecap(state: StepContext): Promise<StepResult> {
     return step("recap", "skipped", "The recap already went out, so it was not sent again.");
   }
 
-  const outcome = await sendAgendaEmailViaIntercom(state.context, {
-    accountManagerEmail: await clientEmailSenderAddress(state.context),
+  const outcome = await sendClientEmail(state.context, {
+    idempotencyKey: `monthly-touch:${state.touch.id}:recap`,
     recipient: state.client.contact || "",
+    blockedTaskTitles: blockedTaskTitles(state.touch),
     subject: recap.subject,
     html: recap.html,
     label: "recap email",
@@ -528,9 +529,9 @@ async function sendRecap(state: StepContext): Promise<StepResult> {
     return step("recap", "warning", outcome.detail);
   }
   await persistProgress(state.context, state.touch.id, {
-    recap: { ...recap, sentAt: getNowIso() },
+    recap: { ...recap, sentAt: getNowIso(), gmailMessageId: outcome.messageId, ...(outcome.threadId ? { gmailThreadId: outcome.threadId } : {}), sentVia: outcome.sentVia },
   });
-  return step("recap", "done", "Sent through your Intercom.");
+  return step("recap", "done", outcome.detail);
 }
 
 // ---------------------------------------------------------------------------

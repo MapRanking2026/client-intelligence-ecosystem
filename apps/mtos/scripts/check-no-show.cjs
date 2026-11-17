@@ -37,7 +37,8 @@ const mocks = {
   './presentation-service': { generatePresentation: async () => ({ touch: { presentation } }) },
   './google-meet-service': { readRescheduleAvailability: async () => ({ durationMinutes: 30, until: new Date(Date.now() + 30 * 86400000).toISOString(), busy: [] }), rescheduleLinkedEvent: async (_, eventId) => { assert.equal(eventId, 'existing-event'); if (calendarFails) throw Error('Calendar failed'); patches++; } },
   './confirmation-email-service': { resolveRecipient: () => ({ recipient: 'client@example.com' }) },
-  './intercom-send-service': { sendAgendaEmailViaIntercom: async () => { sends++; return sendOutcome; }, verifyLoomEmailAccepted: async () => 'verified-conversation' },
+  './client-email-service': { sendClientEmail: async () => { sends++; return sendOutcome; }, verifyClientEmailAccepted: async () => ({ sent: true, messageId: 'verified-gmail-message' }) },
+  './intercom-send-service': { verifyLoomEmailAccepted: async () => 'verified-conversation' },
   './user-service': { getAccountManagerProfile: async () => ({ name: 'AM', timeZone: 'America/Los_Angeles' }), getAccountManagerPreferences: async () => ({ emailSignoff: 'Regards,\nAM' }), clientEmailSenderAddress: async () => 'am@example.com' },
 };
 Module._load = function (request, parent, ...rest) {
@@ -51,7 +52,7 @@ const context = { tenantId: 'tenant', userId: 'am' };
 const run = (action) => runNoShowAction(context, 'touch', action);
 function reset() {
   records = new Map([['touch', { id: 'touch', clientId: 'client', progress: 'live', calendarEventId: 'existing-event', prepPack: { finalized: true }, prepBrief: { important: 'Preserved' }, review: { approvedAt: '2026-01-01', declinedSections: [] }, live: { notes: { old: 'Historical note' } } }], ['artifact', { payload: 'Old transcript' }]]);
-  sends = patches = 0; calendarFails = false; sendOutcome = { sent: true, conversationId: 'conversation' };
+  sends = patches = 0; calendarFails = false; sendOutcome = { sent: true, messageId: 'gmail-message' };
 }
 async function prepareLoom() {
   await run({ action: 'select', resolution: 'loom' });
@@ -96,6 +97,7 @@ async function prepareLoom() {
   assert.ok(Date.parse(rescheduled.noShow.standbyUntil) < Date.parse(date));
   console.log('PASS reschedule failure preserves live state; success archives and resets only after event update');
   reset(); await prepareLoom();
+  await assert.rejects(run({ action: 'save', script: 'We have pending tasks to discuss.', url: 'https://www.loom.com/share/abc123' }), /unfinished tasks/);
   assert.equal(sends, 0); assert.equal(records.get('touch').progress, 'live');
   assert.match(records.get('touch').noShow.email.html, /loom.com\/share\/abc123/);
   assert.match(records.get('touch').noShow.email.html, /Regards/);
@@ -112,7 +114,7 @@ async function prepareLoom() {
   sendOutcome = { sent: false, detail: 'Not connected' };
   await assert.rejects(run({ action: 'send', approved: true }), /Not connected/);
   assert.equal(records.get('touch').progress, 'live'); assert.equal(records.get('touch').noShow.sendStatus, 'failed');
-  sendOutcome = { sent: true, conversationId: 'retry-conversation' };
+  sendOutcome = { sent: true, messageId: 'retry-gmail-message' };
   await run({ action: 'send', approved: true }); assert.equal(sends, 2);
   reset(); await prepareLoom(); sendOutcome = { sent: false, detail: 'Timeout', deliveryUncertain: true };
   await assert.rejects(run({ action: 'send', approved: true }), /Timeout/);
@@ -120,9 +122,14 @@ async function prepareLoom() {
   assert.equal(records.get('touch').progress, 'live');
   await run({ action: 'reconcile' });
   assert.equal(records.get('touch').progress, 'follow');
-  assert.equal(records.get('touch').noShow.conversationId, 'verified-conversation');
+  assert.equal(records.get('touch').noShow.gmailMessageId, 'verified-gmail-message');
   assert.equal(sends, 1, 'read-only reconciliation does not send again');
   console.log('PASS safe failure retries; ambiguous delivery cannot send twice');
+  reset(); await prepareLoom(); records.get('touch').noShow.sendStatus = 'unknown';
+  await run({ action: 'reconcile' });
+  assert.equal(records.get('touch').noShow.conversationId, 'verified-conversation');
+  assert.equal(sends, 0, 'historical Intercom reconciliation must never send a new Gmail message');
+  console.log('PASS historical Intercom receipts remain reconcilable after the Gmail switch');
   reset(); records.get('touch').noShowBusy = 'in-flight';
   await assert.rejects(run({ action: 'select', resolution: 'loom' }), /in progress/);
   console.log('PASS in-flight claims reject concurrent no-show mutations');

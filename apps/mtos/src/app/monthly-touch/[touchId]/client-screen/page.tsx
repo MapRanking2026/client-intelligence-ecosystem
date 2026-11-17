@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 
 import { ClientScreen } from "@/src/components/mtos/client-screen";
 import { resolveTenantContext } from "@/src/lib/auth/resolve-tenant-context";
+import { clientPresentation } from "@/src/lib/contracts/client-content";
 import { visibleSlides } from "@/src/lib/contracts/live-call";
 import { getMonthlyTouchWorkspaceView } from "@/src/lib/server/services/monthly-touch-service";
 
@@ -38,7 +39,7 @@ export default async function ClientScreenPage({ params }: { params: Promise<{ t
   if (!payload) notFound();
 
   const { touch } = payload;
-  const slides = visibleSlides(touch.presentation?.slides, touch.review?.declinedSections);
+  const slides = visibleSlides(clientPresentation(touch.presentation, touch)?.slides, touch.review?.declinedSections);
 
   return (
     <ClientScreen

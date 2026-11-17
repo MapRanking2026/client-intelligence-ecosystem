@@ -1,3 +1,4 @@
+import { resolveClientTimeZone } from "@/src/lib/contracts/client-time-zone";
 import { blockedTaskTitles, clientText, internalTaskText } from "@/src/lib/contracts/client-content";
 import type { TenantContext } from "@/src/lib/contracts/mtos";
 import {
@@ -20,9 +21,9 @@ import { getAccountManagerPreferences, getAccountManagerProfile } from "@/src/li
  * one thing MTOS cannot supply is covered below.
  */
 
-/** `Mon, 2 November` in the AM's own zone. */
-function dayLabel(iso: string | undefined, timeZone: string): string {
-  if (!iso) return "";
+/** `Mon, 2 November` in the client's recorded zone. */
+function dayLabel(iso: string | undefined, timeZone: string | undefined): string {
+  if (!iso || !timeZone) return "";
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return "";
   return new Intl.DateTimeFormat("en-GB", {
@@ -80,7 +81,7 @@ export async function buildFollowThroughRecap(
     getAccountManagerPreferences(context),
   ]);
   const env = getServerEnv();
-  const timeZone = profile.timeZone;
+  const timeZone = resolveClientTimeZone(client).timeZone;
 
   // The next check-in is only named when one is actually on the calendar. Booking it is the last
   // step of the follow-through, so on most runs this is empty and the email simply does not

@@ -1,4 +1,5 @@
 import { NextResponse, after } from "next/server";
+import { saveClientTimeZone } from "@/src/lib/server/services/client-time-zone-service";
 import { z } from "zod";
 
 import { resolveTenantContext } from "@/src/lib/auth/resolve-tenant-context";
@@ -482,6 +483,7 @@ const touchRequestSchema = z.discriminatedUnion("action", [
     approving sends one email, and pressing this twice sends one email.
   */
   z.object({ action: z.literal("send_agenda_email") }),
+  z.object({ action: z.literal("set_client_time_zone"), timeZone: z.string().min(1).max(100) }),
   // The one approval at the end of the review step. Everything it does leaves MTOS, so it happens
   // only on this explicit request and never as a side effect of loading a screen.
   z.object({
@@ -573,6 +575,9 @@ export async function POST(
     let result: unknown;
 
     switch (payload.action) {
+      case "set_client_time_zone":
+        result = await saveClientTimeZone(context, touchId, payload.timeZone);
+        break;
       case "start_new_touch":
         result = await startNewMonthlyTouch(context, touch, payload);
         break;

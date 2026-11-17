@@ -76,7 +76,9 @@
     "check:no-show-ui": "node scripts/check-no-show-ui.cjs",
     "check:client-content": "tsx scripts/check-client-content.ts",
     "check:client-content-ui": "node scripts/check-client-content-ui.cjs",
-    "check:gmail-transport": "node scripts/check-gmail-transport.cjs"
+    "check:gmail-transport": "node scripts/check-gmail-transport.cjs",
+    "check:email-client-zone": "tsx scripts/check-email-client-zone.ts",
+    "check:email-send-fixes": "node scripts/check-email-send-fixes.cjs"
   },
   "dependencies": {
     "@cie/engine": "*",

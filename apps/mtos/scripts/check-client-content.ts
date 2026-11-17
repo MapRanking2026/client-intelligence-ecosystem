@@ -71,7 +71,7 @@ async function main() {
   const email = buildRecapEmailDraft({ businessName: "Synthetic Client", contactName: "Test", metLabel: "Nov 17", nextCheckInLabel: "", nextCheckInUrl: "", accountManagerName: "AM", signoff: "Regards, AM", wins: [{ what: "Updated service categories", shipped: "" }] }, notes,
     [{ id: "new-ticket", formType: "ticket", taskName: "Investigate pending task", description: "Unfinished", dueDate: "2026-11-25", decision: "approved" }]);
   assert.ok(!email.html.includes("Investigate pending task")); assert.ok(!email.html.includes("Pending client photos")); assert.ok(email.html.includes("Updated service categories"));
-  const agenda = buildAgendaEmailDraft({ channel: "email", whiteLabel: false, subject: "Monthly review", items: ["Performance results", "Review pending tasks"], ask: "Chase overdue ticket", length: "30 minutes", link: "", signoff: "AM", blockingGaps: [] }, { businessName: "Synthetic Client", timeZone: "America/Los_Angeles", timeZoneIsClients: false, accountManagerName: "AM", signoff: "Regards, AM" });
+  const agenda = buildAgendaEmailDraft({ channel: "email", whiteLabel: false, subject: "Monthly review", items: ["Performance results", "Review pending tasks"], ask: "Chase overdue ticket", length: "30 minutes", link: "", signoff: "AM", blockingGaps: [] }, { businessName: "Synthetic Client", timeZone: "America/Los_Angeles", timeZoneIsClients: true, accountManagerName: "AM", signoff: "Regards, AM" });
   assert.ok(!agenda.html.includes("pending tasks")); assert.ok(!agenda.html.includes("overdue ticket"));
   console.log("PASS client recap/agenda exclude unfinished approved tickets and client-side asks");
 

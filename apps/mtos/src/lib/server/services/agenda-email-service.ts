@@ -1,6 +1,6 @@
 import { blockedTaskTitles, internalTaskText, clientText } from "@/src/lib/contracts/client-content";
 import { callLengthMinutes } from "@/src/lib/contracts/live-call";
-import { isTimeZone } from "@/src/lib/contracts/user-preferences";
+import { resolveClientTimeZone } from "@/src/lib/contracts/client-time-zone";
 import { readAgendaMeeting } from "@/src/lib/server/services/google-meet-service";
 import type { TenantContext } from "@/src/lib/contracts/mtos";
 import {
@@ -8,6 +8,8 @@ import {
   buildAgendaEmailDraft,
   isAgendaRecipient,
   sanitizeAgendaEmailHtml,
+  refreshAgendaSchedule,
+  agendaSubjectInClientZone,
   type AgendaEmailDraft,
 } from "@/src/lib/contracts/agenda-email";
 import type { ClientRecord, MonthlyTouchRecord, TouchAgendaEmailState } from "@/src/lib/mtos-data";
@@ -99,11 +101,13 @@ export async function readAgendaEmail(
     };
   }
 
-  const draft = draftFor(touch, client, profile.timeZone, preferences, profile.name, meeting);
-  const html = stored?.html?.trim() || draft.html;
+  const zone = resolveClientTimeZone(client);
+  const draft = draftFor(touch, client, preferences, profile.name, meeting);
+  const html = stored?.html?.trim() ? refreshAgendaSchedule(stored.html, draft.facts) : draft.html;
   const gaps = stored?.html?.trim()
     ? agendaEmailHasBody(html) ? [] : ["Write the email body before sending."]
     : [...draft.blockingGaps];
+  if (!zone.timeZone && !gaps.some((gap) => /client's time zone/i.test(gap))) gaps.push(zone.source);
   if (!isAgendaRecipient(recipient)) {
     gaps.push(
       recipient ? "Enter a valid email address in To." : "Enter the client's email address in To.",
@@ -112,8 +116,11 @@ export async function readAgendaEmail(
 
   return {
     state: {
-      subject: stored?.subject?.trim() || draft.subject,
+      subject: agendaSubjectInClientZone(stored?.subject?.trim() || draft.subject, draft.facts),
       html,
+      ...(zone.timeZone ? { timeZone: zone.timeZone } : {}),
+      timeZoneSource: zone.source,
+      ...(meeting?.scheduledAt || touch.scheduledAt ? { scheduledAt: meeting?.scheduledAt || touch.scheduledAt } : {}),
       recipient,
       recipientSource,
       ...(ccEnabled && availableCc.length ? { cc: availableCc.join(", ") } : {}),
@@ -131,7 +138,6 @@ export async function readAgendaEmail(
 function draftFor(
   touch: MonthlyTouchRecord,
   client: ClientRecord,
-  timeZone: string,
   preferences: AccountManagerPreferences,
   accountManagerName: string,
   meeting: Awaited<ReturnType<typeof readAgendaMeeting>>,
@@ -140,7 +146,7 @@ function draftFor(
   const name = accountManagerName || client.accountManager || "";
   const title = preferences.jobTitle?.trim();
   const signature = preferences.emailSignoff?.trim() || (name && title ? `Best regards,\n${name}\n${title} | Map Ranking` : "");
-  const meetingZone = meeting?.timeZone;
+  const zone = resolveClientTimeZone(client);
   const email = touch.prepBrief?.clientAgendaEmail;
   const blocked = blockedTaskTitles(touch);
   const safeEmail = email ? { ...email, items: email.items.filter((item) => !internalTaskText(item, blocked)), ask: clientText(email.ask, blocked), subject: clientText(email.subject, blocked) } : undefined;
@@ -148,8 +154,8 @@ function draftFor(
     businessName: client.name,
     contactName: resolveConfirmationContact(client),
     scheduledAt: meeting?.scheduledAt || touch.scheduledAt || touch.prepPack?.schedule.scheduledAt,
-    timeZone: isTimeZone(meetingZone) ? meetingZone : timeZone,
-    timeZoneIsClients: false,
+    timeZone: zone.timeZone,
+    timeZoneIsClients: Boolean(zone.timeZone),
     meetingUrl: meeting?.meetingUrl || touch.googleMeeting?.meetingUrl,
     lengthMinutes: meeting?.lengthMinutes || callLengthMinutes(preferences.callLengthMinutes),
     signoff: signature,

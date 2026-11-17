@@ -1,7 +1,8 @@
+import { saveClientTimeZone } from "@/src/lib/server/services/client-time-zone-service";
+import { resolveClientTimeZone } from "@/src/lib/contracts/client-time-zone";
 import { blockedTaskTitles } from "@/src/lib/contracts/client-content";
 import { getAccountManagerPreferences, getAccountManagerProfile } from "@/src/lib/server/services/user-service";
 import { readAgendaMeeting } from "@/src/lib/server/services/google-meet-service";
-import { isTimeZone } from "@/src/lib/contracts/user-preferences";
 import type { TenantContext } from "@/src/lib/contracts/mtos";
 import {
   emptyPrepWorkflowState,
@@ -500,11 +501,11 @@ export async function generateConfirmationEmailStage(
   const name = profile.name || client.accountManager || "";
   const title = preferences.jobTitle?.trim();
   const signature = preferences.emailSignoff?.trim() || (name && title ? `Best regards,\n${name}\n${title} | Map Ranking` : "");
-  const meetingZone = meeting?.timeZone;
+  if (options.timeZone) await saveClientTimeZone(context, touchId, options.timeZone);
   if (before.confirmationEmail?.deliveryUncertain) throw new Error("The previous Gmail send has unresolved delivery. Retry the existing send to reconcile Gmail Sent before generating a new draft.");
   const email = await generateConfirmationEmail(touch, client, {
     ...options,
-    timeZone: options.timeZone || (isTimeZone(meetingZone) ? meetingZone : profile.timeZone),
+    ...(options.timeZone ? { timeZone: options.timeZone } : {}),
     accountManagerName: name,
     signature,
     ...(meeting?.scheduledAt ? { scheduledAt: meeting.scheduledAt } : {}),
@@ -561,6 +562,10 @@ export async function approveConfirmationEmailStage(
   }
 
   if (email.deliveryUncertain) throw new Error("This Gmail send has unresolved delivery. Retry the existing send to check Gmail Sent before editing or approving a new version.");
+  if (edits.timeZone?.trim() && edits.timeZone.trim() !== email.timeZone) {
+    await saveClientTimeZone(context, touchId, edits.timeZone);
+    throw new Error("Client time zone saved. Generate the confirmation again so its date and time are updated before approval.");
+  }
   const subject = edits.subject.trim();
   const body = edits.body.trim();
   if (!subject || !body) {
@@ -676,7 +681,7 @@ export async function sendConfirmationEmailStage(
   context: TenantContext,
   touchId: string,
 ): Promise<PrepStageResult> {
-  const { touch } = await loadTouch(context, touchId);
+  const { touch, client } = await loadTouch(context, touchId);
   const before = workflowOf(touch);
   assertStageOpen(before, "confirmation_email");
 
@@ -688,6 +693,8 @@ export async function sendConfirmationEmailStage(
     );
   }
 
+  const zone = resolveClientTimeZone(client);
+  if (email.status !== "sent" && email.status !== "sent_manually" && (!zone.timeZone || email.timeZone !== zone.timeZone)) throw new Error("Generate the confirmation again using the client’s saved time zone before sending.");
   const result = await sendConfirmationEmail(context, email, blockedTaskTitles(touch));
   const workflow: PrepWorkflowState = {
     ...before,

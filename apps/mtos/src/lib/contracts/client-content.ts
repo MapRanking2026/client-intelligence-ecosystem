@@ -1,3 +1,4 @@
+import { htmlToMarkdown, markdownToPlainText } from "@/src/lib/contracts/rich-text";
 import type { CallGuide, MonthlyTouchRecord, Presentation, PresentationSlide } from "@/src/lib/mtos-data";
 
 export const CLIENT_CONTENT_RULE = "CLIENT VISIBILITY RULE: Open, pending, proposed, overdue, in-progress, blocked, unverified and future tasks/tickets/commitments are INTERNAL ONLY, including client-side tasks. Do not mention them in slides, guides, scripts, agendas, email, tables, headings or presenter notes. Work-delivery summaries may contain only tasks explicitly verified completed. Approval is not completion. Keep factual performance results, including declines, accurate. Never relabel unfinished work as completed.";
@@ -6,16 +7,36 @@ export function completedStatus(status: unknown): boolean {
   return typeof status === "string" && /^(completed?|done|finished|delivered|shipped)$/i.test(status.trim());
 }
 
-/** Also protects older generated content and manually edited public drafts. */
+/** Validate rendered content by paragraph/list/table row, never CSS, links or HTML comments. */
+export function clientContentViolations(text: string, blockedTitles: string[] = []): { text: string; reason: string }[] {
+  const visible = /<\/?[a-z][^>]*>/i.test(text)
+    ? htmlToMarkdown(text.replace(/<!--[\s\S]*?-->/g, "").replace(/<(style|script)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, "").replace(/&#x([0-9a-f]+);/gi, (_, code) => {
+        const point = parseInt(code, 16); return point > 0 && point <= 0x10ffff ? String.fromCodePoint(point) : "";
+      })) : text;
+  const blocks = visible.split(/\n+/).map((line) => markdownToPlainText(line).replace(/\s+/g, " ").trim()).filter(Boolean);
+  const specificTitles = blockedTitles.map((title) => title.trim()).filter((title) => {
+    const words = title.toLowerCase().match(/[\p{L}\p{N}]+/gu) || [];
+    const meaningful = words.filter((word) => !/^(the|a|an|and|or|for|of|to|with|client|monthly|touch|meeting|call|agenda|report|update|review|google|ads|seo|photos|offer|preparation)$/i.test(word));
+    return title.length >= 8 && words.length >= 2 && meaningful.length > 0;
+  });
+  return blocks.flatMap((plain) => {
+    const task = /\b(?:tasks?|tickets?|commitments?|backlog|deliverables?|action items?)\b/i.test(plain);
+    const unfinished = /\b(?:pending|overdue|in[ -]progress|not[ -]started|awaiting|start me|to[ -]do|todo|unfinished|incomplete)\b|still open|not (?:yet )?(?:done|completed|delivered|shipped)/i.test(plain);
+    const internal = /internal[ -]only|internal preparation|team only|do not (?:show|share|present)/i.test(plain);
+    const delivery = /\b(?:we|I) (?:owe|need to)|\b(?:we|I)(?: will|'ll|’ll)\b.{0,50}\b(?:deliver|complete|fix|refresh|investigate|build|finish|implement|publish|upload)\b/i.test(plain);
+    const progress = /\b(?:working on|underway|under review|needs to be (?:done|fixed|completed))\b/i.test(plain) && /\b(?:task|ticket|report|scan|website|page|schema|citation|project|deliverable|fix)\b/i.test(plain);
+    const proposal = /\bproposed\b/i.test(plain) && /\b(?:task|ticket|scan|refresh|fix|deliverable|project)\b/i.test(plain);
+    const openTask = /\b(?:open|outstanding)\b.{0,45}\b(?:tasks?|tickets?|items?|promises?|commitments?)\b|\b(?:tasks?|tickets?|items?|promises?|commitments?)\b.{0,45}\b(?:open|outstanding)\b/i.test(plain);
+    const named = specificTitles.some((title) => plain.toLowerCase().includes(title.toLowerCase()));
+    if (internal || unfinished || delivery || progress || proposal || openTask || named || (task && !/\b(?:completed?|delivered|done|finished|shipped)\b/i.test(plain))) {
+      return [{ text: plain.slice(0, 180), reason: named ? "Named unfinished work" : "Unfinished task details" }];
+    }
+    return [];
+  });
+}
+
 export function internalTaskText(text: string, blockedTitles: string[] = []): boolean {
-  if (/<(?:td|span|strong|b)\b[^>]*>\s*(?:open|pending|proposed|start me|to do|in progress)\s*<\//i.test(text)) return true;
-  const plain = text.replace(/<[^>]*>/g, " ").replace(/[_*]+/g, " ").replace(/\s+/g, " ");
-  if (/internal[ -]only|internal preparation|team only|do not (?:show|share|present)|still open|not (?:yet )?(?:done|completed|delivered)|\b(?:pending|overdue|in.progress|not.started|awaiting|proposed|start me|to do|todo|blocked)\b/i.test(plain)) return true;
-  if (/\b(?:working on|underway|under review|not yet shipped|needs to be (?:done|fixed|completed))\b/i.test(plain)) return true;
-  if (/\b(?:tasks?|tickets?|commitments?)\b/i.test(plain) && !/\b(?:completed?|delivered|done|finished|shipped)\b/i.test(plain)) return true;
-  if (/\b(?:open|outstanding|unfinished|incomplete|future)\b.{0,70}\b(?:tasks?|tickets?|items?|promises?|commitments?|reports?)\b|\b(?:tasks?|tickets?|items?|promises?|commitments?)\b.{0,70}\b(?:open|outstanding|unfinished|incomplete)\b|\b(?:(?:we|I) (?:owe|need to)|due (?:on|by)|new date to follow)\b|\b(?:we|I)(?: will|'ll|’ll)\b.{0,50}\b(?:send|deliver|complete|fix|refresh|investigate|build|create|finish|implement|publish|upload|provide)\b/i.test(plain)) return true;
-  const normalized = plain.toLowerCase();
-  return blockedTitles.some((title) => title.trim().length >= 4 && normalized.includes(title.trim().toLowerCase()));
+  return clientContentViolations(text, blockedTitles).length > 0;
 }
 
 export function blockedTaskTitles(touch: MonthlyTouchRecord): string[] {

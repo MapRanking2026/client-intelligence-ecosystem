@@ -480,6 +480,8 @@ export interface ClickupClientContext {
 }
 
 export interface ClientRecord {
+  /** Explicit client time zone; never inferred from the AM/calendar's zone. */
+  timeZone?: string;
   /** Explicit attendee addresses for reliable Google Calendar client matching. */
   googleMeetingEmails?: string[];
   id: string;
@@ -1336,6 +1338,9 @@ export interface TouchCoachingChoice {
 
 /** The client-facing agenda email, sent using the AM's connected Gmail account. */
 export interface TouchAgendaEmailState {
+  timeZone?: string;
+  timeZoneSource?: string;
+  scheduledAt?: string;
   subject: string;
   html: string;
   /** The AM said it is already sent, or should not be sent at all. */

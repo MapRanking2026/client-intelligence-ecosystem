@@ -1,3 +1,4 @@
+import { resolveClientTimeZone } from "@/src/lib/contracts/client-time-zone";
 import { CLIENT_CONTENT_RULE, blockedTaskTitles, clientText, internalTaskText } from "@/src/lib/contracts/client-content";
 import { emailSignatureLines } from "@/src/lib/contracts/agenda-email";
 import { nanoid } from "nanoid";
@@ -46,7 +47,7 @@ function formatMeetingWhen(iso: string | undefined, timeZone: string): string {
     }).format(date);
   } catch {
     // An unknown zone string must not take the whole stage down; fall back and let the gap list say so.
-    return new Intl.DateTimeFormat("en-US", { dateStyle: "full", timeStyle: "short" }).format(date);
+    return "—";
   }
 }
 
@@ -142,24 +143,6 @@ function resolveChannel(client: ClientRecord, touch: MonthlyTouchRecord): string
   return "Email — no channel preference is recorded for this client, so this is the default, not a confirmed choice";
 }
 
-/**
- * The time zone the meeting time is stated in.
- *
- * MTOS has no client time-zone field, so this is the Map Ranking working zone until the AM sets it.
- * It is labelled as that rather than presented as the client's zone: a confirmation email that
- * states the wrong hour is the one mistake this step exists to prevent.
- */
-function resolveTimeZone(override?: string): { timeZone: string; timeZoneSource: string } {
-  if (override?.trim()) {
-    return { timeZone: override.trim(), timeZoneSource: "Set by the account manager for this client." };
-  }
-  return {
-    timeZone: "America/Los_Angeles",
-    timeZoneSource:
-      "Map Ranking's working time zone. MTOS has no time zone on file for this client — check it is the client's zone before sending.",
-  };
-}
-
 export interface GenerateConfirmationEmailOptions {
   /** The AM can set the client's real zone; it is carried into the stated meeting time. */
   timeZone?: string;
@@ -184,14 +167,16 @@ export async function generateConfirmationEmail(
 ): Promise<ConfirmationEmailState> {
   const generatedAt = getNowIso();
   const env = getServerEnv();
-  const { timeZone, timeZoneSource } = resolveTimeZone(options.timeZone);
+  const resolvedZone = resolveClientTimeZone(client, options.timeZone);
+  const timeZone = resolvedZone.timeZone;
+  const timeZoneSource = resolvedZone.source;
   const scheduledAt = options.scheduledAt || touch.scheduledAt || touch.prepPack?.schedule.scheduledAt;
   const link = options.meetingUrl || touch.googleMeeting?.meetingUrl || "";
   const joinLine = /^https:\/\//i.test(link) ? `Join meeting: ${link}` : "";
   const signature = emailSignatureLines(options.signature, options.accountManagerName || client.accountManager);
   const contact = resolveConfirmationContact(client);
   const greeting = contact || "there";
-  const meetingWhen = formatMeetingWhen(scheduledAt, timeZone);
+  const meetingWhen = timeZone ? formatMeetingWhen(scheduledAt, timeZone) : "—";
   const resolved = resolveRecipient(client, touch);
   const recipient = options.recipient?.trim() || resolved.recipient;
   const recipientSource = options.recipient?.trim()
@@ -205,14 +190,14 @@ export async function generateConfirmationEmail(
 
   const gaps: string[] = [];
   if (!recipient) gaps.push("No client email address. Add the address you use for this client.");
-  if (meetingWhen === "—") {
+  if (!scheduledAt || Number.isNaN(Date.parse(scheduledAt))) {
     gaps.push(
       "This touch has no scheduled date and time, so the email cannot state when the call is. Set the meeting time first.",
     );
   }
-  if (!options.timeZone) {
+  if (!timeZone) {
     gaps.push(
-      "The meeting time is stated in Map Ranking's time zone. Confirm the client's zone, or set it, before sending.",
+      "No verified client time zone is recorded. Set the client’s time zone before sending.",
     );
   }
 
@@ -220,7 +205,7 @@ export async function generateConfirmationEmail(
     channel,
     recipient,
     recipientSource,
-    timeZone,
+    timeZone: timeZone || "",
     timeZoneSource,
     meetingWhen,
     status: "draft",

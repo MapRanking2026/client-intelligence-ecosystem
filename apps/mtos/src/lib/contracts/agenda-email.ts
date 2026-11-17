@@ -1,4 +1,5 @@
 import { internalTaskText } from "@/src/lib/contracts/client-content";
+import { clientZone } from "@/src/lib/contracts/client-time-zone";
 import type { ClientAgendaEmail } from "@/src/lib/contracts/prep-brief";
 
 /**
@@ -138,9 +139,9 @@ export interface AgendaEmailSourceFacts {
   contactName?: string;
   /** The scheduled start of the call, ISO. Absent is a blocking gap, never a guessed date. */
   scheduledAt?: string;
-  /** The zone the date and time are stated in -- the client's when we hold it, ours when we do not. */
-  timeZone: string;
-  /** True when `timeZone` is the client's own, false when it is Map Ranking's working zone. */
+  /** The client's recorded IANA zone. An unknown client zone blocks sending. */
+  timeZone?: string;
+  /** True only when `timeZone` is recorded for this client; working/calendar zones are insufficient. */
   timeZoneIsClients: boolean;
   meetingUrl?: string;
   /** Planned call length in minutes, when the touch has one. */
@@ -170,7 +171,7 @@ function formatInZone(iso: string, timeZone: string, options: Intl.DateTimeForma
     return new Intl.DateTimeFormat("en-US", { timeZone, ...options }).format(date);
   } catch {
     // An unusable zone string must not take the draft down; the gap list says the zone is unknown.
-    return new Intl.DateTimeFormat("en-US", options).format(date);
+    return "";
   }
 }
 
@@ -196,6 +197,8 @@ export function buildAgendaEmailDraft(
   source: AgendaEmailSourceFacts,
 ): AgendaEmailDraft {
   const gaps: string[] = [];
+  const timeZone = source.timeZoneIsClients ? clientZone(source.timeZone) : undefined;
+  if (!timeZone) gaps.push("Set the client's time zone before sending. The calendar or account manager's time zone is not a substitute.");
 
   const scheduled = source.scheduledAt && !Number.isNaN(new Date(source.scheduledAt).getTime())
     ? source.scheduledAt
@@ -206,14 +209,14 @@ export function buildAgendaEmailDraft(
     );
   }
 
-  const dateLabel = scheduled
-    ? formatInZone(scheduled, source.timeZone, { weekday: "short", month: "long", day: "numeric" })
+  const dateLabel = scheduled && timeZone
+    ? formatInZone(scheduled, timeZone, { weekday: "short", month: "long", day: "numeric" })
     : "";
-  const timeLabel = scheduled
-    ? formatInZone(scheduled, source.timeZone, { hour: "numeric", minute: "2-digit", timeZoneName: "short" })
+  const timeLabel = scheduled && timeZone
+    ? formatInZone(scheduled, timeZone, { hour: "numeric", minute: "2-digit", timeZoneName: "short" })
     : "";
-  const monthLabel = scheduled
-    ? formatInZone(scheduled, source.timeZone, { month: "long", year: "numeric" })
+  const monthLabel = scheduled && timeZone
+    ? formatInZone(scheduled, timeZone, { month: "long", year: "numeric" })
     : "";
 
   const items = email?.items?.filter((item) => item.trim() && !internalTaskText(item)) || [];
@@ -262,8 +265,7 @@ export function buildAgendaEmailDraft(
     logoUrl,
   };
 
-  const subject = email?.subject?.trim()
-    || `Agenda for our check-in${dateLabel ? ` — ${dateLabel}` : ""}`;
+  const subject = agendaSubjectInClientZone(email?.subject?.trim() || `Agenda for our check-in${facts.dateLabel ? ` — ${facts.dateLabel}` : ""}`, facts);
 
   return {
     subject,
@@ -272,6 +274,31 @@ export function buildAgendaEmailDraft(
     // Prep output can be older than the current meeting or recipient. Validate current facts.
     blockingGaps: gaps,
   };
+}
+
+export function agendaSubjectInClientZone(subject: string, facts: AgendaEmailFacts): string {
+  if (/\b\d{1,2}(?::\d{2})?\s*[ap]m\b|\b(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)(?:day|sday|nesday|rsday|urday)?\b/i.test(subject)) {
+    return `Agenda for our check-in${facts.dateLabel ? ` — ${facts.dateLabel}` : ""}${facts.timeLabel ? ` · ${facts.timeLabel}` : ""}`;
+  }
+  return subject;
+}
+
+/** Synchronize app-owned schedule facts in saved templates without replacing the AM's prose. */
+export function refreshAgendaSchedule(html: string, facts: AgendaEmailFacts): string {
+  let updated = html.replace(/<p\b[^>]*data-mtos-field=["']meeting-summary["'][^>]*>[\s\S]*?<\/p>/gi, "");
+  const values: [string, string][] = [["date", facts.dateLabel], ["time", facts.timeLabel], ["length", facts.lengthLabel]];
+  let found = false;
+  for (const [key, value] of values) {
+    const marked = new RegExp(`(<div\\b[^>]*data-mtos-field=["']meeting-${key}["'][^>]*>)[\\s\\S]*?(<\\/div>)`, "gi");
+    const legacy = new RegExp(`(<div\\b[^>]*>[^<]*\\b${key}\\s*<\\/div>\\s*<div\\b[^>]*>)[\\s\\S]*?(<\\/div>)`, "gi");
+    updated = updated.replace(marked, (_, start: string, end: string) => { found = true; return `${start}${esc(value)}${end}`; });
+    updated = updated.replace(legacy, (_, start: string, end: string) => { found = true; return `${start}${esc(value)}${end}`; });
+  }
+  const month = /(<div\b[^>]*>[^<]*Monthly check-in\s*·\s*)[^<]*(<\/div>)/gi;
+  updated = updated.replace(month, `$1${esc(facts.monthLabel)}$2`);
+  updated = updated.replace(/(<p\b[^>]*>)Looking forward to our check-in[\s\S]*?(<\/p>)/gi, `$1${esc(facts.intro)}$2`);
+  if (!found && facts.timeLabel) updated = `<p data-mtos-field="meeting-summary"><strong>Meeting:</strong> ${esc(facts.dateLabel)} · ${esc(facts.timeLabel)}</p>${updated}`;
+  return updated;
 }
 
 function headerBlock(facts: AgendaEmailFacts): string {
@@ -297,7 +324,7 @@ function headerBlock(facts: AgendaEmailFacts): string {
       ? `<table role="presentation" cellpadding="0" cellspacing="0" style="border-collapse:collapse;position:relative;margin-top:16px"><tr>${facts_row
           .map(
             ([label, value], index) =>
-              `<td style="${index < facts_row.length - 1 ? "padding-right:26px;" : ""}vertical-align:top"><div style="font-size:11px;letter-spacing:1.4px;text-transform:uppercase;font-weight:700;color:${BODY}">${esc(label)}</div><div style="font-size:15px;font-weight:700;color:${NAVY};margin-top:2px">${esc(value)}</div></td>`,
+              `<td style="${index < facts_row.length - 1 ? "padding-right:26px;" : ""}vertical-align:top"><div style="font-size:11px;letter-spacing:1.4px;text-transform:uppercase;font-weight:700;color:${BODY}">${esc(label)}</div><div data-mtos-field="meeting-${/date/i.test(label) ? "date" : /time/i.test(label) ? "time" : "length"}" style="font-size:15px;font-weight:700;color:${NAVY};margin-top:2px">${esc(value)}</div></td>`,
           )
           .join("")}</tr></table>`
       : "",

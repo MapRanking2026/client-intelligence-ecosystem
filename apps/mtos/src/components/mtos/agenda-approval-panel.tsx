@@ -5,6 +5,8 @@ import { AlertTriangle, Check, CheckCircle2, Loader2, Mail, Presentation, Rocket
 
 import { agendaEmailHasBody, isAgendaRecipient, sanitizeAgendaEmailHtml } from "@/src/lib/contracts/agenda-email";
 import { useTouchAutosave } from "@/src/components/mtos/use-touch-autosave";
+import { ClientTimeZoneField } from "@/src/components/mtos/client-time-zone-field";
+import { clientZone } from "@/src/lib/contracts/client-time-zone";
 import {
   APPROVAL_STEPS,
   APPROVAL_STEP_LABEL,
@@ -105,6 +107,7 @@ export function AgendaApprovalPanel({
   const blocking = editedHtml === undefined
     ? (email.blockingGaps || []).filter((gap) => !/email address in To\./i.test(gap))
     : agendaEmailHasBody(editedHtml) ? [] : ["Write the email body before sending."];
+  if (!clientZone(email.timeZone) && !blocking.some((gap) => /time zone/i.test(gap))) blocking.push("Set the client’s time zone before sending.");
   if (!isAgendaRecipient(recipient)) blocking.push("Enter a valid email address in To.");
 
   const plan = useMemo(
@@ -210,6 +213,7 @@ export function AgendaApprovalPanel({
 
   return (
     <div className="flex flex-col gap-4">
+      <ClientTimeZoneField touchId={touchId} timeZone={email.timeZone} source={email.timeZoneSource} disabled={alreadySent || sending || running} beforeSave={autosave.flush} />
       <EmailCard
         email={email}
         {...(freshTemplateHtml ? { freshTemplateHtml } : {})}

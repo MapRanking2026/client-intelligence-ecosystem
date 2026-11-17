@@ -74,7 +74,7 @@ const SOURCE = {
   contactName: "Maya Brooks",
   scheduledAt: "2026-11-05T18:00:00.000Z",
   timeZone: PT,
-  timeZoneIsClients: false,
+  timeZoneIsClients: true,
   meetingUrl: "https://meet.google.com/abc-defg-hij",
   lengthMinutes: 40,
   accountManagerName: "Javier",
@@ -128,9 +128,9 @@ check("a leading separator is not treated as a split", agendaTopic("— stray").
 scenario("Current calendar facts are sufficient when the time includes its zone");
 const full = buildAgendaEmailDraft(agendaEmail(), SOURCE);
 check("a complete draft has no send blockers", full.blockingGaps.length === 0, full.blockingGaps.join(" | "));
-check("the date reads in the AM's zone", full.facts.dateLabel === "Thu, November 5", full.facts.dateLabel);
+check("the date reads in the client's zone", full.facts.dateLabel === "Thu, November 5", full.facts.dateLabel);
 check(
-  "the time reads in the AM's zone",
+  "the time reads in the client's zone",
   full.facts.timeLabel.includes("10:00") && full.facts.timeLabel.includes("PST"),
   full.facts.timeLabel,
 );

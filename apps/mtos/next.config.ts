@@ -2,6 +2,7 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   // Workspace packages ship TypeScript source; Next must transpile them.
+  serverExternalPackages: ["playwright-core", "@sparticuz/chromium"],
   transpilePackages: ["@cie/engine", "@cie/contracts", "@cie/core"],
   async headers() {
     return [

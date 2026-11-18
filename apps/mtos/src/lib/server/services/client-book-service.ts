@@ -9,6 +9,11 @@ import {
   type BookPage,
 } from "@/src/lib/server/services/client-book-pages";
 import {
+  flattenMarkdownTables,
+  isTableStructureError,
+  normalizeMarkdownTables,
+} from "@/src/lib/server/services/clickup-markdown";
+import {
   CLICKUP_V3,
   clickupFetch,
   findClientFolder,
@@ -81,6 +86,97 @@ function pageUrl(workspaceId: string, docId: string, pageId: string): string {
 }
 
 /**
+ * What ClickUp said when it refused, in its own words.
+ *
+ * Carried back to the caller rather than logged and dropped. The screen used to say only
+ * "ClickUp refused to create the page", which is true of a disconnected integration, a deleted
+ * doc and a stray `|` in one table cell alike -- and the AM could act on exactly one of those.
+ */
+interface PageWriteFailure {
+  status: number;
+  detail: string;
+}
+
+type PageWriteResult<T> = { ok: true; value: T } | { ok: false } & PageWriteFailure;
+
+/** ClickUp's `message` out of its error body, or the raw text when it isn't JSON. */
+function clickupMessage(body: string): string {
+  try {
+    const parsed = JSON.parse(body) as JsonRecord;
+    const message = String(parsed.message || parsed.err || "").trim();
+    if (message) return message;
+  } catch {
+    // Not JSON; the raw body is still the most informative thing available.
+  }
+  return body.trim().slice(0, 300);
+}
+
+/**
+ * One attempt at a page write, with the body already in its final form.
+ *
+ * Both the POST and the PUT go through here so the retry below sees the same failure shape from
+ * either, and so there is one place that decides what counts as ClickUp's message.
+ */
+async function writePage(
+  access: ClickupAccess,
+  url: string,
+  method: "POST" | "PUT",
+  body: JsonRecord,
+  label: string,
+): Promise<PageWriteResult<JsonRecord>> {
+  try {
+    const response = await fetch(url, {
+      method,
+      headers: {
+        authorization: access.token,
+        accept: "application/json",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify(body),
+    });
+    if (!response.ok) {
+      const detail = clickupMessage(await response.text());
+      console.warn(`[client-book] ${label} failed ${response.status}: ${detail}`);
+      return { ok: false, status: response.status, detail };
+    }
+    return { ok: true, value: (await response.json().catch(() => ({}))) as JsonRecord };
+  } catch (error) {
+    console.warn(`[client-book] ${label} threw`, error);
+    return { ok: false, status: 0, detail: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+/**
+ * Send the notes, and if ClickUp rejects a table in them, send them again without tables.
+ *
+ * ClickUp parses `text/md` strictly: one row whose column count does not match its header rejects
+ * the WHOLE page, which is how an approved brief for a real client failed to reach the book on
+ * 18 November 2026 over a stray `|` inside one cell. Normalizing first fixes the row; the retry
+ * exists because the normalizer can only repair the malformed tables it can recognize, and a
+ * brief that reads as bullet lines still beats a brief that is not in the book at all.
+ */
+async function sendWithTableFallback(
+  access: ClickupAccess,
+  url: string,
+  method: "POST" | "PUT",
+  body: JsonRecord,
+  content: string,
+  label: string,
+): Promise<PageWriteResult<JsonRecord>> {
+  const normalized = normalizeMarkdownTables(content);
+  const first = await writePage(access, url, method, { ...body, content: normalized }, label);
+  if (first.ok || !isTableStructureError(first.detail)) {
+    return first;
+  }
+  const flattened = flattenMarkdownTables(normalized);
+  if (flattened === normalized) {
+    return first;
+  }
+  console.warn(`[client-book] ${label}: retrying with tables flattened after ${first.detail}`);
+  return writePage(access, url, method, { ...body, content: flattened }, `${label} (tables flattened)`);
+}
+
+/**
  * POST a new page into the book.
  *
  * `content_format: "text/md"` is what makes the headings, tables and lists in the notes render as
@@ -92,33 +188,25 @@ async function createPage(
   name: string,
   content: string,
   parentPageId?: string,
-): Promise<{ id: string } | null> {
-  try {
-    const response = await fetch(`${CLICKUP_V3}/workspaces/${access.workspaceId}/docs/${docId}/pages`, {
-      method: "POST",
-      headers: {
-        authorization: access.token,
-        accept: "application/json",
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({
-        ...(parentPageId ? { parent_page_id: parentPageId } : {}),
-        name,
-        content,
-        content_format: "text/md",
-      }),
-    });
-    if (!response.ok) {
-      console.warn(`[client-book] create page failed ${response.status}: ${(await response.text()).slice(0, 300)}`);
-      return null;
-    }
-    const payload = (await response.json()) as JsonRecord;
-    const id = String(payload.id || (payload.page as JsonRecord)?.id || "");
-    return id ? { id } : null;
-  } catch (error) {
-    console.warn("[client-book] create page threw", error);
-    return null;
-  }
+): Promise<PageWriteResult<{ id: string }>> {
+  const result = await sendWithTableFallback(
+    access,
+    `${CLICKUP_V3}/workspaces/${access.workspaceId}/docs/${docId}/pages`,
+    "POST",
+    {
+      ...(parentPageId ? { parent_page_id: parentPageId } : {}),
+      name,
+      content_format: "text/md",
+    },
+    content,
+    "create page",
+  );
+  if (!result.ok) return result;
+  const payload = result.value;
+  const id = String(payload.id || (payload.page as JsonRecord)?.id || "");
+  return id
+    ? { ok: true, value: { id } }
+    : { ok: false, status: 200, detail: "ClickUp accepted the page but returned no page id." };
 }
 
 /** Replace a page MTOS wrote earlier. Only ever called with a page id MTOS itself recorded. */
@@ -128,33 +216,15 @@ async function replacePage(
   pageId: string,
   name: string,
   content: string,
-): Promise<boolean> {
-  try {
-    const response = await fetch(
-      `${CLICKUP_V3}/workspaces/${access.workspaceId}/docs/${docId}/pages/${pageId}`,
-      {
-        method: "PUT",
-        headers: {
-          authorization: access.token,
-          accept: "application/json",
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({
-          name,
-          content,
-          content_format: "text/md",
-          content_edit_mode: "replace",
-        }),
-      },
-    );
-    if (!response.ok) {
-      console.warn(`[client-book] update page failed ${response.status}: ${(await response.text()).slice(0, 300)}`);
-    }
-    return response.ok;
-  } catch (error) {
-    console.warn("[client-book] update page threw", error);
-    return false;
-  }
+): Promise<PageWriteResult<JsonRecord>> {
+  return sendWithTableFallback(
+    access,
+    `${CLICKUP_V3}/workspaces/${access.workspaceId}/docs/${docId}/pages/${pageId}`,
+    "PUT",
+    { name, content_format: "text/md", content_edit_mode: "replace" },
+    content,
+    "update page",
+  );
 }
 
 
@@ -298,15 +368,17 @@ export async function filePrepNotesToClientBook(
   let prepPageId = "";
   if (existing?.prepPageId) {
     const replaced = await replacePage(access, docId, existing.prepPageId, name, options.markdown);
-    if (replaced) prepPageId = existing.prepPageId;
+    if (replaced.ok) prepPageId = existing.prepPageId;
     // Otherwise fall through and create a fresh page: the old one may have been deleted in ClickUp.
   }
   if (!prepPageId) {
     const created = await createPage(access, docId, name, options.markdown, meetingsPageId);
-    if (!created) {
-      return { error: `ClickUp refused to create the "${name}" page in the Client's Book.` };
+    if (!created.ok) {
+      return {
+        error: `ClickUp refused to create the "${name}" page in the Client's Book: ${created.detail}`,
+      };
     }
-    prepPageId = created.id;
+    prepPageId = created.value.id;
   }
 
   // The empty post-notes subpage. A subpage already recorded is kept rather than replaced with a
@@ -316,9 +388,9 @@ export async function filePrepNotesToClientBook(
   if (!postPageId) {
     const subName = postNotesPageName(name, options.touchDateIso);
     const child = await createPage(access, docId, subName, POST_NOTES_PLACEHOLDER, prepPageId);
-    if (child) {
-      postPageId = child.id;
-      postPageUrl = pageUrl(access.workspaceId, docId, child.id);
+    if (child.ok) {
+      postPageId = child.value.id;
+      postPageUrl = pageUrl(access.workspaceId, docId, child.value.id);
     }
     // A subpage ClickUp refused is not worth failing the approval over. The brief itself is
     // filed, and the post-meeting step creates the subpage then if it is still missing.
@@ -409,7 +481,7 @@ export async function writePostNotesToClientBook(
   // rather than duplicates.
   if (links.postPageId) {
     const replaced = await replacePage(access, docId, links.postPageId, name, options.markdown);
-    if (replaced) {
+    if (replaced.ok) {
       return {
         pageName: name,
         links: { ...links, prepPageId: parentId, prepPageUrl: pageUrl(access.workspaceId, docId, parentId), writtenAt: new Date().toISOString() },
@@ -426,8 +498,10 @@ export async function writePostNotesToClientBook(
   }
 
   const created = await createPage(access, docId, name, options.markdown, parentId);
-  if (!created) {
-    return { error: `ClickUp refused to create the "${name}" subpage under "${parentName}".` };
+  if (!created.ok) {
+    return {
+      error: `ClickUp refused to create the "${name}" subpage under "${parentName}": ${created.detail}`,
+    };
   }
 
   return {
@@ -436,8 +510,8 @@ export async function writePostNotesToClientBook(
       ...links,
       prepPageId: parentId,
       prepPageUrl: pageUrl(access.workspaceId, docId, parentId),
-      postPageId: created.id,
-      postPageUrl: pageUrl(access.workspaceId, docId, created.id),
+      postPageId: created.value.id,
+      postPageUrl: pageUrl(access.workspaceId, docId, created.value.id),
       writtenAt: new Date().toISOString(),
     },
   };

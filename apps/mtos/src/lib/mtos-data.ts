@@ -670,9 +670,25 @@ export interface CallGuide {
  * set rather than free-form HTML so the deck cannot drift off-brand, and so the
  * same slide renders identically in the in-app viewer and in the exported .pptx.
  */
+export interface RankScanScreenshot { id: string; touchId: string; width: number; height: number; mimeType: "image/png"; }
+
+export interface PresentationRankComparison {
+  nativeSource?: { reportId: string; heatmapId: string; scanA: string; scanB: string };
+  originalImage?: RankScanScreenshot;
+  keyword: string;
+  businessId: string;
+  businessName: string;
+  address: string;
+  current: { reportId: string; grid: HeatmapGrid; screenshot?: RankScanScreenshot };
+  previous?: { reportId: string; grid: HeatmapGrid; screenshot?: RankScanScreenshot };
+  baselineLabel: string;
+  sameGrid: boolean;
+}
+
 export type PresentationLayout =
   | "cover"
   | "agenda"
+  | "rank_comparison"
   | "stat_callouts"
   | "bullets"
   | "two_column"
@@ -703,6 +719,7 @@ export interface PresentationSlide {
   /** Original generation position for saved AM capture notes; display numbering stays contiguous. */
   generatedIndex?: number;
   layout: PresentationLayout;
+  rankComparison?: PresentationRankComparison;
   /**
    * Which brief section this slide presents, when it presents one.
    *
@@ -731,6 +748,7 @@ export interface PresentationSlide {
 }
 
 export interface Presentation {
+  instructionsUsed?: string;
   status: "not_generated" | "generated";
   title?: string;
   clientName?: string;
@@ -1469,6 +1487,9 @@ export interface TouchFollowThroughState {
 }
 
 export interface MonthlyTouchRecord {
+  approvedRankComparisons?: PresentationRankComparison[];
+  presentationInstructions?: string;
+  presentationInstructionsUpdatedAt?: string;
   noShow?: import("@/src/lib/contracts/no-show").NoShowState;
   noShowHistory?: { at: string; by: string; resolution: "reschedule" | "loom"; detail: string }[];
   /** A test attempt removed from the working history. */

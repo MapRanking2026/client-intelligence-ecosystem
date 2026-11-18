@@ -15,6 +15,7 @@ import type {
  * tab get overwritten.
  */
 export interface TouchDraftPatch {
+  presentationInstructions?: string;
   review?: Partial<TouchReviewState>;
   agendaEmail?: Partial<TouchAgendaEmailState>;
   live?: Partial<TouchLiveState>;

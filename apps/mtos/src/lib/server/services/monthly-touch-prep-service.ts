@@ -2048,7 +2048,7 @@ export async function fetchLiveRankTrackerEvidence(
     }
 
     const profiles: RankTrackerProfileEvidence[] = [];
-    for (const business of matchedBusinesses.slice(0, 4)) {
+    for (const business of matchedBusinesses.slice(0, 6)) {
       const keywordScans = await fetchBusinessKeywordScanHistory(session, {
         businessId: business.businessId,
         businessName: business.businessName,

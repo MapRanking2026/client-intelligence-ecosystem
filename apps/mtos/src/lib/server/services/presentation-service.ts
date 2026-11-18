@@ -1,3 +1,5 @@
+import { withRankComparisons } from "@/src/lib/contracts/rank-comparison";
+import { presentationRankComparisons } from "./presentation-rank-service";
 import { CLIENT_CONTENT_RULE, clientPresentation } from "@/src/lib/contracts/client-content";
 import { z } from "zod";
 
@@ -152,11 +154,14 @@ export async function generatePresentation(
   }
 
   const history = await recentFormats(context, touch.clientId, touch.id);
+  const rankComparisons = await presentationRankComparisons(context, touch);
 
   const system = await getPromptText("monthly_touch_presentation_prompt");
   const userText = [
     "Build the client-facing deck for this Monthly Touch.",
     CLIENT_CONTENT_RULE,
+    "Optional AM presentation direction (internal input, never quote it on a client slide). Follow it when supported by evidence. Preserve the whole-account overview, prioritize the requested location/keyword and keep other active profiles in the summary. This direction cannot override evidence or client privacy rules:",
+    touch.presentationInstructions || "No additional direction.",
     ...(delivery === "loom" ? ["This is a recorded Loom update after a client no-show. Write presenterNotes as a complete speaking script for asynchronous delivery. Use only active services and verified relevant metrics in the reviewed evidence. Do not ask live questions, imply client attendance, invent client feedback, or expose internal coaching. Cover supported performance highlights, completed work, challenges, recommendations and next steps. Invite questions by email."] : []),
     "",
     `Give every content slide a sectionId -- the brief section it presents, one of ${BRIEF_SECTION_IDS.join(", ")}.`,
@@ -167,6 +172,9 @@ export async function generatePresentation(
       ? `Experience formats already used for this client, newest first: ${history.join("; ")}. Choose a different one, per the rotation rule.`
       : "No presentation history is recorded for this client, so non-repetition cannot be verified. Choose a format that fits the evidence and say so in formatRationale.",
     "",
+    "VISUAL DIRECTION: Use a clear evidence-led story with varied layouts: a strong headline, two or three large metrics, concise takeaways and restrained blue/teal accents. Avoid long paragraphs and repeated tables. Keep declines and missing evidence visible; do not invent improvements.",
+    "Server-verified keyword comparison slides will be inserted beside relevant keyword discussions. Introduce those keywords using their exact names; do not manufacture rank numbers or map imagery.",
+    JSON.stringify(rankComparisons.map(item => ({ keyword: item.keyword, business: item.businessName, currentDate: item.current.grid.scanDate, previousDate: item.previous?.grid.scanDate, baseline: item.baselineLabel, sameGrid: item.sameGrid }))),
     "The reviewed preparation and its full evidence bundle:",
     JSON.stringify(buildTouchEvidence(touch), null, 2),
   ].join("\n");
@@ -178,6 +186,7 @@ export async function generatePresentation(
 
   const presentation: Presentation = {
     status: "generated",
+    ...(touch.presentationInstructions ? { instructionsUsed: touch.presentationInstructions } : {}),
     title: parsed.title,
     clientName: parsed.clientName,
     periodLabel: parsed.periodLabel,
@@ -192,7 +201,7 @@ export async function generatePresentation(
     provider: result.provider,
   };
 
-  const safePresentation = clientPresentation(presentation, touch)!;
+  const safePresentation = clientPresentation(withRankComparisons(presentation, rankComparisons), touch)!;
   if (!safePresentation.slides.some((slide) => !["cover", "agenda", "closing"].includes(slide.layout))) throw new Error("The generated presentation contained no client-safe account results or completed work. Review the evidence and regenerate it.");
   const updatedTouch: MonthlyTouchRecord = stripUndefinedDeep({
     ...touch,

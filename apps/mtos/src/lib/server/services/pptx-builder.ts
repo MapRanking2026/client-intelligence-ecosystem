@@ -1,3 +1,4 @@
+import { comparisonPins, rankColor, rankSummary, rankValue } from "@/src/lib/contracts/rank-comparison";
 import { clientPresentation } from "@/src/lib/contracts/client-content";
 import JSZip from "jszip";
 
@@ -256,7 +257,29 @@ function buildSlideShapes(
   const bodyTop = Math.max(top + 12, 180);
   const bodyW = 1152;
 
-  if (slide.layout === "stat_callouts" && slide.stats?.length) {
+  if (slide.layout === "rank_comparison" && slide.rankComparison) {
+    const comparison = slide.rankComparison;
+    parts.push(rect(64, bodyTop, 1152, 48, C.paleBlue, { round: true }));
+    parts.push(textBox(84, bodyTop + 8, 1110, 36, [rankSummary(comparison)], { size: 16, bold: true, color: C.deepBlue }));
+    [comparison.previous, comparison.current].forEach((scan, index) => {
+      const x = 64 + index * 588, y = bodyTop + 66;
+      parts.push(rect(x, y, 564, 326, index ? "F0FAF7" : "F7F9FC", { line: C.border, round: true }));
+      parts.push(textBox(x + 20, y + 14, 520, 22, [index ? "LATEST AVAILABLE SCAN" : "PREVIOUS SCAN"], { size: 10, color: index ? "16866B" : C.gray, bold: true }));
+      parts.push(textBox(x + 20, y + 38, 520, 32, [scan?.grid.scanDate.slice(0,10) || "No verified baseline"], { size: 17, bold: true, color: C.navy }));
+      if (!scan) { parts.push(textBox(x + 24, y + 135, 480, 100, ["A matching previous scan was not available. Only the latest measured result is shown."], { size: 16, color: C.gray })); return; }
+      parts.push(rect(x + 20, y + 82, 280, 224, C.white, { line: C.border, round: true }));
+      comparisonPins(comparison, scan.grid).forEach(pin => {
+        const radius = Math.max(4, Math.min(13, 88 / Math.max(scan.grid.gridSize,1)));
+        const cx = x + 40 + pin.x * 240, cy = y + 100 + pin.y * 188;
+        parts.push(rect(cx - radius, cy - radius, radius * 2, radius * 2, rankColor(pin.rank).slice(1), { round: true }).replace('prst="roundRect"', 'prst="ellipse"'));
+        parts.push(textBox(cx - radius, cy - radius + 1, radius * 2, radius * 2, [pin.rank && pin.rank > 0 ? String(pin.rank) : "–"], { size: Math.max(4, radius * 0.6), color: C.white, align: "ctr" }));
+      });
+      parts.push(textBox(x + 326, y + 96, 218, 24, ["AVERAGE RANK"], { size: 10, color: C.gray }));
+      parts.push(textBox(x + 326, y + 125, 218, 64, [rankValue(scan.grid.averageRankPosition)], { size: 30, bold: true, color: C.navy }));
+      parts.push(textBox(x + 326, y + 204, 218, 64, ["Top 3: " + (scan.grid.top3Percent === null ? "—" : scan.grid.top3Percent + "%"), "Local voice: " + (scan.grid.shareOfLocalVoicePercent === null ? "—" : scan.grid.shareOfLocalVoicePercent + "%")], { size: 13, color: C.navy }));
+    });
+    parts.push(textBox(64, bodyTop + 406, 1152, 30, [comparison.baselineLabel + " · Green: top 3 · Gold: 4–10 · Coral: 11+ · Gray: not found"], { size: 9, color: C.gray }));
+  } else if (slide.layout === "stat_callouts" && slide.stats?.length) {
     const n = Math.min(slide.stats.length, 4);
     const gap = 24;
     const cardW = (bodyW - gap * (n - 1)) / n;

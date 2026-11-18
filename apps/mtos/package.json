@@ -79,14 +79,16 @@
     "check:client-content-ui": "node scripts/check-client-content-ui.cjs",
     "check:gmail-transport": "node scripts/check-gmail-transport.cjs",
     "check:email-client-zone": "tsx scripts/check-email-client-zone.ts",
+    "check:clickup-markdown": "tsx scripts/check-clickup-markdown.ts",
     "check:email-send-fixes": "node scripts/check-email-send-fixes.cjs"
   },
   "dependencies": {
-    "@cie/engine": "*",
     "@cie/contracts": "*",
     "@cie/core": "*",
-    "@supabase/supabase-js": "^2.58.0",
+    "@cie/engine": "*",
     "@opentelemetry/api": "^1.9.1",
+    "@sparticuz/chromium": "141.0.0",
+    "@supabase/supabase-js": "^2.58.0",
     "docx": "^9.7.1",
     "firebase": "^12.2.1",
     "firebase-admin": "^13.5.0",
@@ -96,6 +98,7 @@
     "nanoid": "^5.1.6",
     "next": "16.2.9",
     "pino": "^10.0.0",
+    "playwright-core": "1.56.1",
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "zod": "^4.1.5"

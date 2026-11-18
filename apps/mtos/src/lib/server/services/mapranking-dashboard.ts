@@ -183,7 +183,8 @@ export async function fetchBusinessKeywordScanHistory(
       })
       // newest first -- the two most recent are the current + previous month comparison
       .sort((a, b) => b.scanDate.localeCompare(a.scanDate))
-      .slice(0, 4);
+      .filter((scan, index, all) => index < 4 || all.findIndex((other) => other.scanDate.slice(0, 7) === scan.scanDate.slice(0, 7)) === index)
+      .slice(0, 16);
     if (deduped.length) {
       results.push({ keyword, businessName: business.businessName, scans: deduped });
     }
@@ -206,7 +207,7 @@ function round5(value: number) {
   return Math.round(value * 100000) / 100000;
 }
 
-async function fetchHeatmapReportGrid(
+export async function fetchHeatmapReportGrid(
   session: DashboardSession,
   entry: { keyword: string; businessName: string },
   scan: { reportId: string; scanDate: string },
@@ -218,11 +219,11 @@ async function fetchHeatmapReportGrid(
     const scanData = ((report.data as JsonRecord | undefined)?.data || {}) as JsonRecord;
     const results = Array.isArray(scanData.results) ? (scanData.results as JsonRecord[]) : [];
 
-    const pins: HeatmapPin[] = results.map((pin) => ({
-      lat: round5(toNumber(pin.lat) ?? 0),
-      lng: round5(toNumber(pin.lng) ?? 0),
-      rank: pin.found === false ? null : toNumber(pin.rank),
-    }));
+    const pins: HeatmapPin[] = results.flatMap((pin) => {
+      const lat = toNumber(pin.lat), lng = toNumber(pin.lng), rank = toNumber(pin.rank);
+      if (lat === null || lng === null || Math.abs(lat) > 90 || Math.abs(lng) > 180) return [];
+      return [{ lat: round5(lat), lng: round5(lng), rank: pin.found === false || rank === null || rank <= 0 ? null : rank }];
+    });
 
     let topCompetitors: HeatmapCompetitor[] = [];
     if (includeCompetitors) {

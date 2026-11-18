@@ -500,6 +500,7 @@ const touchRequestSchema = z.discriminatedUnion("action", [
   // present, which the service enforces rather than the schema so the message can say so plainly.
   z.object({
     action: z.literal("save_touch_draft"),
+    presentationInstructions: z.string().max(8000).optional(),
     review: z
       .object({
         declinedSections: z.array(z.string()).optional(),
@@ -761,6 +762,7 @@ export async function POST(
         break;
       case "save_touch_draft":
         result = await saveTouchDraft(context, touchId, {
+          ...(payload.presentationInstructions !== undefined ? { presentationInstructions: payload.presentationInstructions } : {}),
           ...(payload.review ? { review: payload.review } : {}),
           // The HTML comes out of a rich-text editor, so it is cleaned here rather than only in
           // the browser: this is the copy that is stored and the copy that is sent.

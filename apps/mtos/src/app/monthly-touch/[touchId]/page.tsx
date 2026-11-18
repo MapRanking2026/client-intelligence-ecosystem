@@ -1,3 +1,4 @@
+import { PresentationInstructions } from "@/src/components/mtos/presentation-instructions";
 import { canDeleteTestTouch } from "@/src/lib/contracts/touch-progress";
 import { StartNewMonthlyTouch } from "@/src/components/mtos/start-new-monthly-touch";
 import { GoogleMeetingPanel } from "@/src/components/mtos/google-meeting-panel";
@@ -522,6 +523,7 @@ export default async function MonthlyTouchRunSheetPage({
 
           {/* 1c. The account review, and the fifteen-section brief it has to produce. */}
           <div id="workflow">
+            <PresentationInstructions touchId={touch.id} initial={touch.presentationInstructions} />
             <PrepStagePanel
               touchId={touch.id}
               clientName={client.name}
@@ -582,6 +584,7 @@ export default async function MonthlyTouchRunSheetPage({
                 </p>
               </div>
             </div>
+            <PresentationInstructions touchId={touch.id} initial={touch.presentationInstructions} />
             <AgendaApprovalPanel
               touchId={touch.id}
               email={agendaEmail.state}
@@ -648,7 +651,7 @@ export default async function MonthlyTouchRunSheetPage({
             {...(touch.review?.declinedSections ? { declinedSections: touch.review.declinedSections } : {})}
             showQaChips={preferences.qaChipsInPresenterView ?? true}
             initialFormat={liveFormat}
-            materialTools={<PresentationViewer touchId={touch.id} presentation={touch.presentation} toolsOnly />}
+            materialTools={<div className="grid gap-3"><PresentationInstructions touchId={touch.id} initial={touch.presentationInstructions} /><PresentationViewer touchId={touch.id} presentation={touch.presentation} toolsOnly /></div>}
           /> : null}
 
           {/*

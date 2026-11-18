@@ -124,6 +124,12 @@ export async function saveTouchDraft(
     const update: Record<string, unknown> = {};
     const fields: string[] = [];
 
+    if (patch.presentationInstructions !== undefined) {
+      update.presentationInstructions = patch.presentationInstructions.trim().slice(0, 8000);
+      update.presentationInstructionsUpdatedAt = savedAt;
+      fields.push("presentationInstructions");
+    }
+
     if (patch.review) {
       const next: TouchReviewState = {
         declinedSections: [],

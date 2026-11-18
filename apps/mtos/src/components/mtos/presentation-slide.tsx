@@ -1,3 +1,4 @@
+import { RankComparisonVisual } from "./rank-comparison-visual";
 import type { PresentationSlide, PresentationTone } from "@/src/lib/mtos-data";
 
 /**
@@ -225,6 +226,7 @@ export function PresentationSlideCanvas({
   return (
     <div style={base}>
       <Chrome slide={slide}>
+        {slide.layout === "rank_comparison" && slide.rankComparison ? <RankComparisonVisual comparison={slide.rankComparison} /> : null}
         {slide.layout === "stat_callouts" && slide.stats?.length ? (
           <div
             style={{

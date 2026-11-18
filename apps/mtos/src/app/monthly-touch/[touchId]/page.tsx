@@ -9,7 +9,7 @@ import { ArrowLeft, ClipboardCheck, ExternalLink, FileText, Sparkles } from "luc
 import { AppShell } from "@/src/components/mtos/app-shell";
 import { DataError } from "@/src/components/mtos/data-error";
 import { Linkified } from "@/src/components/mtos/annotate";
-import { JoinMeetButton, LiveModeLauncher } from "@/src/components/mtos/live-mode";
+import { JoinMeetButton } from "@/src/components/mtos/live-mode";
 import { NoShowPanel } from "@/src/components/mtos/no-show-panel";
 import { LiveCallStep } from "@/src/components/mtos/live-call-step";
 import { TranscriptWaitPanel } from "@/src/components/mtos/transcript-wait-panel";
@@ -434,14 +434,6 @@ export default async function MonthlyTouchRunSheetPage({
     profile.timeZone,
   );
 
-  const liveLauncher = (
-    <LiveModeLauncher
-      touch={touch}
-      clientId={client.id}
-      clientName={client.name}
-      label={stage === "live" ? primary.label : "Open Live mode"}
-    />
-  );
 
   /**
    * The one action for the stage the touch is in, shown inside the sticky rail.
@@ -452,7 +444,7 @@ export default async function MonthlyTouchRunSheetPage({
    */
   const primaryAction =
     stage === "live" ? (
-      liveLauncher
+      view === "live" ? <NoShowPanel touchId={touch.id} initial={touch.noShow} embedded primaryAction={touch.noShow?.resolution !== "loom" ? <JoinMeetButton touch={touch} label="Start Live Meeting" /> : undefined} /> : <Link href={`/monthly-touch/${touch.id}?stage=live`} className="btn btn-primary">Go to Live call</Link>
     ) : stage === "follow_through" ? (
       <Link href={`/monthly-touch/${touch.id}/follow-through`} className="btn btn-primary">
         <Sparkles />
@@ -506,6 +498,7 @@ export default async function MonthlyTouchRunSheetPage({
         followThroughDueAt={touch.followThrough?.dueAt}
         timeZone={profile.timeZone}
         action={primaryAction}
+        wideAction={view === "live"}
       />
 
       {/* ---------- 1. Prep: the meeting, the two scores, then the account review ---------- */}
@@ -641,7 +634,6 @@ export default async function MonthlyTouchRunSheetPage({
             <ApprovalStatusCard touchId={touch.id} approval={touch.approval} />
           ) : null}
 
-          <NoShowPanel touchId={touch.id} initial={touch.noShow} />
           {touch.noShow?.resolution !== "loom" ? <LiveCallStep
             touchId={touch.id}
             clientId={client.id}
@@ -655,6 +647,8 @@ export default async function MonthlyTouchRunSheetPage({
             {...(touch.presentation ? { presentation: touch.presentation } : {})}
             {...(touch.review?.declinedSections ? { declinedSections: touch.review.declinedSections } : {})}
             showQaChips={preferences.qaChipsInPresenterView ?? true}
+            initialFormat={liveFormat}
+            materialTools={<PresentationViewer touchId={touch.id} presentation={touch.presentation} toolsOnly />}
           /> : null}
 
           {/*
@@ -669,49 +663,13 @@ export default async function MonthlyTouchRunSheetPage({
             followThroughHref={`/monthly-touch/${touch.id}/follow-through`}
           /> : null}
 
-          {touch.noShow?.resolution !== "loom" ? <><div className="card mt-4">
-            <div className="card-head">
-              <div className="card-title">The call itself</div>
-            </div>
-            <p className="text-[0.88rem] leading-7" style={{ color: "var(--text-2)" }}>
-              Open the client&apos;s Google Meet here, then start the clock above when they join. Everything you type
-              on this screen is saved against the part of the call you were in, and goes to the follow-through with
-              the transcript.
-            </p>
-            <div className="mt-4 flex flex-wrap items-center gap-2.5">
-              <JoinMeetButton touch={touch} />
-            </div>
-            {touch.liveSession ? (
-              <p className="muted mt-3 text-[0.8rem]">
-                This touch also has notes from the older full-screen Live mode:{" "}
-                {touch.liveSession.segments.filter((segment) => segment.notes.trim()).length} segments from{" "}
-                {new Date(touch.liveSession.startedAt).toLocaleString()}. They are kept and go to the follow-through
-                too — nothing was moved.
-              </p>
-            ) : null}
-            <div className="mt-4 flex flex-wrap gap-2.5">{liveLauncher}</div>
-          </div>
+          {touch.noShow?.resolution !== "loom" ? <details className="card mt-4 live-guide-tools">
+            <summary>Call guide &amp; preparation tools</summary>
+            <p className="field-hint mt-3">Regenerate the guide here if preparation has changed. Switch to the guide in the live workspace to use it during the call.</p>
+            <CallGuideActions touchId={touch.id} clientId={client.id} callGuide={touch.callGuide} screenOverrides={touch.callGuideScreens} />
+            {touch.liveSession ? <p className="field-hint mt-3">Notes from the previous Live mode are preserved and included in Follow-Through.</p> : null}
+          </details> : <Section eyebrow="Loom video update" title="Client presentation"><PresentationViewer touchId={touch.id} presentation={touch.noShow?.presentation || touch.presentation} readOnly /></Section>}
 
-          <Section
-            eyebrow="Live meeting"
-            title="Live call guide"
-            subtitle="The guide the call above reads from. Regenerate it here if the preparation changed."
-          >
-            <CallGuideActions
-              touchId={touch.id}
-              clientId={client.id}
-              callGuide={touch.callGuide}
-              screenOverrides={touch.callGuideScreens}
-            />
-          </Section></> : null}
-
-          <Section
-            eyebrow="Live meeting"
-            title="Client presentation"
-            subtitle="The client-facing deck, built from the same preparation, with private presenter notes. On the call it opens in its own window, which is the window you share."
-          >
-            <PresentationViewer touchId={touch.id} presentation={touch.noShow?.presentation || touch.presentation} readOnly={touch.noShow?.resolution === "loom"} />
-          </Section>
         </>
       ) : null}
 

@@ -54,6 +54,7 @@ export function TouchProgressRail({
   followThroughDueAt,
   timeZone,
   action,
+  wideAction = false,
 }: {
   touchId: string;
   /** The furthest step reached. Steps beyond it are locked. */
@@ -71,6 +72,7 @@ export function TouchProgressRail({
    * reading a stage they had already passed.
    */
   action?: ReactNode;
+  wideAction?: boolean;
 }) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -83,7 +85,18 @@ export function TouchProgressRail({
   const deadline = followThroughDeadline(followThroughDueAt, now);
 
   return (
-    <div className="card stage-rail mt-4">
+    <div className={`card stage-rail mt-4 ${wideAction ? "live-stage-rail" : ""}`}>
+      {resume && current === resume.step ? (
+        <div
+          className="mt-3 flex flex-wrap items-center gap-2 rounded-[10px] p-3 text-[0.82rem]"
+          style={{ background: "var(--info-bg)", color: "var(--info)" }}
+        >
+          <History style={{ width: 14, height: 14 }} />
+          <span style={{ fontWeight: 600 }}>{resume.headline}</span>
+          {resume.savedLabel ? <span style={{ opacity: 0.85 }}>{resume.savedLabel}</span> : null}
+        </div>
+      ) : null}
+
       <nav aria-label="Monthly Touch stages">
         <ol className="stage-track" style={{ listStyle: "none", margin: 0, padding: 0 }}>
           {TOUCH_STEPS.map((step, index) => {
@@ -142,19 +155,10 @@ export function TouchProgressRail({
             ? TOUCH_STAGE_PURPOSE[current]
             : `You are reading ${TOUCH_STEP_LABELS[current]}; this touch is in ${TOUCH_STEP_LABELS[progress]}. Nothing you look at here moves it back.`}
         </p>
-        {action ? <div className="flex flex-wrap items-center gap-2.5">{action}</div> : null}
+        {action && !wideAction ? <div className="flex flex-wrap items-center gap-2.5">{action}</div> : null}
       </div>
 
-      {resume && current === resume.step ? (
-        <div
-          className="mt-3 flex flex-wrap items-center gap-2 rounded-[10px] p-3 text-[0.82rem]"
-          style={{ background: "var(--info-bg)", color: "var(--info)" }}
-        >
-          <History style={{ width: 14, height: 14 }} />
-          <span style={{ fontWeight: 600 }}>{resume.headline}</span>
-          {resume.savedLabel ? <span style={{ opacity: 0.85 }}>{resume.savedLabel}</span> : null}
-        </div>
-      ) : null}
+      {action && wideAction ? <div className="mt-3">{action}</div> : null}
 
       {deadline ? (
         <div className="mt-3 flex flex-wrap items-center gap-2">

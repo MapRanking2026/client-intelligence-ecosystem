@@ -1,13 +1,13 @@
 "use client";
 
 import { RescheduleCalendar } from "./reschedule-calendar";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import type { NoShowState } from "@/src/lib/contracts/no-show";
 import { usableLoomUrl } from "@/src/lib/contracts/no-show";
 import { readJsonResponse } from "@/src/lib/api/read-json-response";
 
-export function NoShowPanel({ touchId, initial }: { touchId: string; initial?: NoShowState }) {
+export function NoShowPanel({ touchId, initial, primaryAction, embedded = false }: { touchId: string; initial?: NoShowState; primaryAction?: ReactNode; embedded?: boolean }) {
   const router = useRouter();
   const [open, setOpen] = useState(Boolean(initial && !initial.rescheduledAt));
   const [state, setState] = useState(initial);
@@ -42,9 +42,9 @@ export function NoShowPanel({ touchId, initial }: { touchId: string; initial?: N
     finally { setBusy(false); }
   }
   const chosen = state && !state.rescheduledAt ? state.resolution : undefined;
-  return <div className="card mt-4">
+  return <div className={embedded ? "live-resolution-controls" : "card mt-4"}>
     {state?.rescheduledAt && state.standbyUntil && Date.parse(state.standbyUntil) > checkedAt ? <p role="status">Rescheduled. This Monthly Touch stays in Preparation on standby until 48 hours before the meeting.</p> : null}
-    <button type="button" className="btn btn-risk" disabled={busy} onClick={() => setOpen(!open)}>No-Show</button>
+    <div className={embedded ? "live-workflow-actions" : "flex flex-wrap gap-2"}><button type="button" className="btn btn-risk" disabled={busy} onClick={() => setOpen(!open)} aria-expanded={open}>No-Show</button>{primaryAction}</div>
     {open ? <section aria-label="No-show resolution" className="mt-4 grid gap-4">
       <div className="flex items-center justify-between"><h2 className="h3">Client did not attend</h2><button type="button" className="btn btn-ghost btn-sm" disabled={busy} onClick={() => setOpen(false)}>{chosen ? "Return to Live Call" : "Cancel"}</button></div>
       {!chosen ? <div className="grid gap-3 md:grid-cols-2">

@@ -36,10 +36,12 @@ export function PresentationViewer({
   touchId,
   presentation,
   readOnly = false,
+  toolsOnly = false,
 }: {
   touchId: string;
   presentation?: Presentation;
   readOnly?: boolean;
+  toolsOnly?: boolean;
 }) {
   const [index, setIndex] = useState(0);
   const [showNotes, setShowNotes] = useState(true);
@@ -85,7 +87,7 @@ export function PresentationViewer({
   }, []);
 
   useEffect(() => {
-    if (!count) return;
+    if (toolsOnly || !count) return;
     const onKey = (event: KeyboardEvent) => {
       // Never steal keys from a field the AM is typing in.
       const target = event.target as HTMLElement | null;
@@ -106,7 +108,7 @@ export function PresentationViewer({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [count, go]);
+  }, [count, go, toolsOnly]);
 
   async function present() {
     try {
@@ -154,8 +156,8 @@ export function PresentationViewer({
 
   return (
     <div className="space-y-4">
-      <div className="card flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0">
+      <div className={toolsOnly ? "flex flex-wrap gap-2" : "card flex flex-wrap items-start justify-between gap-3"}>
+        {!toolsOnly ? <div className="min-w-0">
           <p className="card-title">
             Client presentation
           </p>
@@ -171,11 +173,11 @@ export function PresentationViewer({
             </p>
           ) : null}
         </div>
-
+        : null}
         <div className="flex flex-wrap gap-2">
           {count ? (
             <>
-              <button
+              {!toolsOnly ? <button
                 type="button"
                 onClick={present}
                 style={{ color: "#0d1625" }}
@@ -183,7 +185,7 @@ export function PresentationViewer({
               >
                 <Play className="h-4 w-4" />
                 Play slideshow
-              </button>
+              </button> : null}
               <a
                 href={`/api/monthly-touches/${touchId}/presentation.pptx`}
                 className="btn btn-ghost"
@@ -209,7 +211,7 @@ export function PresentationViewer({
       {error ? <p className="text-sm text-rose-300">{error}</p> : null}
       {presentation?.errorMessage ? <p className="text-sm text-amber-200">{presentation.errorMessage}</p> : null}
 
-      {count && current ? (
+      {!toolsOnly && count && current ? (
         <div className="space-y-3">
           <div
             ref={stageRef}
@@ -334,7 +336,7 @@ export function PresentationViewer({
         ) : null}
       </div>
 
-      {count && !isFullscreen ? (
+      {!toolsOnly && count && !isFullscreen ? (
         <p className="text-xs text-slate-500">
           <Maximize2 className="mr-1 inline h-3 w-3" />
           Play slideshow fills the screen with the slide alone — share that window on the call. Your notes

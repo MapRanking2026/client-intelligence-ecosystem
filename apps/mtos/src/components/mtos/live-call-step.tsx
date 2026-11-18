@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { ChevronLeft, ChevronRight, Eye, Monitor, PhoneOff, Play, X } from "lucide-react";
 
@@ -224,6 +224,8 @@ export function LiveCallStep({
   presentation,
   declinedSections,
   showQaChips = true,
+  materialTools,
+  initialFormat = "guide",
   /** Formatted on the server, where the account manager's time zone is known. */
   approvedAtLabel,
   agendaSent,
@@ -238,6 +240,8 @@ export function LiveCallStep({
   presentation?: Presentation;
   declinedSections?: string[];
   showQaChips?: boolean;
+  materialTools?: ReactNode;
+  initialFormat?: LiveCallFormat;
   approvedAtLabel?: string;
   agendaSent?: boolean;
   callAtLabel?: string;
@@ -250,7 +254,7 @@ export function LiveCallStep({
   // the client says hello should not be watching a spinner.
   const [startedAt, setStartedAt] = useState(live?.callStartedAt);
   const [endedAt, setEndedAt] = useState(live?.callEndedAt);
-  const [format, setFormat] = useState<LiveCallFormat>(live?.format || "guide");
+  const [format, setFormat] = useState<LiveCallFormat>(live?.format || initialFormat);
   const [notes, setNotes] = useState<Record<string, string>>(live?.notes || {});
   const [partIndex, setPartIndex] = useState(0);
   const [slideIndex, setSlideIndex] = useState(0);
@@ -433,7 +437,7 @@ export function LiveCallStep({
     const onKey = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
       if (target && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return;
-      if (target?.isContentEditable) return;
+      if (target?.isContentEditable || target?.closest('[aria-label="No-show resolution"], dialog')) return;
       if (event.key === "ArrowRight" || event.key === "PageDown") {
         event.preventDefault();
         move(1);
@@ -453,7 +457,7 @@ export function LiveCallStep({
   const elapsed = callElapsedSeconds(liveState);
 
   return (
-    <div className="grid gap-4">
+    <div className="grid gap-4 live-call-workspace" aria-label="Live call workspace">
       <div className="card mt-4">
         <div className="flex flex-wrap items-center gap-3">
           <span className={`chip ${TONE_CLASS[header.tone].chip}`}>
@@ -477,22 +481,10 @@ export function LiveCallStep({
                 {isDeck ? "Use the call guide" : "Use the presentation"}
               </button>
             ) : null}
-            {isDeck ? (
-              <>
-                <button type="button" className="btn btn-primary btn-sm" onClick={openClientScreen}>
-                  <Monitor />
-                  Open client screen
-                </button>
-                <button type="button" className="btn btn-ghost btn-sm" onClick={() => setPreview(true)}>
-                  <Eye />
-                  Preview as client
-                </button>
-              </>
-            ) : null}
             {header.canStart ? (
               <button type="button" className="btn btn-primary btn-sm" onClick={() => void startCall()}>
                 <Play />
-                Start call
+                Start call timer
               </button>
             ) : null}
             {header.canEnd ? (
@@ -523,13 +515,30 @@ export function LiveCallStep({
         ) : null}
       </div>
 
+      {!isDeck && materialTools ? <details className="card"><summary>Presentation tools</summary>{materialTools}</details> : null}
       {isDeck ? (
-        <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
+        <div className="live-deck-workspace">
           <div className="card">
             <div className="card-head">
               <div className="card-title">
-                Slide {slideIndex + 1} of {slides.length}
+                Client presentation
               </div>
+            </div>
+            <div className="live-presentation-tools">
+              {materialTools}
+              <div className="live-screen-actions">
+                <button type="button" className="btn btn-primary btn-sm" onClick={openClientScreen}>
+                  <Monitor />
+                  Open client screen
+                </button>
+                <button type="button" className="btn btn-ghost btn-sm" onClick={() => setPreview(true)}>
+                  <Eye />
+                  Preview as client
+                </button>
+              </div>
+            </div>
+            <LiveDeckStage presentation={presentation} slides={slides} index={slideIndex} />
+            <div className="live-slide-navigation">
               <div className="flex gap-2">
                 <button
                   type="button"
@@ -550,21 +559,17 @@ export function LiveCallStep({
                   <ChevronRight />
                 </button>
               </div>
-            </div>
-            {/* Half size: this is the AM's own copy of the slide, not the one the client reads. */}
-            <div style={{ width: DECK.width * 0.5, height: DECK.height * 0.5, overflow: "hidden" }}>
-              <div style={{ transform: "scale(0.5)", transformOrigin: "top left" }}>
-                <Slide presentation={presentation} slides={slides} index={slideIndex} />
-              </div>
+              <span className="field-hint">{slideIndex + 1} / {slides.length} · Arrow keys move between slides</span>
             </div>
           </div>
 
           <div className="grid gap-4">
             <div className="card">
               <div className="card-head">
-                <div className="card-title">Presenter — private</div>
+                <div className="card-title">Presenter notes — only you see these</div>
                 <span className="chip">Never on the client screen</span>
               </div>
+              {presentation?.formatRationale ? <details className="mb-3"><summary className="field-hint">Presentation background</summary><p className="field-hint">{presentation.experienceFormat ? presentation.experienceFormat + " · " : ""}{presentation.formatRationale}</p></details> : null}
               {slide?.presenterNotes ? (
                 <p className="text-[0.88rem] leading-7">
                   <Linkified text={slide.presenterNotes} clientId={clientId} />
@@ -608,6 +613,7 @@ export function LiveCallStep({
               )}
             </div>
 
+            <nav className="live-slide-strip" aria-label="Presentation slides">{slides.map((item, index) => <button type="button" key={index} aria-label={"Go to slide " + (index + 1) + ": " + item.title} aria-current={index === slideIndex ? "step" : undefined} onClick={() => setSlideIndex(index)}><span>{String(index + 1).padStart(2, "0")}</span><strong>{item.title}</strong></button>)}</nav>
             <Field
               id={`capture-${noteKey}`}
               label="Capture — decisions, dates, quotes"
@@ -723,6 +729,20 @@ export function LiveCallStep({
       ) : null}
     </div>
   );
+}
+
+/** The single presenter canvas scales to the available width. */
+function LiveDeckStage({ presentation, slides, index }: { presentation?: Presentation; slides: PresentationSlide[]; index: number }) {
+  const host = useRef<HTMLDivElement>(null);
+  const [scale, setScale] = useState(0.5);
+  useEffect(() => {
+    const element = host.current;
+    if (!element) return;
+    const observer = new ResizeObserver(([entry]) => setScale(entry.contentRect.width / DECK.width));
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+  return <div ref={host} className="live-deck-stage" style={{ aspectRatio: DECK.width / DECK.height }}><div style={{ width: DECK.width, height: DECK.height, transform: "scale(" + scale + ")", transformOrigin: "top left" }}><Slide presentation={presentation} slides={slides} index={index} /></div></div>;
 }
 
 export { formatClock };

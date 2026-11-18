@@ -9,6 +9,7 @@ import {
   Eye,
   EyeOff,
   Maximize2,
+  MessageSquareQuote,
   Pencil,
   Play,
   Sparkles,
@@ -20,6 +21,7 @@ import { PresentationEditor } from "@/src/components/mtos/presentation-editor";
 import { DECK, PresentationSlideCanvas } from "@/src/components/mtos/presentation-slide";
 import { readJsonResponse } from "@/src/lib/api/read-json-response";
 import { editableSlide, normalizeSlide, slideIsHiddenFromClient } from "@/src/lib/contracts/presentation-edit";
+import { slidesMissingScript } from "@/src/lib/contracts/presenter-script";
 import type { Presentation, PresentationSlide } from "@/src/lib/mtos-data";
 
 /**
@@ -70,6 +72,7 @@ export function PresentationViewer({
    */
   const [draft, setDraft] = useState<PresentationSlide[] | null>(null);
   const [saving, setSaving] = useState(false);
+  const [scripting, setScripting] = useState(false);
 
   const stageRef = useRef<HTMLDivElement | null>(null);
   const fullscreenRef = useRef<HTMLDivElement | null>(null);
@@ -82,6 +85,7 @@ export function PresentationViewer({
   // does not light up the unsaved badge for the whole call.
   const asSaved = (list: PresentationSlide[]) => JSON.stringify(list.map((slide) => editableSlide(normalizeSlide(slide))));
   const dirty = editing && asSaved(presentation?.slides || []) !== asSaved(draft);
+  const missingScripts = slidesMissingScript(presentation?.slides);
 
   const go = useCallback(
     (delta: number) => setIndex((i) => Math.min(Math.max(i + delta, 0), Math.max(count - 1, 0))),
@@ -201,6 +205,25 @@ export function PresentationViewer({
     return () => window.removeEventListener("beforeunload", onLeave);
   }, [dirty]);
 
+  /** The spoken script for every slide, written against the deck as it now stands. */
+  async function writeScripts() {
+    setScripting(true);
+    setError(null);
+    try {
+      const response = await fetch(`/api/monthly-touches/${touchId}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "generate_presentation_scripts", target }),
+      });
+      const payload = await readJsonResponse<{ error?: string }>(response);
+      if (!response.ok) throw new Error(payload?.error || "The presenter scripts could not be written.");
+      globalThis.location.reload();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "The presenter scripts could not be written.");
+      setScripting(false);
+    }
+  }
+
   function startEditing() {
     setError(null);
     setDraft((presentation?.slides || []).map((slide) => ({ ...slide })));
@@ -289,10 +312,22 @@ export function PresentationViewer({
             </>
           ) : null}
           {!readOnly && presentation?.status === "generated" && presentation.slides?.length ? (
-            <button type="button" onClick={editing ? stopEditing : startEditing} className="btn btn-ghost">
-              {editing ? <X className="h-4 w-4" /> : <Pencil className="h-4 w-4" />}
-              {editing ? "Close editor" : "Edit slides"}
-            </button>
+            <>
+              <button type="button" onClick={editing ? stopEditing : startEditing} className="btn btn-ghost">
+                {editing ? <X className="h-4 w-4" /> : <Pencil className="h-4 w-4" />}
+                {editing ? "Close editor" : "Edit slides"}
+              </button>
+              {/* Written here rather than only on the call screen: the AM reads the scripts through
+                  while preparing, and edits them in the slide editor before the client is on. */}
+              <button type="button" onClick={() => void writeScripts()} disabled={scripting || dirty} className="btn btn-ghost">
+                <MessageSquareQuote className="h-4 w-4" />
+                {scripting
+                  ? "Writing scripts…"
+                  : missingScripts
+                    ? `Write presenter scripts (${missingScripts} missing)`
+                    : "Rewrite presenter scripts"}
+              </button>
+            </>
           ) : null}
           {!readOnly ? <button
             type="button"

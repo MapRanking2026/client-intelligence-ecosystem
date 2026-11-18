@@ -741,6 +741,21 @@ export function PresentationEditor({
           onChange={(event) => patch({ presenterNotes: event.target.value })}
         />
       </label>
+
+      <label className="field-label">
+        Spoken script — the words you say on this slide
+        <textarea
+          className="textarea"
+          rows={5}
+          maxLength={EDIT_LIMITS.presenterScript}
+          value={slide.presenterScript || ""}
+          placeholder="Written by “Write the scripts” on the live call screen, and editable here."
+          onChange={(event) => patch({ presenterScript: event.target.value })}
+        />
+        <span className="field-hint">
+          Read aloud as written. Say what the figure means for this client&apos;s business, not what it is called.
+        </span>
+      </label>
     </div>
   );
 }

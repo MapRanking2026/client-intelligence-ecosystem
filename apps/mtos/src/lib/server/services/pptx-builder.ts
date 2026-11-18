@@ -611,7 +611,19 @@ export async function buildPptx(
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${rels.join("")}</Relationships>`,
     );
 
-    zip.file(`ppt/notesSlides/notesSlide${n}.xml`, notesXml(slide.presenterNotes || ""));
+    // PowerPoint's notes pane is presenter-only, the same surface as the in-app presenter panel,
+    // so it carries both: the words to say first, then what to remember about the slide.
+    zip.file(
+      `ppt/notesSlides/notesSlide${n}.xml`,
+      notesXml(
+        [
+          slide.presenterScript?.trim(),
+          slide.presenterNotes?.trim() ? `NOTES — do not read aloud:\n${slide.presenterNotes.trim()}` : "",
+        ]
+          .filter(Boolean)
+          .join("\n\n"),
+      ),
+    );
     zip.file(
       `ppt/notesSlides/_rels/notesSlide${n}.xml.rels`,
       `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>

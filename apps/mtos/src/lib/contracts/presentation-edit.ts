@@ -42,6 +42,7 @@ export const EDIT_LIMITS = {
   section: 120,
   footnote: 400,
   presenterNotes: 4000,
+  presenterScript: 1600,
   bullets: 24,
   bulletText: 400,
   stats: 6,
@@ -166,6 +167,9 @@ export function normalizeSlide(slide: PresentationSlide): PresentationSlide {
     ...(slide.subtitle?.trim() ? { subtitle: text(slide.subtitle, EDIT_LIMITS.subtitle) } : {}),
     ...(slide.footnote?.trim() ? { footnote: text(slide.footnote, EDIT_LIMITS.footnote) } : {}),
     ...(slide.presenterNotes?.trim() ? { presenterNotes: text(slide.presenterNotes, EDIT_LIMITS.presenterNotes) } : {}),
+    // The spoken script travels with the slide, so reordering or editing a deck never silently
+    // drops the words the AM is about to read out.
+    ...(slide.presenterScript?.trim() ? { presenterScript: text(slide.presenterScript, EDIT_LIMITS.presenterScript) } : {}),
   };
 
   if (body === "bullets") {

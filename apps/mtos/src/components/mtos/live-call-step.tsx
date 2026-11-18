@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { ChevronLeft, ChevronRight, Eye, Monitor, PhoneOff, Play, X } from "lucide-react";
 
 import { Linkified } from "@/src/components/mtos/annotate";
+import { formatSpeakingTime, notesBullets, scriptParagraphs } from "@/src/lib/contracts/presenter-script";
 import { DECK, PresentationSlideCanvas } from "@/src/components/mtos/presentation-slide";
 import { SourceChips } from "@/src/components/mtos/source-chip";
 import { useTouchAutosave } from "@/src/components/mtos/use-touch-autosave";
@@ -249,6 +250,12 @@ export function LiveCallStep({
   const router = useRouter();
   const autosave = useTouchAutosave(touchId);
 
+  // Script or notes on the presenter card. Defaults to the script: during a call the question is
+  // what to say, and the notes are one click away for the slides where the AM wants the caveats.
+  const [presenterView, setPresenterView] = useState<"script" | "notes">("script");
+  const [scriptBusy, setScriptBusy] = useState(false);
+  const [scriptError, setScriptError] = useState("");
+
   // The three timestamps are held locally as well as on the server so Start call and End call
   // change the header on the click rather than after the round trip -- an AM pressing Start while
   // the client says hello should not be watching a spinner.
@@ -307,6 +314,31 @@ export function LiveCallStep({
    * slide as the dependency otherwise, which recomputes this on every slide object identity
    * change and makes it refuse to optimise the component at all.
    */
+  // Read off the slide on screen rather than memoised on the slide object: the script and the
+  // notes are plain text, and splitting them is cheaper than tracking their identity.
+  const scriptBlocks = scriptParagraphs(slide?.presenterScript);
+  const noteBullets = notesBullets(slide?.presenterNotes);
+
+  /** Write the spoken script for every slide of this deck, then reload so the panel has it. */
+  async function writeScripts() {
+    setScriptBusy(true);
+    setScriptError("");
+    try {
+      const response = await fetch(`/api/monthly-touches/${touchId}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "generate_presentation_scripts" }),
+      });
+      const payload = (await response.json().catch(() => ({}))) as { error?: string };
+      if (!response.ok) throw new Error(payload.error || "The presenter scripts could not be written.");
+      router.refresh();
+    } catch (caught) {
+      setScriptError(caught instanceof Error ? caught.message : "The presenter scripts could not be written.");
+    } finally {
+      setScriptBusy(false);
+    }
+  }
+
   const slideSectionId = slide?.sectionId;
   const slidePart = useMemo(
     () => (slideSectionId ? parts.find((candidate) => candidate.sectionId === slideSectionId) : undefined),
@@ -566,17 +598,85 @@ export function LiveCallStep({
           <div className="grid gap-4">
             <div className="card">
               <div className="card-head">
-                <div className="card-title">Presenter notes — only you see these</div>
-                <span className="chip">Never on the client screen</span>
+                <div className="card-title">
+                  {presenterView === "script" ? "Script — say this, only you see it" : "Presenter notes — only you see these"}
+                </div>
+                {/* Script or notes. Two different jobs: the words to say, and what to remember
+                    about the slide. Neither ever reaches the client screen. */}
+                <div className="flex items-center gap-1" role="group" aria-label="Presenter view">
+                  <button
+                    type="button"
+                    className={presenterView === "script" ? "btn btn-primary btn-sm" : "btn btn-ghost btn-sm"}
+                    aria-pressed={presenterView === "script"}
+                    onClick={() => setPresenterView("script")}
+                  >
+                    Script
+                  </button>
+                  <button
+                    type="button"
+                    className={presenterView === "notes" ? "btn btn-primary btn-sm" : "btn btn-ghost btn-sm"}
+                    aria-pressed={presenterView === "notes"}
+                    onClick={() => setPresenterView("notes")}
+                  >
+                    Notes
+                  </button>
+                  <span className="chip">Never on the client screen</span>
+                </div>
               </div>
               {presentation?.formatRationale ? <details className="mb-3"><summary className="field-hint">Presentation background</summary><p className="field-hint">{presentation.experienceFormat ? presentation.experienceFormat + " · " : ""}{presentation.formatRationale}</p></details> : null}
-              {slide?.presenterNotes ? (
-                <p className="text-[0.88rem] leading-7">
-                  <Linkified text={slide.presenterNotes} clientId={clientId} />
-                </p>
+
+              {presenterView === "script" ? (
+                scriptBlocks.length ? (
+                  <div className="grid gap-3">
+                    {scriptBlocks.map((block, index) => (
+                      <p key={`script-${index}`} className="text-[0.95rem] leading-8">
+                        {block}
+                      </p>
+                    ))}
+                    <p className="field-hint">
+                      Read it as written, in your own voice. {formatSpeakingTime(slide?.presenterScript)}.{" "}
+                      <button
+                        type="button"
+                        className="ilink"
+                        disabled={scriptBusy}
+                        onClick={() => void writeScripts()}
+                        style={{ cursor: "pointer" }}
+                      >
+                        {scriptBusy ? "Rewriting…" : "Rewrite every script"}
+                      </button>
+                    </p>
+                    {scriptError ? <p role="alert" className="text-[0.86rem]">{scriptError}</p> : null}
+                  </div>
+                ) : (
+                  <div className="grid gap-2">
+                    <p className="muted text-[0.86rem]">
+                      No script has been written for this slide yet. It writes the words to say on every slide of this
+                      deck — what each figure means for this client&apos;s business — from the slides as they now stand.
+                    </p>
+                    <div>
+                      <button
+                        type="button"
+                        className="btn btn-primary btn-sm"
+                        disabled={scriptBusy || !slides.length}
+                        onClick={() => void writeScripts()}
+                      >
+                        {scriptBusy ? "Writing the scripts…" : "Write the scripts"}
+                      </button>
+                    </div>
+                    {scriptError ? <p role="alert" className="text-[0.86rem]">{scriptError}</p> : null}
+                  </div>
+                )
+              ) : noteBullets.length ? (
+                <ul className="grid gap-2">
+                  {noteBullets.map((bullet, index) => (
+                    <li key={`note-${index}`} className="text-[0.88rem] leading-7">
+                      <Linkified text={bullet} clientId={clientId} />
+                    </li>
+                  ))}
+                </ul>
               ) : (
                 <p className="muted text-[0.86rem]">
-                  No presenter script was written for this slide. Use the points below and the client&apos;s own
+                  No presenter notes were written for this slide. Use the points below and the client&apos;s own
                   answers.
                 </p>
               )}

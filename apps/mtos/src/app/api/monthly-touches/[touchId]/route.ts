@@ -11,6 +11,8 @@ import { prepareMonthlyTouch } from "@/src/lib/server/services/monthly-touch-pre
 import { runResearchStage } from "@/src/lib/server/services/prep-workflow-service";
 import { generatePresentation } from "@/src/lib/server/services/presentation-service";
 import { savePresentationSlides } from "@/src/lib/server/services/presentation-edit-service";
+import { generatePresenterScripts } from "@/src/lib/server/services/presentation-script-service";
+import { SCRIPT_LIMITS } from "@/src/lib/contracts/presenter-script";
 import { EDIT_LIMITS } from "@/src/lib/contracts/presentation-edit";
 import type { PresentationSlide } from "@/src/lib/mtos-data";
 import { generateLiveCallGuide } from "@/src/lib/server/services/live-call-guide-service";
@@ -141,6 +143,7 @@ const presentationSlideSchema = z.object({
     .optional(),
   footnote: z.string().max(EDIT_LIMITS.footnote).optional(),
   presenterNotes: z.string().max(EDIT_LIMITS.presenterNotes).optional(),
+  presenterScript: z.string().max(SCRIPT_LIMITS.perSlide).optional(),
 });
 
 const yesNoSchema = z.enum(["Yes", "No"]);
@@ -411,6 +414,10 @@ const touchRequestSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("prepare_and_generate") }),
   z.object({ action: z.literal("generate_call_guide") }),
   z.object({ action: z.literal("generate_presentation") }),
+  // The spoken script for every slide, written against the final deck -- after the AM's edits and
+  // after the rank comparisons are inserted, which is why it is its own pass rather than part of
+  // generating the deck.
+  z.object({ action: z.literal("generate_presentation_scripts"), target: z.enum(["touch", "loom"]).optional() }),
   // The AM's own edits to a generated deck. The slides come back in the order they are on screen,
   // carrying text and structure only: the rank comparison on a slide is reattached from storage by
   // the service, never read off the request, and `generatedAt` is the guard against saving these
@@ -841,6 +848,9 @@ export async function POST(
         break;
       case "advance_progress":
         result = await advanceTouchProgress(context, touchId, payload.step);
+        break;
+      case "generate_presentation_scripts":
+        result = await generatePresenterScripts(context, touchId, payload.target || "touch");
         break;
       case "save_presentation_slides":
         result = await savePresentationSlides(context, touchId, {

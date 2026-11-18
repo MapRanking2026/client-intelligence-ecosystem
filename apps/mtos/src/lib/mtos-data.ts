@@ -745,6 +745,15 @@ export interface PresentationSlide {
    * pane in presentation-viewer.tsx and the notesSlide in the .pptx export.
    */
   presenterNotes?: string;
+  /**
+   * The words to say on this slide, written to be read aloud as they stand.
+   *
+   * Not a summary of the slide and not a reminder of what to cover -- those are `presenterNotes`.
+   * This is the spoken sentences themselves, addressed to the client in the second person and
+   * framed around what the slide's figures mean for their business. Written on demand by
+   * presentation-script-service, and editable like any other field on the slide.
+   */
+  presenterScript?: string;
   /** True once an account manager has changed this slide from what the model wrote. */
   edited?: boolean;
   /**
@@ -776,6 +785,8 @@ export interface Presentation {
   /** When an account manager last edited a slide by hand, and who. Regenerating clears both. */
   editedAt?: string;
   editedBy?: string;
+  /** When the spoken scripts were last written for this deck. */
+  scriptsGeneratedAt?: string;
   model?: string;
   provider?: string;
   errorMessage?: string;

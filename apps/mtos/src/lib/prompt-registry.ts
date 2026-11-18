@@ -32,6 +32,12 @@ export const PROMPT_BINDINGS: Record<string, PromptBinding[]> = {
       source: "src/lib/server/services/presentation-service.ts",
     },
   ],
+  monthly_touch_presentation_script_prompt: [
+    {
+      module: "Client-facing presentation (verbatim spoken script, one per slide)",
+      source: "src/lib/server/services/presentation-script-service.ts",
+    },
+  ],
   internal_notes_prompt: [
     {
       module: "Post-meeting workflow (Post-Monthly Touch Notes written to the Client's Book)",

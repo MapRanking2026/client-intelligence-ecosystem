@@ -1,9 +1,10 @@
 "use client";
 
+import { RescheduleCalendar } from "./reschedule-calendar";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import type { NoShowState } from "@/src/lib/contracts/no-show";
-import { calendarSlotAvailable, usableLoomUrl, type RescheduleAvailability } from "@/src/lib/contracts/no-show";
+import { usableLoomUrl } from "@/src/lib/contracts/no-show";
 import { readJsonResponse } from "@/src/lib/api/read-json-response";
 
 export function NoShowPanel({ touchId, initial }: { touchId: string; initial?: NoShowState }) {
@@ -14,25 +15,9 @@ export function NoShowPanel({ touchId, initial }: { touchId: string; initial?: N
   const [url, setUrl] = useState(initial?.url || "");
   const [subject, setSubject] = useState(initial?.email?.subject || "");
   const [html, setHtml] = useState(initial?.email?.html || "");
-  const [when, setWhen] = useState("");
-  const [confirm, setConfirm] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [checkedAt, setCheckedAt] = useState(() => Date.now());
-  const [availability, setAvailability] = useState<RescheduleAvailability>();
-  async function loadAvailability() {
-    setBusy(true); setError("");
-    try {
-      const response = await fetch(`/api/monthly-touches/${encodeURIComponent(touchId)}/no-show`);
-      const result = await readJsonResponse<{ data?: typeof availability; error?: string }>(response);
-      if (!response.ok || !result.data) throw new Error(result.error || "Availability could not be loaded.");
-      setAvailability(result.data);
-      setCheckedAt(Date.now());
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "Availability could not be loaded."); }
-    finally { setBusy(false); }
-  }
-  const available = Boolean(availability && when && calendarSlotAvailable(new Date(when).toISOString(), availability, checkedAt));
-  const suggestedTimes = availability && when ? [9, 10, 11, 12, 13, 14, 15, 16].map((hour) => `${when.slice(0, 10)}T${String(hour).padStart(2, "0")}:00`).filter((candidate) => calendarSlotAvailable(new Date(candidate).toISOString(), availability, checkedAt)) : [];
+  const [checkedAt] = useState(() => Date.now());
   async function run(body: object) {
     const response = await fetch(`/api/monthly-touches/${encodeURIComponent(touchId)}/no-show`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
     let result: { data?: NoShowState; error?: string };
@@ -66,13 +51,7 @@ export function NoShowPanel({ touchId, initial }: { touchId: string; initial?: N
         <button type="button" className="card text-left" disabled={busy} onClick={() => void act({ action: "select", resolution: "reschedule" })}><strong>Reschedule Meeting</strong><p>Reschedule the existing Monthly Touch meeting and return the workflow to Preparation.</p></button>
         <button type="button" className="card text-left" disabled={busy} onClick={() => void act({ action: "select", resolution: "loom" })}><strong>Send Loom Video Update</strong><p>Replace the live meeting with a recorded video update that can be sent to the client by email.</p></button>
       </div> : chosen === "reschedule" ? <>
-        <p>The existing Calendar event will be updated, keeping its attendees and meeting link. Calendar write consent is required.</p>
-        <button type="button" className="btn" disabled={busy} onClick={() => void loadAvailability()}>Check calendar availability</button>
-        <label className="field">New meeting date and time (your browser time zone)<input className="input" type="datetime-local" value={when} onChange={(e) => { setWhen(e.target.value); setConfirm(false); }} disabled={busy} /></label>
-        {suggestedTimes.length ? <div className="flex flex-wrap gap-2" aria-label="Available meeting times"><span>Available starts on this date:</span>{suggestedTimes.map((candidate) => <button type="button" className="btn btn-sm" key={candidate} disabled={busy} onClick={() => { setWhen(candidate); setConfirm(false); }}>{candidate.slice(11)}</button>)}</div> : null}
-        {availability ? <><p>Checked your calendar for the next 30 days. Meeting duration: {availability.durationMinutes} minutes. Client availability is not verified.</p><p role="status">{when ? available ? "Selected time is available on your calendar." : "Choose a free time within the next 30 days." : "Select a date and time."}</p><details><summary>Busy times</summary><ul>{availability.busy.map((period, i) => <li key={i}>{period.start} – {period.end}</li>)}</ul></details></> : null}
-        <button type="button" className="btn" disabled={busy || !available} onClick={() => setConfirm(true)}>Review rescheduling</button>
-        {confirm ? <div role="group" aria-label="Confirm rescheduling"><p>Move this meeting to {new Date(when).toLocaleString()} and return to Preparation? Previous attempt records will be archived.</p><button type="button" className="btn btn-primary" disabled={busy} onClick={() => void act({ action: "reschedule", scheduledAt: new Date(when).toISOString(), confirmed: true })}>Confirm rescheduling</button></div> : null}
+        <RescheduleCalendar touchId={touchId} saving={busy} submissionError={error} onConfirm={(scheduledAt) => act({ action: "reschedule", scheduledAt, confirmed: true })} />
       </> : <>
         <p className="chip">No-Show / Loom Video Update</p>
         <button type="button" className="btn" disabled={busy || Boolean(state?.sentAt)} onClick={() => void act({ action: "generate" })}>{state?.presentation ? "Regenerate presentation and script" : "Generate presentation and script"}</button>

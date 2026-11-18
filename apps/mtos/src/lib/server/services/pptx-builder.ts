@@ -1,4 +1,4 @@
-import { comparisonPins, rankColor, rankSummary, rankValue } from "@/src/lib/contracts/rank-comparison";
+import { rankSummary } from "@/src/lib/contracts/rank-comparison";
 import { clientPresentation } from "@/src/lib/contracts/client-content";
 import JSZip from "jszip";
 
@@ -7,11 +7,18 @@ import type { Presentation, PresentationSlide, PresentationTone } from "@/src/li
 /**
  * Builds a real .pptx from a stored Presentation.
  *
- * Native shapes and text, not pictures of slides. Rendering the HTML viewer to
- * images would need a headless browser (which Vercel's runtime does not give us)
- * and would hand the client a deck nobody can edit or copy a number out of. The
- * trade is that the file is faithful to the brand and the content rather than
- * pixel-identical to the in-app viewer.
+ * Native shapes and text, not pictures of slides. Rendering the whole viewer to
+ * images would hand the client a deck nobody can edit or copy a number out of, so
+ * the file is faithful to the brand and the content rather than pixel-identical to
+ * the in-app viewer.
+ *
+ * The keyword comparison slides are the one deliberate exception. Those carry the
+ * provider's OWN captured screenshot of its Report Builder comparison, because the
+ * map is evidence: pins redrawn from grid data here would be a picture MapRanking
+ * drew of a measurement, sitting on a client slide and looking exactly like the
+ * measurement itself. The capture is approved by the AM before it ever reaches a
+ * deck (see original-rank-report-service), and a slide whose image is missing says
+ * so rather than falling back to a drawing of it.
  *
  * A .pptx is a zip of OOXML. The minimum viable package is one presentation part,
  * one master, one layout, one theme, a notes master, and the slides -- each with
@@ -172,14 +179,49 @@ function logoPic(x: number, y: number, w: number, h: number): string {
   )}" y="${px(y)}"/><a:ext cx="${px(w)}" cy="${px(h)}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr></p:pic>`;
 }
 
+/**
+ * Picture shape for this slide's rank comparison capture, which rId5 points at.
+ *
+ * Separate from `logoPic` because the two live on different relationship ids: the logo is one
+ * shared part, while each comparison slide carries its own image, and reusing rId4 for both would
+ * make a slide that has a logo and a comparison show the same picture twice.
+ */
+function rankPic(x: number, y: number, w: number, h: number, name: string): string {
+  const id = nextId();
+  return `<p:pic><p:nvPicPr><p:cNvPr id="${id}" name="${esc(name)}" descr="${esc(name)}"/><p:cNvPicPr/><p:nvPr/></p:nvPicPr><p:blipFill><a:blip r:embed="rId5"/><a:stretch><a:fillRect/></a:stretch></p:blipFill><p:spPr><a:xfrm><a:off x="${px(
+    x,
+  )}" y="${px(y)}"/><a:ext cx="${px(w)}" cy="${px(h)}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr></p:pic>`;
+}
+
+/**
+ * The image at its own aspect ratio, centred in the space the slide gives it.
+ *
+ * Stretching the capture to fill the box would distort a grid of map pins, which is the one thing
+ * on the slide a client reads as a measurement.
+ */
+function fitBox(
+  image: { width: number; height: number },
+  box: { x: number; y: number; w: number; h: number },
+): { x: number; y: number; w: number; h: number } {
+  const width = image.width > 0 ? image.width : box.w;
+  const height = image.height > 0 ? image.height : box.h;
+  const scale = Math.min(box.w / width, box.h / height);
+  const w = Math.round(width * scale);
+  const h = Math.round(height * scale);
+  return { x: Math.round(box.x + (box.w - w) / 2), y: Math.round(box.y + (box.h - h) / 2), w, h };
+}
+
 function buildSlideShapes(
   slide: PresentationSlide,
   deck: Presentation,
   number: number,
   total: number,
-): { xml: string; usesLogo: boolean } {
+  /** True when this slide's approved comparison screenshot is in hand and can be embedded. */
+  hasRankImage = false,
+): { xml: string; usesLogo: boolean; usesRankImage: boolean } {
   const parts: string[] = [];
   let usesLogo = false;
+  let usesRankImage = false;
 
   if (slide.layout === "cover" || slide.layout === "closing") {
     const isCover = slide.layout === "cover";
@@ -233,7 +275,7 @@ function buildSlideShapes(
         }),
       );
     }
-    return { xml: parts.join(""), usesLogo };
+    return { xml: parts.join(""), usesLogo, usesRankImage };
   }
 
   // Shared chrome for every content slide.
@@ -259,26 +301,64 @@ function buildSlideShapes(
 
   if (slide.layout === "rank_comparison" && slide.rankComparison) {
     const comparison = slide.rankComparison;
+    const image = comparison.originalImage;
     parts.push(rect(64, bodyTop, 1152, 48, C.paleBlue, { round: true }));
-    parts.push(textBox(84, bodyTop + 8, 1110, 36, [rankSummary(comparison)], { size: 16, bold: true, color: C.deepBlue }));
-    [comparison.previous, comparison.current].forEach((scan, index) => {
-      const x = 64 + index * 588, y = bodyTop + 66;
-      parts.push(rect(x, y, 564, 326, index ? "F0FAF7" : "F7F9FC", { line: C.border, round: true }));
-      parts.push(textBox(x + 20, y + 14, 520, 22, [index ? "LATEST AVAILABLE SCAN" : "PREVIOUS SCAN"], { size: 10, color: index ? "16866B" : C.gray, bold: true }));
-      parts.push(textBox(x + 20, y + 38, 520, 32, [scan?.grid.scanDate.slice(0,10) || "No verified baseline"], { size: 17, bold: true, color: C.navy }));
-      if (!scan) { parts.push(textBox(x + 24, y + 135, 480, 100, ["A matching previous scan was not available. Only the latest measured result is shown."], { size: 16, color: C.gray })); return; }
-      parts.push(rect(x + 20, y + 82, 280, 224, C.white, { line: C.border, round: true }));
-      comparisonPins(comparison, scan.grid).forEach(pin => {
-        const radius = Math.max(4, Math.min(13, 88 / Math.max(scan.grid.gridSize,1)));
-        const cx = x + 40 + pin.x * 240, cy = y + 100 + pin.y * 188;
-        parts.push(rect(cx - radius, cy - radius, radius * 2, radius * 2, rankColor(pin.rank).slice(1), { round: true }).replace('prst="roundRect"', 'prst="ellipse"'));
-        parts.push(textBox(cx - radius, cy - radius + 1, radius * 2, radius * 2, [pin.rank && pin.rank > 0 ? String(pin.rank) : "–"], { size: Math.max(4, radius * 0.6), color: C.white, align: "ctr" }));
-      });
-      parts.push(textBox(x + 326, y + 96, 218, 24, ["AVERAGE RANK"], { size: 10, color: C.gray }));
-      parts.push(textBox(x + 326, y + 125, 218, 64, [rankValue(scan.grid.averageRankPosition)], { size: 30, bold: true, color: C.navy }));
-      parts.push(textBox(x + 326, y + 204, 218, 64, ["Top 3: " + (scan.grid.top3Percent === null ? "—" : scan.grid.top3Percent + "%"), "Local voice: " + (scan.grid.shareOfLocalVoicePercent === null ? "—" : scan.grid.shareOfLocalVoicePercent + "%")], { size: 13, color: C.navy }));
-    });
-    parts.push(textBox(64, bodyTop + 406, 1152, 30, [comparison.baselineLabel + " · Green: top 3 · Gold: 4–10 · Coral: 11+ · Gray: not found"], { size: 9, color: C.gray }));
+    parts.push(
+      textBox(84, bodyTop + 8, 1110, 36, [rankSummary(comparison)], { size: 16, bold: true, color: C.deepBlue }),
+    );
+
+    const frame = { x: 64, y: bodyTop + 64, w: 1152, h: 392 };
+    parts.push(rect(frame.x, frame.y, frame.w, frame.h, "F7F9FC", { line: C.border, round: true }));
+
+    if (image && hasRankImage) {
+      const fitted = fitBox(image, { x: frame.x + 8, y: frame.y + 8, w: frame.w - 16, h: frame.h - 16 });
+      parts.push(
+        rankPic(
+          fitted.x,
+          fitted.y,
+          fitted.w,
+          fitted.h,
+          `Rank Tracker comparison for ${comparison.keyword}${
+            comparison.previous ? `, ${comparison.previous.grid.scanDate.slice(0, 10)} to ${comparison.current.grid.scanDate.slice(0, 10)}` : ""
+          }`,
+        ),
+      );
+      usesRankImage = true;
+    } else {
+      // No drawing stands in for the capture: a redrawn grid on a client slide would read as the
+      // measurement itself. The slide says what is missing and how to put it back.
+      parts.push(
+        textBox(
+          frame.x + 40,
+          frame.y + 150,
+          frame.w - 80,
+          120,
+          [
+            "The approved Rank Tracker screenshot for this comparison is not available.",
+            "Re-approve it on the Monthly Touch and download the deck again. No recreated map is shown.",
+          ],
+          { size: 16, color: C.gray, lineSpacePct: 130000 },
+        ),
+      );
+    }
+
+    const dates = comparison.previous
+      ? `${comparison.previous.grid.scanDate.slice(0, 10)} → ${comparison.current.grid.scanDate.slice(0, 10)}`
+      : comparison.current.grid.scanDate.slice(0, 10);
+    parts.push(
+      textBox(
+        64,
+        frame.y + frame.h + 8,
+        1152,
+        30,
+        [
+          [comparison.baselineLabel, dates, comparison.sameGrid ? "" : "Scan coverage differs; no like-for-like change is claimed."]
+            .filter(Boolean)
+            .join(" · "),
+        ],
+        { size: 9, color: C.gray },
+      ),
+    );
   } else if (slide.layout === "stat_callouts" && slide.stats?.length) {
     const n = Math.min(slide.stats.length, 4);
     const gap = 24;
@@ -378,7 +458,7 @@ function buildSlideShapes(
     textBox(900, 650, 316, 28, [`MapRanking  |  ${number} / ${total}`], { size: 10, color: C.gray, align: "r" }),
   );
 
-  return { xml: parts.join(""), usesLogo };
+  return { xml: parts.join(""), usesLogo, usesRankImage };
 }
 
 function slideXml(body: string): string {
@@ -406,13 +486,30 @@ const SLIDE_LAYOUT = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 const NOTES_MASTER = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <p:notesMaster xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"><p:cSld><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr/><p:sp><p:nvSpPr><p:cNvPr id="2" name="Notes Placeholder"/><p:cNvSpPr><a:spLocks noGrp="1"/></p:cNvSpPr><p:nvPr><p:ph type="body" idx="1"/></p:nvPr></p:nvSpPr><p:spPr><a:xfrm><a:off x="914400" y="1143000"/><a:ext cx="5029200" cy="4114800"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr><p:txBody><a:bodyPr/><a:lstStyle/><a:p/></p:txBody></p:sp></p:spTree></p:cSld><p:clrMap bg1="lt1" tx1="dk1" bg2="lt2" tx2="dk2" accent1="accent1" accent2="accent2" accent3="accent3" accent4="accent4" accent5="accent5" accent6="accent6" hlink="hlink" folHlink="folHlink"/></p:notesMaster>`;
 
-export async function buildPptx(deck: Presentation, logo: Buffer | null): Promise<Buffer> {
+export async function buildPptx(
+  deck: Presentation,
+  logo: Buffer | null,
+  /**
+   * The approved comparison captures, by image id. Passed in rather than read here because the
+   * builder stays free of Firestore and the tenant context -- the route that already resolved both
+   * loads them (see presentation.pptx/route.ts). An id with no bytes is not fatal: that slide says
+   * its screenshot is missing instead of the deck failing to download.
+   */
+  rankImages?: Map<string, Buffer>,
+): Promise<Buffer> {
   deck = clientPresentation(deck)!;
   shapeId = 1;
   const zip = new JSZip();
   const slides = deck.slides || [];
 
-  const built = slides.map((slide, index) => buildSlideShapes(slide, deck, index + 1, slides.length));
+  const imageFor = (slide: PresentationSlide): Buffer | undefined => {
+    const id = slide.rankComparison?.originalImage?.id;
+    return id ? rankImages?.get(id) : undefined;
+  };
+
+  const built = slides.map((slide, index) =>
+    buildSlideShapes(slide, deck, index + 1, slides.length, Boolean(imageFor(slide))),
+  );
   const anyLogo = built.some((entry) => entry.usesLogo) && Boolean(logo);
 
   zip.file(
@@ -496,6 +593,16 @@ export async function buildPptx(deck: Presentation, logo: Buffer | null): Promis
     if (built[index].usesLogo && logo) {
       rels.push(
         `<Relationship Id="rId4" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/logo.png"/>`,
+      );
+    }
+    // One media part per comparison slide, named after the slide rather than the image id: the
+    // same comparison can legitimately appear on two slides, and a shared part would tie their
+    // relationship ids together.
+    const rankImage = built[index].usesRankImage ? imageFor(slide) : undefined;
+    if (rankImage) {
+      zip.file(`ppt/media/rank${n}.png`, rankImage);
+      rels.push(
+        `<Relationship Id="rId5" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/rank${n}.png"/>`,
       );
     }
     zip.file(

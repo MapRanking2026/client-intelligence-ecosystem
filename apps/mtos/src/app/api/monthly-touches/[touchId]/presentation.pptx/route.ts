@@ -6,6 +6,7 @@ import { NextResponse } from "next/server";
 
 import { resolveTenantContext } from "@/src/lib/auth/resolve-tenant-context";
 import { getMtosDataSource } from "@/src/lib/server/data/seed-mtos-data-source";
+import { loadRankImage } from "@/src/lib/server/services/original-rank-report-service";
 import { buildPptx } from "@/src/lib/server/services/pptx-builder";
 
 /**
@@ -52,7 +53,27 @@ export async function GET(request: Request, { params }: { params: Promise<{ touc
     logo = null;
   }
 
-  const file = await buildPptx(presentation, logo);
+  // The approved Report Builder captures for the comparison slides. Loaded here because this is
+  // where the tenant context lives; one that cannot be read is skipped rather than failing the
+  // download, and its slide then says the screenshot is missing instead of redrawing the map.
+  const rankImages = new Map<string, Buffer>();
+  const wanted = new Map(
+    (presentation.slides || [])
+      .flatMap((slide) => (slide.rankComparison?.originalImage ? [slide.rankComparison.originalImage] : []))
+      .map((image) => [image.id, image] as const),
+  );
+  await Promise.all(
+    [...wanted.values()].map(async (image) => {
+      try {
+        const loaded = await loadRankImage(context, image);
+        rankImages.set(image.id, loaded.bytes);
+      } catch (error) {
+        console.warn(`[presentation.pptx] rank image ${image.id} unavailable`, error);
+      }
+    }),
+  );
+
+  const file = await buildPptx(presentation, logo, rankImages);
   const name = safeFileName(
     [presentation.clientName || "Monthly Touch", presentation.periodLabel].filter(Boolean).join(" "),
   );

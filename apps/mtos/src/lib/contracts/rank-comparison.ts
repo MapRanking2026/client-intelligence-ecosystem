@@ -1,25 +1,24 @@
-import type { HeatmapGrid, KeywordScanPoint, Presentation, PresentationRankComparison, PresentationSlide } from "@/src/lib/mtos-data";
+/**
+ * The rules a keyword comparison obeys before it may sit on a client slide.
+ *
+ * One rule shapes this whole file: MTOS never draws the map. What reaches a deck is the provider's
+ * own captured Report Builder image, approved by the account manager first, because a grid of pins
+ * redrawn here from scan data would look exactly like the measurement while being our picture of
+ * it. The helpers that used to redraw those pins (`comparisonPins`, `rankColor`, `rankValue`) and
+ * the one that guessed last month's scan (`selectPriorMonth`) were removed with the PowerPoint
+ * redraw on 18 November 2026: the account manager now chooses both scan dates explicitly, so there
+ * is nothing left to infer and nothing left to draw.
+ *
+ * What remains is about whether a comparison is honest -- `sameRankGrid` decides whether the two
+ * scans even cover the same ground -- and where its slide belongs in the deck.
+ */
+import type { HeatmapGrid, Presentation, PresentationRankComparison, PresentationSlide } from "@/src/lib/mtos-data";
 
-export function selectPriorMonth(scans: KeywordScanPoint[], current: KeywordScanPoint): KeywordScanPoint | undefined {
-  const date = new Date(current.scanDate);
-  if (!Number.isFinite(date.getTime())) return;
-  const month = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() - 1, 1)).toISOString().slice(0, 7);
-  return scans.filter(scan => scan.reportId !== current.reportId && scan.scanDate.slice(0, 7) === month && Date.parse(scan.scanDate) < Date.parse(current.scanDate)).sort((a, b) => Date.parse(b.scanDate) - Date.parse(a.scanDate))[0];
-}
 export function sameRankGrid(a: HeatmapGrid, b: HeatmapGrid): boolean {
   if ([...a.pins, ...b.pins].some(pin => !Number.isFinite(pin.lat) || !Number.isFinite(pin.lng))) return false;
   const keys = (grid: HeatmapGrid) => grid.pins.map(pin => `${pin.lat.toFixed(5)},${pin.lng.toFixed(5)}`).sort();
   const left = keys(a), right = keys(b);
   return left.length > 0 && new Set(left).size === left.length && left.length === right.length && left.every((key, index) => key === right[index]);
-}
-export function rankValue(value: number | null | undefined): string { return typeof value === "number" && Number.isFinite(value) && value > 0 ? String(Math.round(value * 10) / 10) : "Not available"; }
-export function rankColor(rank: number | null): string { return rank === null || rank <= 0 ? "#8A97A6" : rank <= 3 ? "#16866B" : rank <= 10 ? "#E4A11B" : "#D36755"; }
-/** Shared pin positions for the HTML deck and native PowerPoint shapes; no invented map tiles. */
-export function comparisonPins(comparison: PresentationRankComparison, grid: HeatmapGrid) {
-  const all = [...comparison.current.grid.pins, ...(comparison.previous?.grid.pins || [])].filter(pin => Number.isFinite(pin.lat) && Number.isFinite(pin.lng));
-  const lats = all.map(pin => pin.lat), lngs = all.map(pin => pin.lng);
-  const minLat = Math.min(...lats), maxLat = Math.max(...lats), minLng = Math.min(...lngs), maxLng = Math.max(...lngs);
-  return grid.pins.filter(pin => Number.isFinite(pin.lat) && Number.isFinite(pin.lng)).map(pin => ({ ...pin, x: maxLng === minLng ? 0.5 : (pin.lng - minLng) / (maxLng - minLng), y: maxLat === minLat ? 0.5 : (maxLat - pin.lat) / (maxLat - minLat) }));
 }
 export function rankSummary(comparison: PresentationRankComparison): string {
   if (!comparison.previous) return "No verified prior-month scan available";

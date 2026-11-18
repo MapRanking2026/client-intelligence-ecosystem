@@ -79,6 +79,7 @@
     "check:client-content-ui": "node scripts/check-client-content-ui.cjs",
     "check:gmail-transport": "node scripts/check-gmail-transport.cjs",
     "check:email-client-zone": "tsx scripts/check-email-client-zone.ts",
+    "check:presentation-edit": "tsx scripts/check-presentation-edit.ts",
     "check:rank-comparison": "tsx scripts/check-rank-comparison.ts",
     "check:clickup-markdown": "tsx scripts/check-clickup-markdown.ts",
     "check:email-send-fixes": "node scripts/check-email-send-fixes.cjs"

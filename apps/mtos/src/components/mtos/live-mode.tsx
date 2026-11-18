@@ -531,7 +531,7 @@ export function LiveMode({
             </button>
           </div>
           <div style={{ padding: 18, overflow: "auto" }}>
-            <PresentationViewer touchId={touch.id} presentation={touch.presentation} />
+            <PresentationViewer touchId={touch.id} presentation={touch.presentation} blockedTitles={blockedTaskTitles(touch)} />
           </div>
         </div>
       ) : null}

@@ -1,4 +1,5 @@
 import { PresentationInstructions } from "@/src/components/mtos/presentation-instructions";
+import { blockedTaskTitles } from "@/src/lib/contracts/client-content";
 import { canDeleteTestTouch } from "@/src/lib/contracts/touch-progress";
 import { StartNewMonthlyTouch } from "@/src/components/mtos/start-new-monthly-touch";
 import { GoogleMeetingPanel } from "@/src/components/mtos/google-meeting-panel";
@@ -651,7 +652,7 @@ export default async function MonthlyTouchRunSheetPage({
             {...(touch.review?.declinedSections ? { declinedSections: touch.review.declinedSections } : {})}
             showQaChips={preferences.qaChipsInPresenterView ?? true}
             initialFormat={liveFormat}
-            materialTools={<div className="grid gap-3"><PresentationInstructions touchId={touch.id} initial={touch.presentationInstructions} /><PresentationViewer touchId={touch.id} presentation={touch.presentation} toolsOnly /></div>}
+            materialTools={<div className="grid gap-3"><PresentationInstructions touchId={touch.id} initial={touch.presentationInstructions} /><PresentationViewer touchId={touch.id} presentation={touch.presentation} blockedTitles={blockedTaskTitles(touch)} toolsOnly /></div>}
           /> : null}
 
           {/*

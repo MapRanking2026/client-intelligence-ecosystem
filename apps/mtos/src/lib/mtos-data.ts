@@ -745,6 +745,16 @@ export interface PresentationSlide {
    * pane in presentation-viewer.tsx and the notesSlide in the .pptx export.
    */
   presenterNotes?: string;
+  /** True once an account manager has changed this slide from what the model wrote. */
+  edited?: boolean;
+  /**
+   * What the model wrote, stored the first time an AM changes this slide.
+   *
+   * Carries the editable fields only -- never a nested snapshot, never the rank comparison, which
+   * is reattached from storage on every save. It exists so "revert this slide" is one click during
+   * a call rather than a four-minute regeneration of the whole deck.
+   */
+  generatedSnapshot?: PresentationSlide;
 }
 
 export interface Presentation {
@@ -763,6 +773,9 @@ export interface Presentation {
   formatRationale?: string;
   slides: PresentationSlide[];
   generatedAt?: string;
+  /** When an account manager last edited a slide by hand, and who. Regenerating clears both. */
+  editedAt?: string;
+  editedBy?: string;
   model?: string;
   provider?: string;
   errorMessage?: string;

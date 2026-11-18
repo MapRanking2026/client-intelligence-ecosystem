@@ -10,6 +10,9 @@ import { persistGeneratedFollowThroughDraft } from "@/src/lib/server/services/fo
 import { prepareMonthlyTouch } from "@/src/lib/server/services/monthly-touch-prep-service";
 import { runResearchStage } from "@/src/lib/server/services/prep-workflow-service";
 import { generatePresentation } from "@/src/lib/server/services/presentation-service";
+import { savePresentationSlides } from "@/src/lib/server/services/presentation-edit-service";
+import { EDIT_LIMITS } from "@/src/lib/contracts/presentation-edit";
+import type { PresentationSlide } from "@/src/lib/mtos-data";
 import { generateLiveCallGuide } from "@/src/lib/server/services/live-call-guide-service";
 import {
   analyzePostMeetingTranscript,
@@ -70,6 +73,75 @@ import {
 // model calls plus the dashboard pulls. Matches the ceiling the other long-running
 // routes already use so the combined run isn't cut off mid-generation.
 export const maxDuration = 300;
+
+const toneSchema = z.enum(["neutral", "good", "watch", "risk"]);
+
+/**
+ * One slide as an account manager may send it back.
+ *
+ * Text, structure and position only. `rankComparison` is absent on purpose -- the service copies
+ * it from the stored slide that `generatedIndex` points at, so no request can put a captured
+ * measurement, or something dressed as one, onto a client slide.
+ */
+const presentationSlideSchema = z.object({
+  generatedIndex: z.number().int().min(0).max(500).optional(),
+  layout: z.enum([
+    "cover",
+    "agenda",
+    "rank_comparison",
+    "stat_callouts",
+    "bullets",
+    "two_column",
+    "table",
+    "questions",
+    "status_list",
+    "timeline",
+    "closing",
+  ]),
+  sectionId: z.string().max(4).optional(),
+  section: z.string().max(EDIT_LIMITS.section).optional(),
+  title: z.string().max(EDIT_LIMITS.title),
+  subtitle: z.string().max(EDIT_LIMITS.subtitle).optional(),
+  bullets: z.array(z.string().max(EDIT_LIMITS.bulletText)).max(EDIT_LIMITS.bullets).optional(),
+  stats: z
+    .array(
+      z.object({
+        value: z.string().max(EDIT_LIMITS.statValue),
+        caption: z.string().max(EDIT_LIMITS.statCaption),
+        tone: toneSchema.optional(),
+      }),
+    )
+    .max(EDIT_LIMITS.stats)
+    .optional(),
+  columns: z
+    .array(
+      z.object({
+        heading: z.string().max(EDIT_LIMITS.section),
+        items: z.array(z.string().max(EDIT_LIMITS.bulletText)).max(EDIT_LIMITS.columnItems),
+      }),
+    )
+    .max(EDIT_LIMITS.columns)
+    .optional(),
+  table: z
+    .object({
+      headers: z.array(z.string().max(EDIT_LIMITS.cell)).max(EDIT_LIMITS.tableColumns),
+      rows: z.array(z.array(z.string().max(EDIT_LIMITS.cell)).max(EDIT_LIMITS.tableColumns)).max(EDIT_LIMITS.tableRows),
+    })
+    .optional(),
+  items: z
+    .array(
+      z.object({
+        label: z.string().max(EDIT_LIMITS.itemText),
+        detail: z.string().max(EDIT_LIMITS.itemText).optional(),
+        status: z.string().max(40).optional(),
+        tone: toneSchema.optional(),
+      }),
+    )
+    .max(EDIT_LIMITS.items)
+    .optional(),
+  footnote: z.string().max(EDIT_LIMITS.footnote).optional(),
+  presenterNotes: z.string().max(EDIT_LIMITS.presenterNotes).optional(),
+});
 
 const yesNoSchema = z.enum(["Yes", "No"]);
 const riskRegisterSchema = z.object({
@@ -339,6 +411,16 @@ const touchRequestSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("prepare_and_generate") }),
   z.object({ action: z.literal("generate_call_guide") }),
   z.object({ action: z.literal("generate_presentation") }),
+  // The AM's own edits to a generated deck. The slides come back in the order they are on screen,
+  // carrying text and structure only: the rank comparison on a slide is reattached from storage by
+  // the service, never read off the request, and `generatedAt` is the guard against saving these
+  // slides over a deck that was regenerated in another tab meanwhile.
+  z.object({
+    action: z.literal("save_presentation_slides"),
+    target: z.enum(["touch", "loom"]).optional(),
+    generatedAt: z.string().max(60).optional(),
+    slides: z.array(presentationSlideSchema).min(1).max(EDIT_LIMITS.slides),
+  }),
   z.object({ action: z.literal("analyze_transcript"), transcript: z.string().min(1) }),
   // The one-minute poll the Live step runs after "End call". A POST rather than the read-only
   // GET beside it because a GET route handler can be prerendered or cached under Cache
@@ -759,6 +841,15 @@ export async function POST(
         break;
       case "advance_progress":
         result = await advanceTouchProgress(context, touchId, payload.step);
+        break;
+      case "save_presentation_slides":
+        result = await savePresentationSlides(context, touchId, {
+          target: payload.target || "touch",
+          // Cast: the schema above is the editable subset of a slide by construction, and the
+          // service reattaches everything it deliberately leaves out.
+          slides: payload.slides as PresentationSlide[],
+          ...(payload.generatedAt ? { expectedGeneratedAt: payload.generatedAt } : {}),
+        });
         break;
       case "save_touch_draft":
         result = await saveTouchDraft(context, touchId, {

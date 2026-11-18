@@ -9,14 +9,18 @@ import {
   Eye,
   EyeOff,
   Maximize2,
+  Pencil,
   Play,
   Sparkles,
+  X,
 } from "lucide-react";
 
 import { AiProgressPanel, useAiRun } from "@/src/components/mtos/ai-progress";
+import { PresentationEditor } from "@/src/components/mtos/presentation-editor";
 import { DECK, PresentationSlideCanvas } from "@/src/components/mtos/presentation-slide";
 import { readJsonResponse } from "@/src/lib/api/read-json-response";
-import type { Presentation } from "@/src/lib/mtos-data";
+import { editableSlide, normalizeSlide, slideIsHiddenFromClient } from "@/src/lib/contracts/presentation-edit";
+import type { Presentation, PresentationSlide } from "@/src/lib/mtos-data";
 
 /**
  * The deck surface: a scaled slide, a thumbnail rail, presenter notes, and a
@@ -37,11 +41,17 @@ export function PresentationViewer({
   presentation,
   readOnly = false,
   toolsOnly = false,
+  target = "touch",
+  blockedTitles,
 }: {
   touchId: string;
   presentation?: Presentation;
   readOnly?: boolean;
   toolsOnly?: boolean;
+  /** Which of the touch's decks this is, so edits are saved back to the right one. */
+  target?: "touch" | "loom";
+  /** Open commitments and undelivered promises, for the editor's client-visibility warnings. */
+  blockedTitles?: string[];
 }) {
   const [index, setIndex] = useState(0);
   const [showNotes, setShowNotes] = useState(true);
@@ -50,12 +60,28 @@ export function PresentationViewer({
   const [error, setError] = useState<string | null>(null);
   const ai = useAiRun();
 
+  /**
+   * The working copy while editing.
+   *
+   * `null` means "not editing", and the viewer shows `clientSlides(...)` -- the deck as the client
+   * will see it. While editing it holds the FULL stored slides, because the filtered view drops
+   * slides entirely, and saving that back would delete them. The editor marks the ones the client
+   * will not see instead of hiding them from the AM.
+   */
+  const [draft, setDraft] = useState<PresentationSlide[] | null>(null);
+  const [saving, setSaving] = useState(false);
+
   const stageRef = useRef<HTMLDivElement | null>(null);
   const fullscreenRef = useRef<HTMLDivElement | null>(null);
 
-  const slides = clientSlides(presentation?.slides);
+  const editing = draft !== null;
+  const slides = editing ? draft : clientSlides(presentation?.slides);
   const count = slides.length;
   const current = slides[Math.min(index, Math.max(count - 1, 0))];
+  // Both sides are normalized before comparing, so whitespace the AM has not actually changed
+  // does not light up the unsaved badge for the whole call.
+  const asSaved = (list: PresentationSlide[]) => JSON.stringify(list.map((slide) => editableSlide(normalizeSlide(slide))));
+  const dirty = editing && asSaved(presentation?.slides || []) !== asSaved(draft);
 
   const go = useCallback(
     (delta: number) => setIndex((i) => Math.min(Math.max(i + delta, 0), Math.max(count - 1, 0))),
@@ -87,7 +113,7 @@ export function PresentationViewer({
   }, []);
 
   useEffect(() => {
-    if (toolsOnly || !count) return;
+    if ((toolsOnly && !editing) || !count) return;
     const onKey = (event: KeyboardEvent) => {
       // Never steal keys from a field the AM is typing in.
       const target = event.target as HTMLElement | null;
@@ -108,7 +134,7 @@ export function PresentationViewer({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [count, go, toolsOnly]);
+  }, [count, editing, go, toolsOnly]);
 
   async function present() {
     try {
@@ -118,6 +144,73 @@ export function PresentationViewer({
       // viewer still works, so say so rather than failing silently.
       setError("This browser would not go full screen. Use the slide below, or press F11.");
     }
+  }
+
+  async function save() {
+    if (!draft) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const response = await fetch(`/api/monthly-touches/${touchId}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          action: "save_presentation_slides",
+          target,
+          ...(presentation?.generatedAt ? { generatedAt: presentation.generatedAt } : {}),
+          slides: draft.map((slide) => editableSlide(normalizeSlide(slide))),
+        }),
+      });
+      const payload = await readJsonResponse<{ error?: string; savedAt?: string; slides?: PresentationSlide[] }>(response);
+      if (!response.ok) throw new Error(payload?.error || "These slide edits could not be saved.");
+      // Reload rather than patching local state: the saved slides come back with their generated
+      // snapshots and reattached rank captures, and every other panel on the page reads the touch.
+      globalThis.location.reload();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "These slide edits could not be saved.");
+      setSaving(false);
+    }
+  }
+
+  // Ctrl/Cmd+S saves, because this gets used minutes before a call and that is the reflex. The
+  // handler is held in a ref so the listener is bound once per editing session rather than
+  // rebound on every keystroke in the editor.
+  const saveShortcut = useRef<() => void>(() => {});
+  useEffect(() => {
+    saveShortcut.current = () => {
+      if (!saving) void save();
+    };
+  });
+  useEffect(() => {
+    if (!editing) return;
+    const onKey = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
+        event.preventDefault();
+        saveShortcut.current();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [editing]);
+
+  // A reload or a tab close with unsaved slides asks first. The browser shows its own wording.
+  useEffect(() => {
+    if (!dirty) return;
+    const onLeave = (event: BeforeUnloadEvent) => event.preventDefault();
+    window.addEventListener("beforeunload", onLeave);
+    return () => window.removeEventListener("beforeunload", onLeave);
+  }, [dirty]);
+
+  function startEditing() {
+    setError(null);
+    setDraft((presentation?.slides || []).map((slide) => ({ ...slide })));
+    setIndex(0);
+  }
+
+  function stopEditing() {
+    if (dirty && !globalThis.confirm("Discard your unsaved slide edits?")) return;
+    setDraft(null);
+    setIndex(0);
   }
 
   function generate() {
@@ -195,10 +288,17 @@ export function PresentationViewer({
               </a>
             </>
           ) : null}
+          {!readOnly && presentation?.status === "generated" && presentation.slides?.length ? (
+            <button type="button" onClick={editing ? stopEditing : startEditing} className="btn btn-ghost">
+              {editing ? <X className="h-4 w-4" /> : <Pencil className="h-4 w-4" />}
+              {editing ? "Close editor" : "Edit slides"}
+            </button>
+          ) : null}
           {!readOnly ? <button
             type="button"
             onClick={generate}
-            disabled={ai.isRunning}
+            disabled={ai.isRunning || dirty}
+            title={dirty ? "Save or discard your slide edits first — regenerating replaces every slide." : undefined}
             className="btn btn-ghost"
           >
             <Sparkles className="h-4 w-4" />
@@ -211,7 +311,7 @@ export function PresentationViewer({
       {error ? <p className="text-sm text-rose-300">{error}</p> : null}
       {presentation?.errorMessage ? <p className="text-sm text-amber-200">{presentation.errorMessage}</p> : null}
 
-      {!toolsOnly && count && current ? (
+      {(!toolsOnly || editing) && count && current ? (
         <div className="space-y-3">
           <div
             ref={stageRef}
@@ -269,7 +369,42 @@ export function PresentationViewer({
             </button>
           </div>
 
-          {showNotes ? (
+          {editing ? (
+            <>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-xs text-slate-400">
+                  {dirty ? "Unsaved changes" : "All changes saved"}
+                  {presentation?.editedAt && !dirty
+                    ? ` · last edited by ${presentation.editedBy || "an account manager"}`
+                    : ""}
+                  {" · ⌘/Ctrl+S saves"}
+                </p>
+                <div className="flex gap-2">
+                  <button type="button" className="btn btn-ghost btn-sm" disabled={saving} onClick={stopEditing}>
+                    Discard
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-primary btn-sm"
+                    style={{ color: "#0d1625" }}
+                    disabled={saving || !dirty}
+                    onClick={() => void save()}
+                  >
+                    {saving ? "Saving…" : "Save slides"}
+                  </button>
+                </div>
+              </div>
+              <PresentationEditor
+                slides={draft}
+                index={Math.min(index, count - 1)}
+                blockedTitles={blockedTitles}
+                onSlides={setDraft}
+                onIndex={setIndex}
+              />
+            </>
+          ) : null}
+
+          {showNotes && !editing ? (
             <div className="panel">
               <p className="card-title">
                 Presenter notes — only you see these
@@ -308,6 +443,17 @@ export function PresentationViewer({
                 >
                   <PresentationSlideCanvas {...slideProps} slide={slide} slideNumber={slideIndex + 1} />
                 </div>
+                {editing && slideIsHiddenFromClient(slide, blockedTitles) ? (
+                  <span
+                    className="absolute inset-x-0 bottom-0 bg-amber-500/80 py-0.5 text-[9px] font-semibold text-black"
+                    title="The client never sees this slide."
+                  >
+                    HIDDEN
+                  </span>
+                ) : null}
+                {editing && slide.edited ? (
+                  <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-[color:var(--accent)]" title="Edited" />
+                ) : null}
               </button>
             ))}
           </div>

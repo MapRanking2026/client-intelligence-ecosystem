@@ -38,6 +38,7 @@
     "check:follow-through-compact-ui": "node scripts/check-follow-through-compact-ui.cjs",
     "check:follow-through-notes-unblock": "node scripts/check-follow-through-notes-unblock.cjs",
     "check:follow-through-items-sync": "node scripts/check-follow-through-items-sync.cjs",
+    "check:ticket-description": "tsx scripts/check-ticket-description.ts",
     "check:follow-through-task-policy": "node scripts/check-follow-through-task-policy.cjs",
     "check:notes-output": "node scripts/check-notes-output.cjs",
     "check:follow-through-score": "tsx scripts/check-follow-through-score.ts",

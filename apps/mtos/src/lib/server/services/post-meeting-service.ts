@@ -1,4 +1,5 @@
 import { isWorkflowRecapTask, suggestedEffortMinutes } from "@/src/lib/contracts/follow-through-task-policy";
+import { CLIENT_ANONYMITY_RULE, withoutClientIdentity } from "@/src/lib/contracts/ticket-description";
 import { nanoid } from "nanoid";
 import { CLIENT_CONTENT_RULE, clientText } from "@/src/lib/contracts/client-content";
 import { z } from "zod";
@@ -314,9 +315,10 @@ async function analyzeWithClaude(
     "ticket title and description in the FIRST PERSON (\"I need\", \"Please\", \"Can you\") addressed",
     "directly to the teammate or department who will do the work. Never write in the third person and",
     `never refer to "the AM" or "${amName}" as someone else -- that is you.`,
-    `CONTEXT: Every ticket is for the client "${client.name}". Make it explicit in each ticket`,
-    `description which business the work is for (name the business "${client.name}"), so whoever picks`,
-    "it up knows the client without extra digging.",
+    // The business is a field on the ticket form, and the specialist who picks the ticket up is
+    // not told whose account it is. Asking for the name in the prose spent the first sentence
+    // repeating a field and put the contact's name in front of people who were never given it.
+    `CONTEXT: ${CLIENT_ANONYMITY_RULE}`,
     ...sourceDirective,
     ...(touch.liveSession
       ? [
@@ -468,6 +470,10 @@ async function analyzePostMeetingTranscriptUnlocked(context: TenantContext, touc
   // Default "date it was requested" for billing tickets = the touch/meeting date.
   const touchDateString = toDateInputValue(touch.scheduledAt) || toDateInputValue(getNowIso());
 
+  const identity = {
+    ...(client.name?.trim() ? { businessName: client.name.trim() } : {}),
+    ...(client.contact?.trim() ? { contactName: client.contact.trim() } : {}),
+  };
   const draftTickets: DraftTicket[] = analysis.draftTickets.filter(ticket => !isWorkflowRecapTask(ticket.title)).map((ticket) => {
     const isBilling = ticket.ticketType === "billing";
 
@@ -485,8 +491,9 @@ async function analyzePostMeetingTranscriptUnlocked(context: TenantContext, touc
 
     return {
       id: `ticket-${nanoid(8)}`,
-      title: ticket.title,
-      description: ticket.description,
+      // Asked of the model above, enforced here: a prompt is a request, this is the rule.
+      title: withoutClientIdentity(ticket.title, identity),
+      description: withoutClientIdentity(ticket.description, identity),
       department: ticket.department,
       assigneeId: member ? Number(member.id) : undefined,
       assignee: member?.name,

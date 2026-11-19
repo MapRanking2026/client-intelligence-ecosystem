@@ -1,5 +1,6 @@
 import { readSeoDashboardOwner } from "@/src/lib/server/services/clickup-specialist-owner";
 import { isWorkflowRecapTask, suggestedEffortMinutes, suggestChatOwner } from "@/src/lib/contracts/follow-through-task-policy";
+import { withoutClientIdentity, type TicketClientIdentity } from "@/src/lib/contracts/ticket-description";
 import { fetchClickupClientContext } from "@/src/lib/server/services/clickup-client-context";
 import type { TenantContext } from "@/src/lib/contracts/mtos";
 import type { ActionLine, PendingItem } from "@/src/lib/contracts/follow-through-notes";
@@ -153,7 +154,7 @@ function ticketFromAction(
   action: ActionLine,
   department: string,
   clientFeedback: string,
-  options: { businessName: string; owners: DepartmentOwners; today: Date },
+  options: { businessName: string; owners: DepartmentOwners; today: Date; identity: TicketClientIdentity },
 ): TicketDraftForm {
   const matched = matchDepartment(action.team) || matchDepartment(department);
   const owner = departmentOwner(matched, options.owners);
@@ -177,9 +178,11 @@ function ticketFromAction(
     id: `ticket-${action.id}`,
     formType: "ticket",
     actionId: action.id,
-    taskName: action.what.trim(),
+    // The business has its own field and the specialist is not told whose account this is, so
+    // neither the business nor the contact is named in the words of the ticket itself.
+    taskName: withoutClientIdentity(action.what, options.identity),
     businessName: options.businessName,
-    description,
+    description: withoutClientIdentity(description, options.identity),
     ...(matched ? { department: matched } : {}),
     assignee: action.assignee?.trim() || owner || OWNER_NEEDED,
     priority: "normal",
@@ -192,7 +195,7 @@ function ticketFromAction(
 
 function billingFromAction(
   action: ActionLine,
-  options: { businessName: string; touchDate: string; today: Date },
+  options: { businessName: string; touchDate: string; today: Date; identity: TicketClientIdentity },
 ): BillingDraftForm {
   return {
     id: `billing-${action.id}`,
@@ -204,9 +207,12 @@ function billingFromAction(
       ? { dueDate: parseIsoDay(action.due)! }
       : { ...(dueDateForPriority("normal", options.today) ? { dueDate: dueDateForPriority("normal", options.today)! } : {}) }),
     assignee: BILLING_DEFAULT_ASSIGNEE,
-    details: [action.what.trim(), action.due.trim() ? `Agreed on the call: ${action.due.trim()}` : ""]
-      .filter(Boolean)
-      .join("\n\n"),
+    details: withoutClientIdentity(
+      [action.what.trim(), action.due.trim() ? `Agreed on the call: ${action.due.trim()}` : ""]
+        .filter(Boolean)
+        .join("\n\n"),
+      options.identity,
+    ),
     // The change type is deliberately left unset. Reading "cancel" in a sentence is not the same
     // as the client cancelling, and filing the wrong one of these moves real money.
   };
@@ -221,7 +227,7 @@ function billingFromAction(
  */
 function ticketFromPending(
   item: PendingItem,
-  options: { businessName: string; owners: DepartmentOwners; today: Date },
+  options: { businessName: string; owners: DepartmentOwners; today: Date; identity: TicketClientIdentity },
 ): TicketDraftForm {
   const department = matchDepartment(item.team);
   const owner = departmentOwner(department, options.owners) || item.owner;
@@ -231,16 +237,19 @@ function ticketFromPending(
     // Keyed on the pending item so a rebuild finds the AM's edited version rather than making
     // a second ticket for the same missing thing.
     actionId: item.id,
-    taskName: `${pendingMarker(item)} ${item.missing.trim()}`.trim(),
+    taskName: `${pendingMarker(item)} ${withoutClientIdentity(item.missing, options.identity)}`.trim(),
     businessName: options.businessName,
-    description: [
-      `Waiting on: ${item.waitingOn === "Client" ? "the client" : "AM review"}.`,
-      item.from.trim() ? `From: ${item.from.trim()}` : "",
-      `Chase on: ${item.reminderDate.trim() || "no date set"}.`,
-      "Do not start the work until this arrives.",
-    ]
-      .filter(Boolean)
-      .join("\n\n"),
+    description: withoutClientIdentity(
+      [
+        `Waiting on: ${item.waitingOn === "Client" ? "the client" : "AM review"}.`,
+        item.from.trim() ? `From: ${item.from.trim()}` : "",
+        `Chase on: ${item.reminderDate.trim() || "no date set"}.`,
+        "Do not start the work until this arrives.",
+      ]
+        .filter(Boolean)
+        .join("\n\n"),
+      options.identity,
+    ),
     ...(department ? { department } : {}),
     assignee: owner?.trim() || OWNER_NEEDED,
     priority: "low",
@@ -284,6 +293,12 @@ export async function buildFollowThroughItems(
   ]);
   const today = new Date();
   const touchDate = touch.scheduledLocalDate || (touch.scheduledAt || today.toISOString()).slice(0, 10);
+  // The two names a ticket must not carry: the account's own, which is already a field, and the
+  // person on the call, whom whoever picks the ticket up was never told about.
+  const identity: TicketClientIdentity = {
+    ...(businessName ? { businessName } : {}),
+    ...(client?.contact?.trim() ? { contactName: client.contact.trim() } : {}),
+  };
 
   const chatContext = liveChat || touch.prepPack?.clickupContext;
   const existing = touch.followThrough?.items || [];
@@ -308,8 +323,8 @@ export async function buildFollowThroughItems(
       const billing = legacy?.ticketType === "billing" || looksLikeBilling(action);
       if (billing) {
         items.push({
-          ...billingFromAction(action, { businessName, touchDate, today }),
-          ...(legacy?.description ? { details: legacy.description } : {}),
+          ...billingFromAction(action, { businessName, touchDate, today, identity }),
+          ...(legacy?.description ? { details: withoutClientIdentity(legacy.description, identity) } : {}),
           ...(legacy?.billingChangeType ? { changeType: legacy.billingChangeType } : {}),
           ...(legacy?.dateRequested ? { dateRequested: legacy.dateRequested } : {}),
           ...(legacy?.assignee ? { assignee: legacy.assignee } : {}),
@@ -317,8 +332,8 @@ export async function buildFollowThroughItems(
         });
       } else {
         items.push({
-          ...ticketFromAction(action, department.department, department.clientFeedback, { businessName, owners, today }),
-          ...(legacy?.description ? { description: legacy.description } : {}),
+          ...ticketFromAction(action, department.department, department.clientFeedback, { businessName, owners, today, identity }),
+          ...(legacy?.description ? { description: withoutClientIdentity(legacy.description, identity) } : {}),
           ...(legacy?.assignee ? { assignee: legacy.assignee } : {}),
           ...(legacy?.businessName ? { businessName: legacy.businessName } : {}),
           ...(legacy?.priority ? { priority: legacy.priority } : {}),
@@ -332,7 +347,7 @@ export async function buildFollowThroughItems(
   for (const item of notes.pending) {
     if (isWorkflowRecapTask(item.missing)) continue;
     const kept = byActionId.get(item.id);
-    items.push(kept || ticketFromPending(item, { businessName, owners, today }));
+    items.push(kept || ticketFromPending(item, { businessName, owners, today, identity }));
   }
 
   // Items the AM added by hand have no action line behind them, so they survive every rebuild.

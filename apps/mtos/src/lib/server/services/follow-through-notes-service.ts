@@ -2,6 +2,7 @@ import { loomEvidence } from "@/src/lib/contracts/no-show";
 import { parseNotesOutput } from "@/src/lib/contracts/follow-through-notes-output";
 
 import type { TenantContext } from "@/src/lib/contracts/mtos";
+import { ACTION_LINE_ANONYMITY_RULE } from "@/src/lib/contracts/ticket-description";
 import type { ClientRecord, MonthlyTouchRecord } from "@/src/lib/mtos-data";
 import {
   GOAL_STATUSES,
@@ -181,7 +182,7 @@ export async function draftFollowThroughNotes(
     goal_statuses: GOAL_STATUSES.join(" / "),
   });
 
-  const system = storedSystem + "\nPopulate every summary bullet: metrics, delivery, posture, requests, nextTouch, sentiment. Put the relevant evidence in each field rather than appending it all to summary. Summary must be one to four sentences. For information the evidence does not establish, explicitly write: Not established in the available call evidence. Do not turn drafting or sending the standard Monthly Touch recap email into a department action or pending ticket; that is handled by the recap step below. Extract every other actionable department follow-up into departments[].actions with a concise what, responsible team, assignee only when explicitly named as responsible in the evidence, and due date only when established. Include actions from the prior analysis, deduplicated against the transcript; distinguish completed work from new actions. Never invent tasks, deadlines, owners, metrics or client sentiment. Return clientActions and pending arrays, empty only when no supported items exist.";
+  const system = storedSystem + "\nPopulate every summary bullet: metrics, delivery, posture, requests, nextTouch, sentiment. Put the relevant evidence in each field rather than appending it all to summary. Summary must be one to four sentences. For information the evidence does not establish, explicitly write: Not established in the available call evidence. Do not turn drafting or sending the standard Monthly Touch recap email into a department action or pending ticket; that is handled by the recap step below. Extract every other actionable department follow-up into departments[].actions with a concise what, responsible team, assignee only when explicitly named as responsible in the evidence, and due date only when established. Include actions from the prior analysis, deduplicated against the transcript; distinguish completed work from new actions. Never invent tasks, deadlines, owners, metrics or client sentiment. " + ACTION_LINE_ANONYMITY_RULE + " Return clientActions and pending arrays, empty only when no supported items exist.";
 
   const userText = [
     legacy ? "Prior call analysis (supporting evidence): " + JSON.stringify({ recapSummary: legacy.recapSummary, draftTickets: legacy.draftTickets }) : "",

@@ -166,10 +166,11 @@ async function main() {
   check("single-key resolution is one read", (db as FakeDb).reads - before === 1);
   check("resolved doc has content", Boolean((doc.data() as any)?.prompt));
 
-  // 5. A whole-library write prunes prompts that were removed. Trim Phase 0
-  //    (index 1) from two prompts to one, so exactly one is deleted.
+  // 5. A whole-library write prunes prompts that were removed. Drop the last
+  //    prompt of Phase 0 (index 1), so exactly one is deleted however many
+  //    prompts that phase holds.
   const trimmed = config.map((phase, index) =>
-    index === 1 ? { ...phase, prompts: phase.prompts.slice(0, 1) } : phase,
+    index === 1 ? { ...phase, prompts: phase.prompts.slice(0, -1) } : phase,
   );
   await __internal.writeFirestoreConfig(db, trimmed);
   const afterPrune = await __internal.readFirestoreConfig(db);

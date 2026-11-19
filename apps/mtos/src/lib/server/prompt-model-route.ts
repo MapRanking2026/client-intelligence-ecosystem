@@ -24,15 +24,23 @@ export async function getModelRouteForPrompt(
   env: ServerEnv,
   promptKey: string,
 ): Promise<ModelRoute | null> {
-  if (!isModelRoutingEnabled(env)) {
+  try {
+    if (!isModelRoutingEnabled(env)) {
+      return null;
+    }
+
+    const record = await getPromptRecord(promptKey).catch(() => null);
+
+    return resolveModelRoute(env, {
+      promptKey,
+      provider: record?.provider,
+      difficulty: record?.difficulty,
+    });
+  } catch (error) {
+    // Routing is an optimisation. A failure here must never stop the AI call:
+    // with no route the caller uses the default provider order.
+    const reason = error instanceof Error ? error.message : "unknown error";
+    console.warn(`[model-router] no route for "${promptKey}" (${reason}); using the default provider order`);
     return null;
   }
-
-  const record = await getPromptRecord(promptKey).catch(() => null);
-
-  return resolveModelRoute(env, {
-    promptKey,
-    provider: record?.provider,
-    difficulty: record?.difficulty,
-  });
 }

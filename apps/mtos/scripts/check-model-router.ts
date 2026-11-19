@@ -70,4 +70,9 @@ env = withEnv({ MTOS_MODEL_ROUTES: JSON.stringify({ default: "NOT_A_TIER", a: "C
 assert.equal(resolveModelRoute(env, { promptKey: "unlisted_prompt" }), null);
 assert.equal(resolveModelRoute(env, { promptKey: "a" })?.model, "claude-fast");
 
+// 6. An env object without the routing fields (a test double) means "off", not a crash.
+const partialEnv = { anthropicModel: "claude-default", geminiModel: "gemini-default" } as unknown as ReturnType<typeof getServerEnv>;
+assert.equal(isModelRoutingEnabled(partialEnv), false);
+assert.equal(resolveModelRoute(partialEnv, { promptKey: "qa_evaluation_prompt", provider: "claude", difficulty: "difficult" }), null);
+
 console.log("model router: all checks passed");

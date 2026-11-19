@@ -110,8 +110,22 @@ function tierFromPromptSettings(
   return difficulty === "simple" ? "CLAUDE_FAST" : "CLAUDE_STANDARD";
 }
 
+/**
+ * The routing settings, read defensively. Callers normally pass getServerEnv(),
+ * but a caller holding a partial env object (a test double, an older snapshot)
+ * must get "routing off" rather than a crash in the middle of an AI call.
+ */
+function routingSettings(env: ServerEnv) {
+  const partial = env as Partial<ServerEnv>;
+  return {
+    tiers: (partial.modelTiers ?? {}) as Partial<Record<ModelTier, string>>,
+    routes: typeof partial.modelRoutes === "string" ? partial.modelRoutes : "",
+    fallbacks: typeof partial.modelFallbacks === "string" ? partial.modelFallbacks : "",
+  };
+}
+
 function modelForTier(env: ServerEnv, tier: ModelTier): string {
-  const configured = env.modelTiers[tier];
+  const configured = routingSettings(env).tiers[tier];
   if (configured) {
     return configured;
   }
@@ -120,10 +134,11 @@ function modelForTier(env: ServerEnv, tier: ModelTier): string {
 
 /** True once any MTOS_MODEL_* variable is set. Until then every caller behaves as before. */
 export function isModelRoutingEnabled(env: ServerEnv): boolean {
+  const settings = routingSettings(env);
   return Boolean(
-    env.modelRoutes.trim() ||
-      env.modelFallbacks.trim() ||
-      Object.values(env.modelTiers).some((model) => Boolean(model)),
+    settings.routes.trim() ||
+      settings.fallbacks.trim() ||
+      Object.values(settings.tiers).some((model) => Boolean(model)),
   );
 }
 
@@ -133,8 +148,9 @@ export function resolveModelRoute(env: ServerEnv, input: ModelRouteInput): Model
     return null;
   }
 
-  const routes = parseTierMap(env.modelRoutes, "MTOS_MODEL_ROUTES");
-  const fallbacks = parseTierMap(env.modelFallbacks, "MTOS_MODEL_FALLBACKS");
+  const settings = routingSettings(env);
+  const routes = parseTierMap(settings.routes, "MTOS_MODEL_ROUTES");
+  const fallbacks = parseTierMap(settings.fallbacks, "MTOS_MODEL_FALLBACKS");
 
   const tier =
     (input.promptKey ? routes[input.promptKey] : undefined) ??

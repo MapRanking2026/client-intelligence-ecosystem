@@ -1,4 +1,6 @@
 import { loomReady } from "@/src/lib/contracts/no-show";
+import { resolveRecapRecipient } from "@/src/lib/server/services/recap-recipient";
+import { processingOutcome } from "@/src/lib/contracts/follow-through-finish";
 import { LoomSupportingMaterials } from "@/src/components/mtos/loom-supporting-materials";
 import { canDeleteTestTouch } from "@/src/lib/contracts/touch-progress";
 import { hasMeetingNotes } from "@/src/lib/contracts/follow-through-notes";
@@ -84,7 +86,10 @@ export default async function FollowThroughPage({
   const profile = await getAccountManagerProfile(context);
   const checklist = followThroughChecklist(touch);
   const stage = deriveRunSheetStage(touch);
-  const progress: TouchStep = isTouchStep(touch.progress) ? touch.progress : stage === "follow_through" ? "follow" : stage;
+  // Older partial runs were prematurely handed to QA. Show the unfinished work as active
+  // while preserving the stored QA history and reviewer records.
+  const needsRepair = touch.followThrough?.processing && processingOutcome(touch.followThrough.processing.steps) !== "processed";
+  const progress: TouchStep = needsRepair ? "follow" : isTouchStep(touch.progress) ? touch.progress : stage === "follow_through" ? "follow" : stage;
 
   return (
     <AppShell
@@ -195,7 +200,7 @@ export default async function FollowThroughPage({
         >
           <FollowThroughRecap
             touchId={touch.id}
-            {...(touch.followThrough?.recap ? { recap: touch.followThrough.recap } : {})}
+            {...(touch.followThrough?.recap ? { recap: { ...touch.followThrough.recap, recipient: resolveRecapRecipient(client, touch) } } : {})}
           />
         </SectionCard>
         </div>

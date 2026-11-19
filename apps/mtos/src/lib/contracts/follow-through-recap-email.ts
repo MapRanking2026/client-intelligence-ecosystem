@@ -339,6 +339,7 @@ export function recapEmailHasBody(html: string): boolean {
 export type RecapDecision = "approved" | "denied" | "deleted";
 
 export interface RecapEmailState {
+  recipient?: string;
   gmailMessageId?: string;
   gmailThreadId?: string;
   sentVia?: string;
@@ -361,6 +362,7 @@ export function recapBlockers(state: RecapEmailState | undefined, gaps: string[]
     blockers.push("Decide the recap email — approve it, or deny it if you would rather write your own.");
   }
   if (state.decision === "approved") {
+    if (state.recipient !== undefined && !/^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(state.recipient.trim())) blockers.push("Enter the client's email address in the recap email.");
     if (!state.subject.trim()) blockers.push("The recap email has no subject line.");
     if (!recapEmailHasBody(state.html)) blockers.push("The recap email has almost nothing in it.");
   }

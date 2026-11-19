@@ -137,8 +137,8 @@ export const PROCESSING_STEPS: ProcessingStep[] = [
   { id: "recap", label: "Send the recap email", detail: "Through your connected Gmail account, from support@mapranking.com." },
   {
     id: "channel",
-    label: "Post the brief in the client channel",
-    detail: "And @-tag the people who now own a ticket.",
+    label: "Post the brief on the client's ClickUp record",
+    detail: "Post the team summary on the linked client record, naming the ticket owners.",
   },
   {
     id: "booking",
@@ -173,6 +173,7 @@ export interface ProcessingResult {
 
 /** The handoff's outcome in the AM's own words. `created` is false on a re-run. */
 export interface QcHandoffSummary {
+  ready?: boolean;
   created: boolean;
   /** How many reviewers were notified. Zero is a real answer and is said plainly. */
   notified: number;
@@ -182,19 +183,22 @@ export interface QcHandoffSummary {
 /** Whether the run as a whole left anything the AM still has to do. */
 export function processingOutcome(steps: StepResult[]): "processed" | "partial" | "failed" {
   if (steps.some((step) => step.status === "failed")) return "failed";
-  if (steps.some((step) => step.status === "warning")) return "partial";
+  if (PROCESSING_STEPS.some(definition => !steps.some(step => step.id === definition.id && (step.status === "done" || step.status === "skipped")))) return "partial";
   return "processed";
 }
 
 /** The banner's sentence for a finished run. */
 export function processingSummary(steps: StepResult[]): string {
   const outcome = processingOutcome(steps);
-  const warnings = steps.filter((step) => step.status === "warning" || step.status === "failed");
+  const warnings = PROCESSING_STEPS.flatMap(definition => {
+    const result = steps.find(step => step.id === definition.id);
+    return result?.status === "done" || result?.status === "skipped" ? [] : [result || { ...definition, message: `${definition.label} has not finished yet.` }];
+  });
   if (outcome === "processed") {
     return "Processed. Everything you approved has been created, filed and sent.";
   }
   if (outcome === "partial") {
-    return `Processed, with ${warnings.length === 1 ? "one step" : `${warnings.length} steps`} that need you: ${warnings
+    return `Not finished — ${warnings.length === 1 ? "one step" : `${warnings.length} steps`} need attention: ${warnings
       .map((step) => step.message)
       .join(" ")}`;
   }

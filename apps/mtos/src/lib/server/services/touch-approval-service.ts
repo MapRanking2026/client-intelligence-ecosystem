@@ -354,6 +354,8 @@ export async function approveAndPrepareCall(
               docId: approval.clientBook.docId,
               prepPageId: approval.clientBook.pageId,
               prepPageUrl: approval.clientBook.pageUrl,
+              ...(approval.clientBook.postPageId ? { postPageId: approval.clientBook.postPageId } : {}),
+              ...(approval.clientBook.postPageUrl ? { postPageUrl: approval.clientBook.postPageUrl } : {}),
               writtenAt: approval.steps.book.at || getNowIso(),
             },
           }
@@ -382,6 +384,8 @@ export async function approveAndPrepareCall(
         docId: filed.links.docId,
         pageId: filed.links.prepPageId,
         pageUrl: filed.links.prepPageUrl,
+        ...(filed.links.postPageId ? { postPageId: filed.links.postPageId } : {}),
+        ...(filed.links.postPageUrl ? { postPageUrl: filed.links.postPageUrl } : {}),
         pageName: filed.pageName,
         destination: filed.destination,
       },

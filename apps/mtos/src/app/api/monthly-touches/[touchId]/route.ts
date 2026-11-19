@@ -473,6 +473,7 @@ const touchRequestSchema = z.discriminatedUnion("action", [
   z.object({
     action: z.literal("save_recap"),
     recap: z.object({
+      recipient: z.string().max(320).optional(),
       subject: z.string(),
       html: z.string(),
       decision: z.enum(["approved", "denied", "deleted"]).optional(),

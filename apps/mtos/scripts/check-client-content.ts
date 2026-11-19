@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import JSZip from "jszip";
 import { blockedTaskTitles, clientCallGuide, clientEvidence, clientPresentation, completedStatus, internalTaskText } from "@/src/lib/contracts/client-content";
 import { completePrepBrief } from "@/src/lib/contracts/prep-brief-quality";
-import { EMPTY_PREP_BRIEF } from "@/src/lib/contracts/prep-brief";
+import { EMPTY_PREP_BRIEF, reviewSections } from "@/src/lib/contracts/prep-brief";
 import { buildRecapEmailDraft } from "@/src/lib/contracts/follow-through-recap-email";
 import { buildAgendaEmailDraft } from "@/src/lib/contracts/agenda-email";
 import { visibleSlides, buildGuideParts } from "@/src/lib/contracts/live-call";
@@ -59,7 +59,10 @@ async function main() {
 
   const client = { name: "Synthetic Client", summary: "Recorded context", industry: "Painting", goals: [], healthScore: null } as unknown as ClientRecord;
   const brief = completePrepBrief(undefined, prep, client);
-  for (const id of ["h", ...Array.from({ length: 14 }, (_, i) => String(i + 1))]) assert.ok(brief.sections.some((section) => section.id === id && section.markdown.trim()), `section ${id} is populated`);
+  for (const id of Array.from({ length: 14 }, (_, i) => String(i + 1))) assert.ok(brief.sections.some((section) => section.id === id && section.markdown.trim()), `section ${id} is populated`);
+  assert.ok(!brief.sections.some(section => section.id === "h"), "the header comes from verified client fields, not integration snapshot serialization");
+  const legacy = { ...brief, sections: [{ id: "h" as const, title: "Brief header", markdown: "### sources\n- provider Id: google-calendar\n- summary: 873 calendar events scanned" }, ...brief.sections] };
+  assert.deepEqual(reviewSections(legacy).find(section => section.id === "h")?.blocks, [], "existing generated headers also omit the raw provider dump without regenerating");
   assert.match(brief.sections.find((section) => section.id === "7")!.markdown, /INTERNAL ONLY/);
   assert.match(brief.sections.find((section) => section.id === "7")!.markdown, /Bi-weekly Google Ads report/);
   assert.match(brief.sections.find((section) => section.id === "10")!.markdown, /previous Value|previous value/i);

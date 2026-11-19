@@ -528,7 +528,9 @@ export function reviewSections(
   const declined = new Set(review?.declinedSections || []);
   const edits = review?.sectionEdits || {};
   return BRIEF_SECTIONS.map((meta) => {
-    const blocks = brief.sections.filter((section) => section.id === meta.id);
+    // The header is rendered from verified client/calendar fields, never from an old
+    // generic serialization of integration snapshots (including agency-wide sync totals).
+    const blocks = meta.id === "h" ? [] : brief.sections.filter((section) => section.id === meta.id);
     const edited = edits[meta.id];
     const state: SectionState = declined.has(meta.id)
       ? "declined"

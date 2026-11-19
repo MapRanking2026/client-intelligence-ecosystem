@@ -45,6 +45,8 @@ export interface ApprovedBookPage {
   docId: string;
   pageId: string;
   pageUrl: string;
+  postPageId?: string;
+  postPageUrl?: string;
   pageName: string;
   /** Which folder and page it went to, so the AM can confirm it is the right client. */
   destination: string;

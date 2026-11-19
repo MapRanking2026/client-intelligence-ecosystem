@@ -91,7 +91,8 @@ export async function readBookedNextMeeting(context: TenantContext, touchId: str
 export async function bookNextMonthlyTouch(context: TenantContext, touchId: string, input: NextTouchBookingRequest) {
   const { touch, client } = await visible(context, touchId);
   if (!input.confirmed || !Number.isInteger(input.durationMinutes) || input.durationMinutes < 15 || input.durationMinutes > 240 || !input.attendees.length || !input.title.trim()) throw new Error("Confirm the meeting details, duration and attendees before booking.");
-  if (!["live", "follow"].includes(touch.progress || "") && !touch.followThrough?.startedAt) throw new Error("Book the next meeting during the Live Call or Follow-Through stage.");
+  const repairingUnfinishedBooking = touch.progress === "qa" && touch.followThrough?.processing?.steps.some(step => step.id === "booking" && (step.status === "warning" || step.status === "failed"));
+  if (!["live", "follow"].includes(touch.progress || "") && !touch.followThrough?.startedAt && !repairingUnfinishedBooking) throw new Error("Book the next meeting during the Live Call or Follow-Through stage.");
   if (touch.nextMeetingBooking?.ownerUserId && touch.nextMeetingBooking.ownerUserId !== context.userId) throw new Error("This next meeting belongs to the AM who booked it. Ask them to update it in their calendar.");
   const db = getFirebaseAdminDb(); if (!db) throw new Error("MTOS storage is unavailable.");
   const token = await calendarAccessToken(context, true); const eventId = nextTouchEventId(context.tenantId, touchId); const ref = db.doc(monthlyTouchPath(context.tenantId, touchId));

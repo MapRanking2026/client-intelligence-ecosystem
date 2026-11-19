@@ -1,4 +1,5 @@
 import { readBookedNextMeeting } from "@/src/lib/server/services/next-touch-booking-service";
+import { resolveRecapRecipient } from "@/src/lib/server/services/recap-recipient";
 import { blockedTaskTitles } from "@/src/lib/contracts/client-content";
 import { loomReady } from "@/src/lib/contracts/no-show";
 import { FieldValue } from "firebase-admin/firestore";
@@ -8,6 +9,7 @@ import {
   PROCESSING_STEPS,
   approvedClientActions,
   finishBlockers,
+  processingOutcome,
   type ProcessingResult,
   type StepResult,
   type StepStatus,
@@ -326,14 +328,16 @@ Client email: ${state.touch.noShow.sendStatus} (${state.touch.noShow.gmailMessag
   // parent these notes go under, so its id is handed over as the prep page rather than letting
   // the writer search the book again and risk matching a page an AM made by hand.
   const approved = state.touch.approval?.clientBook;
-  const links = approved
+  const links = state.touch.followThrough?.notesBookLinks || (approved
     ? {
         docId: approved.docId,
         prepPageId: approved.pageId,
         prepPageUrl: approved.pageUrl,
+        ...(approved.postPageId ? { postPageId: approved.postPageId } : {}),
+        ...(approved.postPageUrl ? { postPageUrl: approved.postPageUrl } : {}),
         writtenAt: state.touch.approval?.finishedAt || getNowIso(),
       }
-    : undefined;
+    : state.touch.prepWorkflow?.filing?.links);
 
   const result = await writePostNotesToClientBook(state.context, {
     clientName: state.client.name,
@@ -345,7 +349,8 @@ Client email: ${state.touch.noShow.sendStatus} (${state.touch.noShow.gmailMessag
   if ("error" in result) {
     return step("notes", "warning", result.error);
   }
-  return step("notes", "done", `Filed under “${result.pageName}”.`);
+  await persistProgress(state.context, state.touch.id, { notesBookLinks: result.links });
+  return step("notes", "done", `Filed under “${result.pageName}”: ${result.links.postPageUrl || result.links.prepPageUrl}`);
 }
 
 // ---------------------------------------------------------------------------
@@ -360,8 +365,8 @@ async function writeRiskRow(state: StepContext): Promise<StepResult> {
   if (card.decision !== "approved") {
     return step(
       "risk",
-      "warning",
-      "The Risk Register row was not approved, so this client is not logged in the register. The notes carry it as still owed.",
+      "skipped",
+      "The Risk Register row was declined, so it was not written.",
     );
   }
 
@@ -520,7 +525,7 @@ async function sendRecap(state: StepContext): Promise<StepResult> {
   const outcome = await sendClientEmail(state.context, {
     contentPolicy: "agreed-recap",
     idempotencyKey: `monthly-touch:${state.touch.id}:recap`,
-    recipient: state.client.contact || "",
+    recipient: resolveRecapRecipient(state.client, state.touch),
     blockedTaskTitles: blockedTaskTitles(state.touch),
     subject: recap.subject,
     html: recap.html,
@@ -606,10 +611,14 @@ async function bookNextTouch(state: StepContext): Promise<StepResult> {
       if (booked) return step("booking", "done", "Next Monthly Touch is booked in Google Calendar for " + booked.scheduledAt + (booked.htmlLink ? ": " + booked.htmlLink : "."));
     } catch (error) { return step("booking", "warning", error instanceof Error ? error.message : "Verify the saved next meeting in Google Calendar."); }
   }
-  const isLoom = state.touch.noShow?.resolution === "loom";
   const reminder = state.touch.followThrough;
-  if (isLoom && reminder?.bookingReminderId) return step("booking", "warning", `The next-meeting reminder already exists (${reminder.bookingReminderId}). Book the meeting yourself; no duplicate reminder was created.`);
-  if (isLoom && (reminder?.bookingReminderStatus === "creating" || reminder?.bookingReminderStatus === "unknown")) return step("booking", "warning", "The next-meeting reminder outcome is unresolved. Check ClickUp before creating another reminder.");
+  const previousReminder = reminder?.processing?.steps.find(entry => entry.id === "booking")?.message.match(/A reminder ticket was created instead: https:\/\/app\.clickup\.com\/t\/([a-z0-9]+)/i)?.[1];
+  if (!reminder?.bookingReminderId && previousReminder) {
+    await persistProgress(state.context, state.touch.id, { bookingReminderId: previousReminder, bookingReminderStatus: "created" });
+    return step("booking", "warning", `The next-meeting reminder already exists (${previousReminder}). Use Book next Monthly Touch here; no duplicate reminder was created.`);
+  }
+  if (reminder?.bookingReminderId) return step("booking", "warning", `The next-meeting reminder already exists (${reminder.bookingReminderId}). Use Book next Monthly Touch here; no duplicate reminder was created.`);
+  if (reminder?.bookingReminderStatus === "creating" || reminder?.bookingReminderStatus === "unknown") return step("booking", "warning", "The next-meeting reminder outcome is unresolved. Check ClickUp before creating another reminder.");
   // Asked of the shared permission read rather than by comparing a scope string here, so this
   // step and the Settings screen can never disagree about whether booking is allowed.
   const canWrite = await hasPermission(state.context, "calendar-write");
@@ -626,7 +635,7 @@ async function bookNextTouch(state: StepContext): Promise<StepResult> {
   }
 
   try {
-    if (isLoom) await persistProgress(state.context, state.touch.id, { bookingReminderStatus: "creating" });
+    await persistProgress(state.context, state.touch.id, { bookingReminderStatus: "creating" });
     const response = await fetch(`${CLICKUP_API}/list/${listId}/task`, {
       method: "POST",
       headers: { authorization: token, "content-type": "application/json" },
@@ -637,20 +646,18 @@ async function bookNextTouch(state: StepContext): Promise<StepResult> {
       }),
     });
     const payload = (await response.json().catch(() => ({}))) as { id?: string; url?: string };
-    if (isLoom) {
-      if (!response.ok || !payload.id) {
-        await persistProgress(state.context, state.touch.id, { bookingReminderStatus: response.ok || response.status >= 500 ? "unknown" : "failed" });
-        return step("booking", "warning", `ClickUp did not confirm a reminder task (${response.status}). Check ClickUp before retrying.`);
-      }
-      await persistProgress(state.context, state.touch.id, { bookingReminderId: payload.id, bookingReminderStatus: "created" });
+    if (!response.ok || !payload.id) {
+      await persistProgress(state.context, state.touch.id, { bookingReminderStatus: response.ok || response.status >= 500 ? "unknown" : "failed" });
+      return step("booking", "warning", `ClickUp did not confirm a reminder task (${response.status}). Check ClickUp before retrying.`);
     }
+    await persistProgress(state.context, state.touch.id, { bookingReminderId: payload.id, bookingReminderStatus: "created" });
     return step(
       "booking",
       "warning",
       `${base} A reminder ticket was created instead${payload.url ? `: ${payload.url}` : ""}.`,
     );
   } catch {
-    if (isLoom) await persistProgress(state.context, state.touch.id, { bookingReminderStatus: "unknown" });
+    await persistProgress(state.context, state.touch.id, { bookingReminderStatus: "unknown" });
     return step("booking", "warning", `${base} Book the next Monthly Touch yourself.`);
   }
 }
@@ -673,15 +680,15 @@ export async function processFollowThrough(
   touchId: string,
 ): Promise<ProcessingResult> {
   const touch = await getMtosDataSource(context).getMonthlyTouchById(touchId);
-  if (touch?.noShow?.resolution !== "loom") return processFollowThroughRun(context, touchId);
-  if (!loomReady(touch)) throw new Error("Send the approved Loom update before processing Follow-Through.");
+  if (!touch) throw new Error("Monthly touch not found");
+  if (touch.noShow?.resolution === "loom" && !loomReady(touch)) throw new Error("Send the approved Loom update before processing Follow-Through.");
   const db = getFirebaseAdminDb();
   if (!db) throw new Error("MTOS storage is unavailable.");
   const ref = db.doc(monthlyTouchPath(context.tenantId, touchId));
   const claim = new Date().toISOString();
   await db.runTransaction(async (tx) => {
     const current = (await tx.get(ref)).data() as { noShowProcessingAt?: string };
-    if (current?.noShowProcessingAt && Date.now() - Date.parse(current.noShowProcessingAt) < 10 * 60000) throw new Error("Loom Follow-Through is already processing. Wait before retrying.");
+    if (current?.noShowProcessingAt && Date.now() - Date.parse(current.noShowProcessingAt) < 10 * 60000) throw new Error("Follow-Through is already processing. Wait before retrying.");
     tx.update(ref, { noShowProcessingAt: claim });
   });
   try { return await processFollowThroughRun(context, touchId); }
@@ -721,6 +728,7 @@ async function processFollowThroughRun(
     trackerDiffs: diffs,
     ...(follow?.recap ? { recap: follow.recap } : {}),
   });
+  if (follow?.recap?.decision === "approved" && !follow.recap.sentAt && !resolveRecapRecipient(client, touch)) blockers.push("Enter and save the client's email address in Recap email before finishing.");
   if (blockers.length) {
     throw new FollowThroughNotReadyError(blockers);
   }
@@ -748,6 +756,11 @@ async function processFollowThroughRun(
 
   const steps: StepResult[] = [];
   for (const definition of PROCESSING_STEPS) {
+    const previous = follow?.processing?.steps.find(entry => entry.id === definition.id);
+    if (previous?.status === "done") {
+      steps.push(previous);
+      continue;
+    }
     const runner = runners[definition.id];
     try {
       steps.push(await runner(state));
@@ -758,6 +771,11 @@ async function processFollowThroughRun(
         step(definition.id, "warning", `${definition.label} did not run: ${error instanceof Error ? error.message : "unknown error"}.`),
       );
     }
+    const checkpoint = PROCESSING_STEPS.flatMap(definition => {
+      const known = steps.find(entry => entry.id === definition.id) || follow?.processing?.steps.find(entry => entry.id === definition.id);
+      return known ? [known] : [];
+    });
+    await persistProgress(context, touchId, { processing: { steps: checkpoint, ticketUrls: state.ticketUrls } });
   }
 
   const result: ProcessingResult = {
@@ -768,18 +786,17 @@ async function processFollowThroughRun(
 
   await persistProgress(context, touchId, {
     processing: result,
-    finishedAt: result.processedAt,
+    ...(processingOutcome(steps) === "processed" ? { finishedAt: result.processedAt } : {}),
     ticketIds: state.ticketIds,
     ticketUrls: state.ticketUrls,
   });
 
-  // The touch as it now stands, which is what QC takes its evidence from. Built here rather than
-  // re-read: the four fields just persisted are the four the evidence depends on, and reading the
-  // document back to learn what we had only now written would be a Firestore read for nothing.
+  // Include each step's persisted receipts and destination links in the QA evidence.
+  const latest = await dataSource.getMonthlyTouchById(touchId);
   const finished: MonthlyTouchRecord = {
-    ...touch,
+    ...(latest || touch),
     followThrough: {
-      ...touch.followThrough,
+      ...(latest || touch).followThrough,
       processing: result,
       finishedAt: result.processedAt,
       ticketIds: state.ticketIds,
@@ -791,17 +808,21 @@ async function processFollowThroughRun(
   // out to ClickUp, Intercom and the trackers; a handoff that threw and turned the whole call into
   // an error would invite the AM to press Finish again, having been told nothing happened when in
   // fact all of it did.
-  try {
+  if (processingOutcome(steps) !== "processed") {
+    result.qc = { created: false, notified: 0, message: "Follow-through still has unfinished steps. Resolve the warnings and run the unfinished steps again before continuing to QA." };
+  } else try {
     const handoff = await handTouchToQc(context, finished, client);
     result.qc = {
       created: handoff.created,
       notified: handoff.notified.length,
       message: handoff.message,
+      ready: handoff.created || Boolean(handoff.qc),
     };
   } catch (error) {
     result.qc = {
       created: false,
       notified: 0,
+      ready: false,
       message: `The follow-through is filed, but the touch could not be sent to QC: ${
         error instanceof Error ? error.message : "unknown error"
       }. Nothing was lost -- press Finish again to retry the handoff.`,

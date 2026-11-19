@@ -181,6 +181,12 @@ export function FollowThroughRecap({
       <p className="muted text-[0.78rem]">Regenerate from the latest saved call notes using the updated email structure, then review and approve the new draft.</p>
 
       <div className="field">
+        <label className="field-label" htmlFor="recap-recipient">To</label>
+        <input id="recap-recipient" className="input" type="email" value={state.recipient || ""} disabled={!editable}
+          onChange={event => setState(previous => previous ? { ...previous, recipient: event.target.value, edited: true } : previous)} />
+        <p className="muted text-[0.78rem]">Review the client address before approving. The email is sent only when you finish.</p>
+      </div>
+      <div className="field">
         <label className="field-label" htmlFor="recap-subject">
           Subject
         </label>

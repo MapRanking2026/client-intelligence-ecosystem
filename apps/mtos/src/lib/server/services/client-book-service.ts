@@ -56,6 +56,7 @@ interface BookPageNode {
   id: string;
   name: string;
   pages?: BookPageNode[];
+  content?: string;
 }
 
 interface ClickupAccess {
@@ -484,16 +485,31 @@ export async function writePostNotesToClientBook(
     if (replaced.ok) {
       return {
         pageName: name,
-        links: { ...links, prepPageId: parentId, prepPageUrl: pageUrl(access.workspaceId, docId, parentId), writtenAt: new Date().toISOString() },
+        links: { ...links, prepPageId: parentId, prepPageUrl: pageUrl(access.workspaceId, docId, parentId), postPageUrl: pageUrl(access.workspaceId, docId, links.postPageId), writtenAt: new Date().toISOString() },
       };
     }
+    if (replaced.status !== 404) return { error: `ClickUp could not update the saved post-notes page: ${replaced.detail}. No duplicate page was created.` };
   }
 
   // Somebody else's write-up under the same parent. Reported, never replaced.
   const theirs = findPostNotesPage(toBookPages(childrenOf(tree, parentId)));
   if (theirs && theirs.id !== links.postPageId) {
+    // Older approval records lost the child id. Recover only the exact MTOS placeholder,
+    // never a blank page or somebody's existing write-up.
+    const page = pages.find(candidate => candidate.id === theirs.id);
+    const read = typeof page?.content === "string" ? page : await clickupFetch(
+      `${CLICKUP_V3}/workspaces/${access.workspaceId}/docs/${docId}/pages/${theirs.id}?content_format=text%2Fmd`, access.token,
+    ) as JsonRecord | null;
+    if (typeof read?.content === "string" && read.content.trim() === normalizeMarkdownTables(options.markdown).trim()) {
+      return { pageName: name, links: { ...links, postPageId: theirs.id, postPageUrl: pageUrl(access.workspaceId, docId, theirs.id), writtenAt: new Date().toISOString() } };
+    }
+    if (typeof read?.content === "string" && read.content.trim() === POST_NOTES_PLACEHOLDER) {
+      const replaced = await replacePage(access, docId, theirs.id, name, options.markdown);
+      if (!replaced.ok) return { error: `ClickUp could not fill the post-notes placeholder: ${replaced.detail}` };
+      return { pageName: name, links: { ...links, postPageId: theirs.id, postPageUrl: pageUrl(access.workspaceId, docId, theirs.id), writtenAt: new Date().toISOString() } };
+    }
     return {
-      error: `"${parentName}" already has a "${theirs.name}" subpage and MTOS has no record of writing it. If that is still the empty page the approval created, delete it and file again; if somebody has written in it, the post-meeting notes are on this screen to paste in. Nothing was overwritten.`,
+      error: `"${parentName}" already has a "${theirs.name}" subpage whose contents could not be verified as the MTOS placeholder. Review that page before filing; nothing was overwritten.`,
     };
   }
 

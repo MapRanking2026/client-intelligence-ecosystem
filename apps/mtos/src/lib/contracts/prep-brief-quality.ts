@@ -48,14 +48,14 @@ export function completePrepBrief(brief: PrepBrief | undefined, prep: MonthlyTou
     "7": { visibility: "INTERNAL ONLY — never share in client presentations, guides or email.", openCommitments: prep.openCommitments },
     "8": { completedWork: prep.completedCommitments || [], verifiedSeoWins: current.unreportedSeoWins, businessScorecard: prep.businessScorecard },
     "9": { visibility: "INTERNAL ONLY task/remedy planning. Performance problems remain factual; proposals are not completed work.", issuesAndSolutions: prep.issuesAndSolutions },
-    "10": { businessScorecard: prep.businessScorecard, seoAndGbp: prep.seoPerformance, advertising: prep.adsPerformance, sourceWindows: prep.integrationSources, caveats: prep.dataGaps },
+    "10": { businessScorecard: prep.businessScorecard, seoAndGbp: prep.seoPerformance, advertising: prep.adsPerformance, caveats: prep.dataGaps },
     "11": { recordedGoals: client.goals || [], goalNote: client.goals?.length ? "Use the recorded target; do not invent a new agreed goal." : "No verified goal supplied. Ask the client for their target; no numeric target has been assumed." },
     "12": { visibility: "INTERNAL ONLY proposals, not completed work.", opportunities: prep.activeOpportunities },
     "13": { suggestedQuestion: "Which of the verified results best matches what you are seeing in your business?", evidenceForDiscussion: current.unreportedSeoWins, leadQualityQuestions: prep.leadQualityQuestions },
     "14": { clientSafeClose: "Recap factual performance and verified completed work. Confirm the next meeting using the existing scheduling workflow. Keep unfinished tasks and follow-up ownership in internal documentation." },
   };
-  const sections = [...current.sections];
-  for (const meta of BRIEF_SECTIONS.filter((entry) => entry.id !== "15")) {
+  const sections = current.sections.filter(section => section.id !== "h");
+  for (const meta of BRIEF_SECTIONS.filter((entry) => entry.id !== "15" && entry.id !== "h")) {
     const existing = sections.filter((section) => section.id === meta.id);
     const evidence = evidenceMarkdown(sources[meta.id]);
     if (!existing.some((section) => section.markdown.trim())) sections.push({ id: meta.id, title: meta.title, markdown: `**Internal preparation — team only.**\n\n${evidence}` });

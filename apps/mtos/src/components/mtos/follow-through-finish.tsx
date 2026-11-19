@@ -5,6 +5,7 @@ import Link from "next/link";
 import { AlertTriangle, ArrowRight, Check, Eye, Loader2, Minus, Rocket, X } from "lucide-react";
 
 import { readJsonResponse } from "@/src/lib/api/read-json-response";
+import { NextTouchBookingControl } from "@/src/components/mtos/next-touch-booking";
 import {
   PROCESSING_STEPS,
   finishBlockers,
@@ -127,7 +128,7 @@ export function FollowThroughFinish({
           </span>
           <div>
             <div className="callout-title">
-              {outcome === "processed" ? "Processed" : outcome === "partial" ? "Processed, with something left for you" : "Not fully processed"}
+              {outcome === "processed" ? "Follow-through processed" : "Follow-through needs attention"}
             </div>
             <div className="callout-body">{processingSummary(result.steps)}</div>
           </div>
@@ -137,7 +138,7 @@ export function FollowThroughFinish({
       {/* The handoff to QC, said separately from the seven steps. It is not something the AM
           approved or can retry item by item, so it does not belong in that list -- but they do
           need to know the touch has left their desk and who was told. */}
-      {result?.qc ? (
+      {result?.qc && outcome === "processed" ? (
         <div
           className="callout"
           style={{ borderLeftColor: result.qc.created ? "var(--violet, #6d5ae0)" : undefined }}
@@ -146,7 +147,7 @@ export function FollowThroughFinish({
             {result.qc.created && result.qc.notified ? <Check /> : <AlertTriangle />}
           </span>
           <div>
-            <div className="callout-title">{result.qc.created ? "With QC" : "Already with QC"}</div>
+            <div className="callout-title">{result.qc.ready === false ? "QA handoff needs attention" : result.qc.created ? "With QC" : "QA handoff"}</div>
             <div className="callout-body">{result.qc.message}</div>
           </div>
         </div>
@@ -170,13 +171,21 @@ export function FollowThroughFinish({
                 <span className="muted block text-[0.8rem]">
                   {outcomeStep?.message || definition.detail}
                 </span>
+                {outcomeStep && (outcomeStep.status === "warning" || outcomeStep.status === "failed") ? (
+                  <span className="mt-2 flex flex-wrap gap-2">
+                    {definition.id === "booking" ? <NextTouchBookingControl touchId={touchId} /> : null}
+                    {definition.id === "recap" ? <a className="ilink" href="#recap">Review recipient and recap email</a> : null}
+                    {definition.id === "notes" ? <a className="ilink" href="#notes">Review the notes</a> : null}
+                    {definition.id === "risk" || definition.id === "health" ? <a className="ilink" href="#trackers">Review tracker rows</a> : null}
+                  </span>
+                ) : null}
               </span>
             </li>
           );
         })}
       </ul>
 
-      {shown.length && !result ? (
+      {shown.length ? (
         <div className="card">
           <div className="card-head">
             <div className="card-title">Before you can finish</div>
@@ -227,7 +236,7 @@ export function FollowThroughFinish({
               ? "Run the unfinished steps again"
               : "Finish follow-through & process approved"}
         </button>
-        {result ? (
+        {result && outcome === "processed" && result.qc?.ready !== false ? (
           <Link href={qaHref} className="btn btn-ghost btn-sm">
             Continue to QA
             <ArrowRight />

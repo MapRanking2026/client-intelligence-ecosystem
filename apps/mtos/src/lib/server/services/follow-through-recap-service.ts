@@ -1,4 +1,5 @@
 import { readBookedNextMeeting } from "@/src/lib/server/services/next-touch-booking-service";
+import { resolveRecapRecipient } from "@/src/lib/server/services/recap-recipient";
 import { loomEvidence } from "@/src/lib/contracts/no-show";
 import { recapCommunicationViolations } from "@/src/lib/contracts/recap-client-content";
 import { readTouchTranscriptPayload } from "@/src/lib/server/services/transcript-watch-service";
@@ -161,7 +162,7 @@ export async function buildFollowThroughRecap(
   );
 
   return {
-    recap: { subject: draft.subject, html: draft.html },
+    recap: { recipient: resolveRecapRecipient(client, touch), subject: draft.subject, html: draft.html },
     blockingGaps: [...draft.blockingGaps, ...reviewGaps],
     note: [
       !transcript && !alternative ? "No transcript was available. Verify the agreed follow-ups and promised email content against your call notes before approving." : "",
@@ -179,6 +180,10 @@ export async function saveFollowThroughRecap(
   // wrote it, so this is not defence against an attacker -- it is defence against what lands in
   // a contentEditable when someone pastes from a web page.
   if (recapCommunicationViolations(`${recap.subject} ${recap.html}`).length) throw new Error("Keep internal team information out of the client recap. Include only the agreed client-facing follow-ups.");
+  const touch = await getMtosDataSource(context).getMonthlyTouchById(touchId);
+  if (!touch) throw new Error("Monthly touch not found");
+  const existing = touch.followThrough?.recap;
+  if (existing?.sentAt) return existing;
   const cleaned: RecapEmailState = { ...recap, html: sanitizeRecapEmailHtml(recap.html) };
   const db = getFirebaseAdminDb();
   if (db) {

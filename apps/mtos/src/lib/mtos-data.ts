@@ -1507,6 +1507,7 @@ export interface TouchFollowThroughState {
    */
   ticketIds?: Record<string, string>;
   ticketUrls?: Record<string, string>;
+  notesBookLinks?: ClientBookLinks;
   /** What the last processing run did, step by step. */
   processing?: ProcessingResult;
 }

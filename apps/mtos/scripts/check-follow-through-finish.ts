@@ -239,7 +239,9 @@ check(
 
 const allDone: StepResult[] = PROCESSING_STEPS.map((step) => ({ id: step.id, status: "done", message: "ok" }));
 check("every step done is processed", processingOutcome(allDone) === "processed");
-check("a skipped step is still processed", processingOutcome([...allDone.slice(1), { id: "risk", status: "skipped", message: "not needed" }]) === "processed");
+check("a skipped step is still processed", processingOutcome(allDone.map(step => step.id === "risk" ? { ...step, status: "skipped" } : step)) === "processed");
+check("an interrupted run is not complete", processingOutcome(allDone.slice(0, 2)) === "partial");
+check("a pending step is not complete", processingOutcome(allDone.map(step => step.id === "recap" ? { ...step, status: "pending" } : step)) === "partial");
 
 const withWarning: StepResult[] = [
   ...allDone.slice(0, 6),

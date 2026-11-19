@@ -1,11 +1,12 @@
 import { loomEvidence } from "@/src/lib/contracts/no-show";
-import { z } from "zod";
+import { parseNotesOutput } from "@/src/lib/contracts/follow-through-notes-output";
 
 import type { TenantContext } from "@/src/lib/contracts/mtos";
 import type { ClientRecord, MonthlyTouchRecord } from "@/src/lib/mtos-data";
 import {
   GOAL_STATUSES,
   SUMMARY_BULLETS,
+  summaryBudget,
   type ActionLine,
   type GoalStatus,
   type NotesDraft,
@@ -42,54 +43,6 @@ import { readTouchTranscriptPayload } from "@/src/lib/server/services/transcript
  *  - **Write section 4 on its own.** The account-health section appears when the confirmed score
  *    is 6 or below and not otherwise, because that is the rule the score gate already applied.
  */
-
-const actionSchema = z.object({
-  what: z.string(),
-  team: z.string().optional(),
-  due: z.string().optional(),
-  carryOver: z.boolean().optional(),
-  crossDepartment: z.string().optional(),
-  dependsOn: z.string().optional(),
-});
-
-const draftSchema = z.object({
-  summary: z.string().optional(),
-  bullets: z.record(z.string(), z.string()).optional(),
-  goalText: z.string().optional(),
-  goalStatus: z.string().optional(),
-  goalEvidence: z.string().optional(),
-  departments: z
-    .array(
-      z.object({
-        department: z.string(),
-        clientFeedback: z.string().optional(),
-        actions: z.array(actionSchema).optional(),
-      }),
-    )
-    .optional(),
-  clientActions: z
-    .array(
-      z.object({
-        what: z.string(),
-        due: z.string().optional(),
-        tentative: z.boolean().optional(),
-        blocks: z.string().optional(),
-      }),
-    )
-    .optional(),
-  pending: z
-    .array(
-      z.object({
-        waitingOn: z.string().optional(),
-        missing: z.string(),
-        from: z.string().optional(),
-        team: z.string().optional(),
-        owner: z.string().optional(),
-        reminderDate: z.string().optional(),
-      }),
-    )
-    .optional(),
-});
 
 /** Stable ids, so an AM's edit to the third action survives a re-render of the list. */
 function makeId(prefix: string, index: number) {
@@ -194,18 +147,6 @@ export async function draftFollowThroughNotes(
   const base = emptyDraft(touch, client, amName, month, date);
   if (manual) return { notes: base };
   const legacy = touch.postMeeting;
-  if (touch.noShow?.resolution !== "loom" && (!touch.transcript?.foundAt || (legacy?.analyzedAt && legacy.analyzedAt >= touch.transcript.foundAt))) {
-    const departments = new Map<string, NotesDraft["departments"][number]>();
-    for (const ticket of legacy?.draftTickets || []) {
-      const department = ticket.department;
-      const group = departments.get(department) || { department, clientFeedback: "", actions: [] };
-      group.actions.push({ id: `legacy-${ticket.id}`, what: ticket.title, team: department, due: ticket.dueDate || "" });
-      departments.set(department, group);
-    }
-    if (legacy?.recapSummary?.trim() || departments.size) {
-      return { notes: { ...base, summary: legacy?.recapSummary?.trim() || "", departments: [...departments.values()] } };
-    }
-  }
 
   const env = getServerEnv();
   const alternative = loomEvidence(touch);
@@ -217,7 +158,7 @@ export async function draftFollowThroughNotes(
     ...(touch.liveSession?.segments || []).map((segment) => segment.notes),
     touch.liveSession?.closeNotes,
   ].filter((note) => note?.trim()).join("\n");
-  if (!transcript && !captured) {
+  if (!transcript && !captured && !legacy?.recapSummary?.trim()) {
     return {
       notes: base,
       note: "There is no transcript on this touch, so the notes start empty. Write them from your own notes, or attach a transcript on the call screen first.",
@@ -235,12 +176,15 @@ export async function draftFollowThroughNotes(
   // The bullet set and the goal statuses stay in code because the parser that validates the
   // answer is built from them; the engine's prompt receives them as variables rather than
   // restating them, so a rubric change cannot leave the prompt describing the old one.
-  const system = await getPromptText("post_touch_notes_draft_prompt", {
+  const storedSystem = await getPromptText("post_touch_notes_draft_prompt", {
     summary_bullet_keys: SUMMARY_BULLETS.map((bullet) => bullet.key).join(", "),
     goal_statuses: GOAL_STATUSES.join(" / "),
   });
 
+  const system = storedSystem + "\nPopulate every summary bullet: metrics, delivery, posture, requests, nextTouch, sentiment. Put the relevant evidence in each field rather than appending it all to summary. Summary must be one to four sentences. For information the evidence does not establish, explicitly write: Not established in the available call evidence. Extract every actionable department follow-up into departments[].actions with a concise what, responsible team, assignee only when explicitly named as responsible in the evidence, and due date only when established. Include actions from the prior analysis, deduplicated against the transcript; distinguish completed work from new actions. Never invent tasks, deadlines, owners, metrics or client sentiment. Return clientActions and pending arrays, empty only when no supported items exist.";
+
   const userText = [
+    legacy ? "Prior call analysis (supporting evidence): " + JSON.stringify({ recapSummary: legacy.recapSummary, draftTickets: legacy.draftTickets }) : "",
     // Evidence only. What to answer -- the keys, the bullet set, the goal statuses and the
     // carry-over rule -- is the engine row's contract, resolved above.
     JSON.stringify(
@@ -269,9 +213,20 @@ export async function draftFollowThroughNotes(
   ].join("\n");
 
   const { data } = await callLlmForJson({ env, system, userText, maxTokens: 6000 });
-  const parsed = draftSchema.safeParse(data);
-  if (!parsed.success) {
-    throw new Error("MTOS could not read the generated notes. Try drafting again.");
+  let parsed = parseNotesOutput(data);
+  const completenessIssues = (value: typeof parsed): string[] => value.success ? [
+    ...SUMMARY_BULLETS.filter(bullet => !value.data.bullets?.[bullet.key]?.trim()).map(bullet => "bullets." + bullet.key + " is missing"),
+    ...(!value.data.summary?.trim() ? ["summary is missing"] : []),
+    ...(value.data.summary && summaryBudget(value.data.summary).count > 4 ? ["summary exceeds four sentences; move detail to its appropriate field"] : []),
+  ] : [];
+  if (!parsed.success || completenessIssues(parsed).length) {
+    const issues = parsed.success ? completenessIssues(parsed).join("; ") : parsed.error.issues.map(issue => `${issue.path.join(".") || "notes"}: ${issue.message}`).join("; ");
+    const repaired = await callLlmForJson({ env, system, userText: [userText, "", "Your previous JSON did not match the notes contract. Correct its structure using the same evidence. Preserve supported notes and actions; invent nothing. Missing optional text must be an empty string or omitted. Return only the specified JSON object, not a wrapper.", "Validation issues: " + issues, "Previous JSON:", JSON.stringify(data)].join("\n"), maxTokens: 6000 });
+    parsed = parseNotesOutput(repaired.data);
+    if (!parsed.success || completenessIssues(parsed).length) {
+      const fields = parsed.success ? completenessIssues(parsed).join("; ") : [...new Set(parsed.error.issues.map(issue => issue.path.join(".") || "notes"))].join(", ");
+      throw new Error(`The generated notes still have invalid fields: ${fields}. Your existing notes were kept. You can edit them manually or re-draft from the call.`);
+    }
   }
   if (!parsed.data.summary?.trim() && !parsed.data.departments?.length) {
     throw new Error("The transcript analysis returned no usable notes. Try drafting again or attach a fuller transcript.");
@@ -294,6 +249,7 @@ export async function draftFollowThroughNotes(
           (line, index): ActionLine => ({
             id: makeId(`d${departmentIndex + 1}`, index),
             what: line.what.trim(),
+            ...(line.assignee?.trim() ? { assignee: line.assignee.trim() } : {}),
             team: line.team?.trim() || entry.department.trim(),
             due: line.due?.trim() || "",
             ...(line.carryOver ? { carryOver: true } : {}),

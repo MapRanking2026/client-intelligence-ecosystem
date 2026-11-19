@@ -213,6 +213,7 @@ const actionLineSchema = z.object({
   what: z.string(),
   team: z.string(),
   due: z.string(),
+  assignee: z.string().optional(),
   carryOver: z.boolean().optional(),
   crossDepartment: z.string().optional(),
   dependsOn: z.string().optional(),
@@ -682,7 +683,7 @@ export async function POST(
         if ("note" in draft && draft.note) throw new Error(draft.note);
         const notes = hasMeetingNotes(existing) ? existing :
           await persistGeneratedFollowThroughDraft(context, touchId, "notes", draft.notes);
-        if (!touch.followThrough?.items) {
+        {
           const { items } = await buildFollowThroughItems(context, touchId);
           await persistGeneratedFollowThroughDraft(context, touchId, "items", items);
         }

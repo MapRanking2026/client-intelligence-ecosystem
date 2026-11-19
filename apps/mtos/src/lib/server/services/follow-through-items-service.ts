@@ -178,7 +178,7 @@ function ticketFromAction(
     businessName: options.businessName,
     description,
     ...(matched ? { department: matched } : {}),
-    assignee: owner || OWNER_NEEDED,
+    assignee: action.assignee?.trim() || owner || OWNER_NEEDED,
     priority: "normal",
     ...(agreed
       ? { dueDate: agreed, dueDateAgreedOnCall: true }

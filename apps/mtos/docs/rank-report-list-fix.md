@@ -1,0 +1,7 @@
+# Rank Tracker comparison location-list fix
+
+The reported error occurred before selecting a report location. The list request in original-rank-report-service used limit=50. Inspection of the provider's Report Builder page and its public application source showed its report list using page/limit pagination with limit=10; limit=50 was observed on the separate eligible-businesses endpoint. MTOS now follows the observed report-list request contract with 10-item pages, reads further pages using total/short-page termination, deduplicates report IDs and preserves exact prepared-account name/address matching. Matched profiles also supply locations when needed.
+
+Upstream JSON error messages are retained (bounded to 300 characters), with reconnect guidance only for 401/403. The comparison review panel offers retry without reloading the whole Monthly Touch when the location list fails.
+
+Verification: synthetic service tests cover pagination, six matching locations, deduplication, exclusion of unrelated accounts, explicit validation-error details and authentication-error guidance. An isolated Chrome test covers an initial location-list failure followed by retry and six displayed locations. Existing 21 comparison/PowerPoint checks passed. No live Rank Tracker report was created, changed or sent by this fix. The provider's exact authenticated 400 response could not be replayed from this local environment because no usable shared Rank Tracker session was available; tests do not claim live account delivery or deployed verification.

@@ -35,6 +35,7 @@
     "check:follow-through-trackers": "tsx scripts/check-follow-through-trackers.ts",
     "check:follow-through-tickets": "tsx scripts/check-follow-through-tickets.ts",
     "check:follow-through-notes": "tsx scripts/check-follow-through-notes.ts",
+    "check:notes-output": "node scripts/check-notes-output.cjs",
     "check:follow-through-score": "tsx scripts/check-follow-through-score.ts",
     "check:firestore-quota": "tsx scripts/check-firestore-quota.ts",
     "check:live-call": "tsx scripts/check-live-call.ts",
@@ -81,6 +82,8 @@
     "check:email-client-zone": "tsx scripts/check-email-client-zone.ts",
     "check:presenter-script": "tsx scripts/check-presenter-script.ts",
     "check:presentation-edit": "tsx scripts/check-presentation-edit.ts",
+    "check:rank-report-list": "node scripts/check-rank-report-list.cjs",
+    "check:rank-report-list-ui": "node scripts/check-rank-report-list-ui.cjs",
     "check:rank-comparison": "tsx scripts/check-rank-comparison.ts",
     "check:clickup-markdown": "tsx scripts/check-clickup-markdown.ts",
     "check:email-send-fixes": "node scripts/check-email-send-fixes.cjs"

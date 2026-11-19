@@ -16,18 +16,38 @@ async function visibleTouch(context: TenantContext, touchId: string) {
   return touch;
 }
 async function read(url: string, token?: string): Promise<Json> {
-  const response = await fetch(url, { headers: token ? { authorization: `Bearer ${token}` } : {}, signal: AbortSignal.timeout(45000), cache: "no-store" });
-  if (!response.ok) throw new Error(`Rank Tracker returned ${response.status}. Reconnect Rank Tracker or verify the report is available.`);
-  return response.json();
+  const response = await fetch(url, { headers: { accept: "application/json", ...(token ? { authorization: `Bearer ${token}` } : {}) }, signal: AbortSignal.timeout(45000), cache: "no-store" });
+  const payload = await response.json().catch(() => null) as Json | null;
+  if (!response.ok) {
+    const detail = typeof payload?.message === "string" ? payload.message.slice(0, 300) : "";
+    const recovery = response.status === 401 || response.status === 403
+      ? " Reconnect Rank Tracker or verify access to this report."
+      : " Try loading the report again.";
+    throw new Error(`Rank Tracker returned ${response.status}${detail ? `: ${detail}` : "."}${recovery}`);
+  }
+  if (!payload) throw new Error("Rank Tracker returned an unreadable response. Try loading the report again.");
+  return payload;
 }
 export async function listOriginalReports(context: TenantContext, touchId: string) {
   const touch = await visibleTouch(context, touchId);
   const client = await getMtosDataSource(context).getClientById(touch.clientId);
   const session = await openDashboardSession(context); if (!session || !client) throw new Error("Connect Rank Tracker and refresh preparation first.");
-  const response = await read(`${session.baseUrl}/api/report-builder?${new URLSearchParams({ search: client.name, page: "1", limit: "50" })}`, session.token);
-  const rows = (response.data as { items: { id: string; name: string; address: string }[] }).items || [];
-  const businesses = touch.prepPack?.seoPerformance?.matchedBusinesses || [];
-  return rows.filter(row => businesses.some(item => normalized(item.businessName) === normalized(row.name) && normalized(item.address) === normalized(row.address))).map(row => ({ id: row.id, name: row.name, address: row.address }));
+  const businesses = [...(touch.prepPack?.seoPerformance?.matchedBusinesses || []), ...(touch.prepPack?.seoPerformance?.profiles || []).map(profile => profile.business)];
+  const matched = new Map<string, { id: string; name: string; address: string }>();
+  // Use the same page size as the provider's Report Builder UI. Its report-list
+  // contract differs from eligible-businesses, where a limit of 50 is accepted.
+  const limit = 10;
+  for (let page = 1; page <= 100; page++) {
+    const response = await read(`${session.baseUrl}/api/report-builder?${new URLSearchParams({ search: client.name, page: String(page), limit: String(limit) })}`, session.token);
+    const data = response.data as { items?: { id: string; name: string; address: string }[]; total?: number } | undefined;
+    if (!Array.isArray(data?.items)) throw new Error("Rank Tracker did not return a report list. Try loading the report again.");
+    for (const row of data.items) {
+      if (typeof row.id !== "string" || typeof row.name !== "string" || typeof row.address !== "string") continue;
+      if (businesses.some(item => normalized(item.businessName) === normalized(row.name) && normalized(item.address) === normalized(row.address))) matched.set(row.id, { id: row.id, name: row.name, address: row.address });
+    }
+    if (!data.items.length || (typeof data.total === "number" && page * limit >= data.total) || (data.total === undefined && data.items.length < limit)) return [...matched.values()];
+  }
+  throw new Error("Rank Tracker returned too many report pages. Narrow this client's report search before retrying.");
 }
 export async function readOriginalReport(context: TenantContext, touchId: string, reportId: string) {
   const touch = await visibleTouch(context, touchId);

@@ -23,6 +23,7 @@ import { getPromptText } from "@/src/lib/server/prompt-store";
 import { getFirebaseAdminDb } from "@/src/lib/server/firebase/admin";
 import { monthlyTouchPath } from "@/src/lib/server/firebase/collections";
 import { callLlmForJson, getNowIso, hasAnyLlmProvider } from "@/src/lib/server/services/mtos-ai";
+import { getModelRouteForPrompt } from "@/src/lib/server/prompt-model-route";
 import { getAccountManagerProfile } from "@/src/lib/server/services/user-service";
 import { readTouchTranscriptPayload } from "@/src/lib/server/services/transcript-watch-service";
 
@@ -213,7 +214,8 @@ export async function draftFollowThroughNotes(
     captured,
   ].join("\n");
 
-  const { data } = await callLlmForJson({ env, system, userText, maxTokens: 6000 });
+  const route = await getModelRouteForPrompt(env, "post_touch_notes_draft_prompt");
+  const { data } = await callLlmForJson({ env, system, userText, maxTokens: 6000, route });
   let parsed = parseNotesOutput(data);
   const completenessIssues = (value: typeof parsed): string[] => value.success ? [
     ...SUMMARY_BULLETS.filter(bullet => !value.data.bullets?.[bullet.key]?.trim()).map(bullet => "bullets." + bullet.key + " is missing"),
@@ -222,7 +224,7 @@ export async function draftFollowThroughNotes(
   ] : [];
   if (!parsed.success || completenessIssues(parsed).length) {
     const issues = parsed.success ? completenessIssues(parsed).join("; ") : parsed.error.issues.map(issue => `${issue.path.join(".") || "notes"}: ${issue.message}`).join("; ");
-    const repaired = await callLlmForJson({ env, system, userText: [userText, "", "Your previous JSON did not match the notes contract. Correct its structure using the same evidence. Preserve supported notes and actions; invent nothing. Missing optional text must be an empty string or omitted. Return only the specified JSON object, not a wrapper.", "Validation issues: " + issues, "Previous JSON:", JSON.stringify(data)].join("\n"), maxTokens: 6000 });
+    const repaired = await callLlmForJson({ env, system, route, userText: [userText, "", "Your previous JSON did not match the notes contract. Correct its structure using the same evidence. Preserve supported notes and actions; invent nothing. Missing optional text must be an empty string or omitted. Return only the specified JSON object, not a wrapper.", "Validation issues: " + issues, "Previous JSON:", JSON.stringify(data)].join("\n"), maxTokens: 6000 });
     parsed = parseNotesOutput(repaired.data);
     if (!parsed.success || completenessIssues(parsed).length) {
       const fields = parsed.success ? completenessIssues(parsed).join("; ") : [...new Set(parsed.error.issues.map(issue => issue.path.join(".") || "notes"))].join(", ");

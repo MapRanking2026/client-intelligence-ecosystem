@@ -34,6 +34,21 @@ export function getServerEnv() {
     // Default failover order for the LLM layer; a comma-separated list of
     // provider ids ("claude", "openai", "gemini"). Unknown ids are ignored.
     llmProviderOrder: process.env.LLM_PROVIDER_ORDER || "claude,openai,gemini",
+    // Per-prompt model routing (see model-router.ts). All optional: with none of
+    // these set, every AI call keeps using the single model per provider above.
+    // A tier left empty falls back to that provider's default model.
+    modelTiers: {
+      CLAUDE_HEAVY: process.env.MTOS_MODEL_CLAUDE_HEAVY || "",
+      CLAUDE_STANDARD: process.env.MTOS_MODEL_CLAUDE_STANDARD || "",
+      CLAUDE_FAST: process.env.MTOS_MODEL_CLAUDE_FAST || "",
+      GEMINI_STANDARD: process.env.MTOS_MODEL_GEMINI_STANDARD || "",
+      GEMINI_FAST: process.env.MTOS_MODEL_GEMINI_FAST || "",
+      GEMINI_LIVE: process.env.MTOS_MODEL_GEMINI_LIVE || "",
+    },
+    // JSON object: Prompt Engine key (or "default") -> tier name.
+    modelRoutes: process.env.MTOS_MODEL_ROUTES || "",
+    // JSON object: tier name -> tier to try next when that model fails.
+    modelFallbacks: process.env.MTOS_MODEL_FALLBACKS || "",
     gohighlevelAgencyApiKey: (process.env.GOHIGHLEVEL_AGENCY_API_KEY || "").replace(/^Bearer\s+/i, "").trim(),
     // Shared secret for the Client Intelligence Ecosystem integration gateway
     // (signed service-to-service requests from SEOOS). Empty disables the gateway.

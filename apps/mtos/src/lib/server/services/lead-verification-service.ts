@@ -26,6 +26,7 @@ import { integrationSnapshotPath, leadVerificationPath } from "@/src/lib/server/
 import { getServerEnv } from "@/src/lib/server/env";
 import { fetchGhlClientLeadsAndCalls } from "@/src/lib/server/integration-sync";
 import { callLlmForJson, getNowIso, hasAnyLlmProvider, stripUndefinedDeep } from "@/src/lib/server/services/mtos-ai";
+import { getModelRouteForPrompt } from "@/src/lib/server/prompt-model-route";
 import { getPromptText } from "@/src/lib/server/prompt-store";
 import { namesLikelyMatch } from "@/src/lib/server/name-matching";
 
@@ -386,7 +387,7 @@ async function classifyWithClaude(
       JSON.stringify({ leads: batch }, null, 2),
     ].join("\n");
     try {
-      const result = await callLlmForJson({ env, system, userText, maxTokens: 4096 });
+      const result = await callLlmForJson({ env, system, userText, maxTokens: 4096, route: await getModelRouteForPrompt(env, "lead_verification_prompt") });
       const parsed = verdictsResponseSchema.parse(result.data);
       provider = provider ?? result.provider;
       model = model ?? result.model;

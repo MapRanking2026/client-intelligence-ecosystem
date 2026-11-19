@@ -18,6 +18,7 @@ import { monthlyTouchPath } from "@/src/lib/server/firebase/collections";
 import { getFirebaseAdminDb } from "@/src/lib/server/firebase/admin";
 import { getServerEnv } from "@/src/lib/server/env";
 import { callLlmForJson, getNowIso, hasAnyLlmProvider, stripUndefinedDeep } from "@/src/lib/server/services/mtos-ai";
+import { getModelRouteForPrompt } from "@/src/lib/server/prompt-model-route";
 import { getPromptText, getPromptRecord } from "@/src/lib/server/prompt-store";
 
 const BRIEF_SECTION_IDS = BRIEF_SECTIONS.map((section) => section.id) as [BriefSectionId, ...BriefSectionId[]];
@@ -303,7 +304,7 @@ async function generateClaudeSections(
   // then 12000, both truncated the JSON mid-array -- most recently at position 10828 on the
   // first touch prepared under the richer MT-002 brief, since the guide is derived from the
   // prep. max_tokens is a ceiling, not a spend: headroom costs nothing unless it is used.
-  const result = await callLlmForJson({ env, system, userText, maxTokens: 24000 });
+  const result = await callLlmForJson({ env, system, userText, maxTokens: 24000, route: await getModelRouteForPrompt(env, "meeting_structure_run_sheet_prompt") });
   const parsed = callGuideSchema.parse(result.data);
   // The chips arrive as whatever the model wrote. `normalizeChips` keeps the ones that name a
   // system MTOS knows and drops the rest, so an invented source cannot be rendered as a link the
@@ -367,7 +368,7 @@ async function generatePresentationAids(
       evidence,
       toneDirective,
     ].join("\n");
-    const res = await callLlmForJson({ env, system, userText, maxTokens: 6000 });
+    const res = await callLlmForJson({ env, system, userText, maxTokens: 6000, route: await getModelRouteForPrompt(env, "objection_handling_prompt") });
     aids.anticipatedObjections = objectionsSchema.parse(res.data).objections;
   } catch {
     // Best-effort: omit objections on any failure.
@@ -380,7 +381,7 @@ async function generatePresentationAids(
       evidence,
       toneDirective,
     ].join("\n");
-    const res = await callLlmForJson({ env, system, userText, maxTokens: 6000 });
+    const res = await callLlmForJson({ env, system, userText, maxTokens: 6000, route: await getModelRouteForPrompt(env, "value_performance_translation_prompt") });
     aids.valueTranslations = valueTranslationsSchema.parse(res.data).translations;
   } catch {
     // Best-effort: omit translations on any failure.

@@ -14,6 +14,7 @@
     "publish:prompts": "tsx scripts/publish-prompts.ts",
     "check:prompt-store": "tsx scripts/check-prompt-store.ts",
     "check:prompt-engine": "tsx scripts/check-prompt-engine.ts",
+    "check:model-router": "tsx scripts/check-model-router.ts",
     "check:health-mapping": "tsx scripts/check-clickup-health-mapping.ts",
     "check:transcript-parsing": "tsx scripts/check-transcript-parsing.ts",
     "check:api-errors": "tsx scripts/check-api-error-messages.ts",

@@ -19,6 +19,7 @@ import { getPromptText } from "@/src/lib/server/prompt-store";
 import { getFirebaseAdminDb } from "@/src/lib/server/firebase/admin";
 import { monthlyTouchPath } from "@/src/lib/server/firebase/collections";
 import { callLlmForJson, getNowIso, hasAnyLlmProvider } from "@/src/lib/server/services/mtos-ai";
+import { getModelRouteForPrompt } from "@/src/lib/server/prompt-model-route";
 import { loomReady } from "@/src/lib/contracts/no-show";
 import { readTouchTranscriptPayload } from "@/src/lib/server/services/transcript-watch-service";
 
@@ -185,7 +186,7 @@ export async function analyzeScoreGate(
     transcript,
   ].join("\n");
 
-  const { data } = await callLlmForJson({ env, system, userText, maxTokens: 4000 });
+  const { data } = await callLlmForJson({ env, system, userText, maxTokens: 4000, route: await getModelRouteForPrompt(env, "retention_red_flags_prompt") });
   const parsed = analysisSchema.safeParse(data);
   if (!parsed.success) {
     const { findings, note } = findingsFromIntelligence(touch);

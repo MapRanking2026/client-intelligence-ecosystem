@@ -10,6 +10,7 @@ import { getServerEnv } from "@/src/lib/server/env";
 import { sendGmailMessage } from "@/src/lib/server/gmail";
 import { getPromptText } from "@/src/lib/server/prompt-store";
 import { callLlmForJson, getNowIso, hasAnyLlmProvider } from "@/src/lib/server/services/mtos-ai";
+import { getModelRouteForPrompt } from "@/src/lib/server/prompt-model-route";
 
 /**
  * Step 2 of the preparation workflow: the client confirmation email.
@@ -265,6 +266,7 @@ export async function generateConfirmationEmail(
     const system = await getPromptText("client_confirmation_email_prompt");
     const { data, model, provider } = await callLlmForJson({
       env,
+      route: await getModelRouteForPrompt(env, "client_confirmation_email_prompt"),
       system: `${system}\n\n${CLIENT_CONTENT_RULE}`,
       userText,
       maxTokens: 1200,

@@ -20,6 +20,7 @@ import {
 } from "@/src/lib/server/services/prep-document-builder";
 import { buildTouchEvidence } from "@/src/lib/server/services/live-call-guide-service";
 import { callLlmForJson, getNowIso, hasAnyLlmProvider } from "@/src/lib/server/services/mtos-ai";
+import { getModelRouteForPrompt } from "@/src/lib/server/prompt-model-route";
 import { retrieveKnowledge } from "@/src/lib/server/services/knowledge-service";
 
 /**
@@ -118,6 +119,7 @@ async function generatePass(
     env: getServerEnv(),
     system,
     userText,
+    route: await getModelRouteForPrompt(getServerEnv(), PREP_DOCUMENT_PROMPT_KEY),
     // Eight to ten sections of usable prose. Measured against real accounts: the first pass runs
     // 6-9k tokens on a client with full data, and a tighter ceiling truncated section 8.
     maxTokens: 16000,

@@ -135,7 +135,7 @@ check("the header says it is a recap", draft.html.includes("✅ Monthly check-in
 check("the facts row carries Met", draft.html.includes("🤝 Met"));
 check("and the next check-in", draft.html.includes("🗓️ Next check-in"));
 check("and the goal", draft.html.includes("🎯 Goal"));
-check("unfinished client asks are not rendered", !draft.html.includes("📋 What we need from you"));
+check("unfinished client asks are not rendered", !draft.html.includes("📋 B &middot; What we need from you"));
 check("unfinished team commitments are not rendered", !draft.html.includes("What Map Ranking will do"));
 check("the next check-in is a button when there is a link", draft.html.includes("https://calendar.google.com/event?eid=abc"));
 check("the follow-up channel is named", draft.html.includes("reply to this email"));

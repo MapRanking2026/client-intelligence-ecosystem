@@ -105,6 +105,7 @@ export async function buildFollowThroughRecap(
     .sort((a, b) => (a.scheduledAt || "").localeCompare(b.scheduledAt || ""))[0];
 
   const wins = await winsSinceLastTouch(context, client.id);
+  let generationFailure = "";
 
   const blocked = blockedTaskTitles(touch);
   const safeSummary = clientText(notes.summary, blocked);
@@ -112,8 +113,15 @@ export async function buildFollowThroughRecap(
   const alternative = loomEvidence(touch);
   const presentation = JSON.stringify({ slides: touch.presentation?.slides.map(slide => ({ title: slide.title, subtitle: slide.subtitle, bullets: slide.bullets, columns: slide.columns, presenterNotes: slide.presenterNotes, presenterScript: slide.presenterScript })), callGuide: touch.callGuide, preparationQuestions: touch.prepPack?.recapQuestions, goalQuestions: touch.prepPack?.leadQualityQuestions });
   const evidence = ["Meeting context:", JSON.stringify({ meetingDate: touch.scheduledLocalDate, meetingStartedAt: touch.scheduledAt, clientTimeZone: timeZone }), "Internal call notes (extract supported client-safe facts only):", notes.summary, JSON.stringify({ bullets: notes.bullets, departmentActions: notes.departments, clientActions: notes.clientActions, pending: notes.pending }), alternative || "", "Performance metrics:", notes.bullets.metrics || "", "Verified completed work:", ...wins.map(win => win.what)].filter(Boolean).join("\n");
-  const content = await generateRecapContent(env, evidence, blocked, { transcript, presentation });
-  const reviewGaps = [...(content?.reviewGaps || [])];
+  // A draft the AM cannot open is worse than one they have to rewrite. When the model's content
+  // cannot be produced or verified, the email is still built -- from the notes alone -- and the
+  // reason becomes a gap on the review list, so every account gets something editable on screen
+  // instead of an error where the email should be.
+  const content = await generateRecapContent(env, evidence, blocked, { transcript, presentation }).catch((error) => {
+    generationFailure = error instanceof Error ? error.message : "The recap content could not be generated.";
+    return undefined;
+  });
+  const reviewGaps = [...(content?.reviewGaps || []), ...(generationFailure ? [`${generationFailure} This draft was written from the call notes alone — read every section before approving it.`] : [])];
   const liveBooking = touch.nextMeetingBooking ? await readBookedNextMeeting(context, touchId).catch(error => { reviewGaps.push(error instanceof Error ? error.message : "Verify the saved next meeting in Google Calendar."); return undefined; }) : undefined;
   const nextScheduledAt = liveBooking?.scheduledAt || next?.scheduledAt;
   let nextLabel = nextScheduledAt && timeZone ? new Intl.DateTimeFormat("en-US", { dateStyle: "full", timeStyle: "short", timeZone }).format(new Date(nextScheduledAt!)) + " (" + timeZone + ")" : "";
@@ -134,7 +142,7 @@ export async function buildFollowThroughRecap(
     {
       businessName: client.name,
       contactName: recapContactName(client.contact, [notes.summary, touch.postMeeting?.recapSummary].filter(Boolean).join("\n")),
-      ...(content ? { overview: content.overview, highlights: content.highlights, meetingCommitments: content.agencyCommitments, meetingRequests: content.clientRequests, next30Days: content.next30Days, promisedInclusions: content.promisedInclusions } : {}),
+      ...(content ? { overview: content.overview, highlights: content.highlights, discussionTopics: content.discussionTopics, goalTargets: content.goalTargets, meetingCommitments: content.agencyCommitments, meetingRequests: content.clientRequests, next30Days: content.next30Days, promisedInclusions: content.promisedInclusions } : {}),
       nextMeetingAgreed,
       metLabel: dayLabel(touch.scheduledAt, timeZone),
       nextCheckInLabel: nextLabel,

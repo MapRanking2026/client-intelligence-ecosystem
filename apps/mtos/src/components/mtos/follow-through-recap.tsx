@@ -24,8 +24,12 @@ import {
 const TOOLBAR = [
   { command: "bold", label: "B", title: "Bold" },
   { command: "italic", label: "I", title: "Italic" },
+  { command: "underline", label: "U", title: "Underline" },
   { command: "insertUnorderedList", label: "•", title: "Bulleted list" },
+  { command: "insertOrderedList", label: "1.", title: "Numbered list" },
   { command: "removeFormat", label: "⌫", title: "Clear formatting" },
+  { command: "undo", label: "↶", title: "Undo" },
+  { command: "redo", label: "↷", title: "Redo" },
 ];
 
 export function FollowThroughRecap({
@@ -97,14 +101,32 @@ export function FollowThroughRecap({
     }
   }
 
-  async function save() {
+  /**
+   * Save what is in the editor.
+   *
+   * `continueOn` is the difference between the two buttons, and the reason there are two: saving
+   * used to navigate to the finish step, so there was no way to park a half-written email and come
+   * back to it. An AM rewriting a recap section by section needs to be able to keep their work
+   * without being moved off the page.
+   */
+  async function save(continueOn: boolean) {
     if (!state) return;
-    setBusy("save");
+    setBusy(continueOn ? "save" : "keep");
     setError("");
     try {
       const data = await post({ action: "save_recap", recap: state });
       if (data?.recap) setState(data.recap);
-      window.location.assign("?step=finish#finish");
+      if (continueOn) {
+        window.location.assign("?step=finish#finish");
+        return;
+      }
+      // The stored HTML comes back sanitised, so the editor is left showing exactly what was kept
+      // rather than the markup that went in.
+      if (bodyRef.current && data?.recap) {
+        bodyRef.current.innerHTML = data.recap.html;
+        bodyRef.current.dataset.loaded = "1";
+      }
+      setMessage("Saved. You can keep editing.");
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "The recap was not saved.");
     } finally {
@@ -204,6 +226,12 @@ export function FollowThroughRecap({
       </div>
 
       {editable ? (
+        <>
+        <p className="muted text-[0.78rem]">
+          Every part of this email is yours to change — the subject, the wording of any section,
+          and the sections themselves. Rewrite, delete or add whatever this client needs; what you
+          save is exactly what they receive.
+        </p>
         <div className="flex flex-wrap gap-1">
           {TOOLBAR.map((button) => (
             <button
@@ -218,6 +246,7 @@ export function FollowThroughRecap({
             </button>
           ))}
         </div>
+        </>
       ) : null}
 
       <div
@@ -251,9 +280,12 @@ export function FollowThroughRecap({
       ) : null}
 
       <div className="flex flex-wrap items-center gap-2">
-        <button type="button" className="btn btn-primary" disabled={Boolean(busy)} onClick={() => void save()}>
+        <button type="button" className="btn btn-primary" disabled={Boolean(busy)} onClick={() => void save(true)}>
           <Save />
           {busy === "save" ? "Saving…" : "Save recap and continue to finish"}
+        </button>
+        <button type="button" className="btn btn-ghost" disabled={Boolean(busy) || !editable} onClick={() => void save(false)}>
+          {busy === "keep" ? "Saving…" : "Save and keep editing"}
         </button>
         <span className="muted text-[0.78rem]">It sends through your connected Gmail account from support@mapranking.com when you finish the follow-through.</span>
       </div>

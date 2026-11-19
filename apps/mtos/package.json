@@ -91,7 +91,11 @@
     "check:rank-report-list-ui": "node scripts/check-rank-report-list-ui.cjs",
     "check:rank-comparison": "tsx scripts/check-rank-comparison.ts",
     "check:clickup-markdown": "tsx scripts/check-clickup-markdown.ts",
-    "check:email-send-fixes": "node scripts/check-email-send-fixes.cjs"
+    "check:email-send-fixes": "node scripts/check-email-send-fixes.cjs",
+    "check:recap-email-structure": "tsx scripts/check-recap-email-structure.ts",
+    "check:recap-email-layout": "node scripts/check-recap-email-layout.cjs",
+    "check:recap-structure": "node scripts/check-recap-structure.cjs",
+    "check:recap-agreements": "node scripts/check-recap-agreements.cjs"
   },
   "dependencies": {
     "@cie/contracts": "*",

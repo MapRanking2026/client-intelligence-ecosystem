@@ -117,6 +117,7 @@ export function PresentationSlideCanvas({
   slideNumber,
   slideCount,
   logoSrc = "/brand/mapranking-mark.png",
+  bookingAction,
 }: {
   slide: PresentationSlide;
   deckTitle?: string;
@@ -127,6 +128,7 @@ export function PresentationSlideCanvas({
   slideNumber: number;
   slideCount: number;
   logoSrc?: string;
+  bookingAction?: React.ReactNode;
 }) {
   const base: React.CSSProperties = {
     position: "relative",
@@ -143,6 +145,7 @@ export function PresentationSlideCanvas({
     const isCover = slide.layout === "cover";
     return (
       <div style={base}>
+      {bookingAction ? <div style={{ position: "absolute", right: 64, bottom: 100, width: 350, zIndex: 4 }}>{bookingAction}</div> : null}
         <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 10, background: DECK.blue }} />
         {/* Soft geometric tint, echoing the reference covers. */}
         <div
@@ -225,6 +228,7 @@ export function PresentationSlideCanvas({
 
   return (
     <div style={base}>
+      {bookingAction ? <div style={{ position: "absolute", right: 64, bottom: 100, width: 350, zIndex: 4 }}>{bookingAction}</div> : null}
       <Chrome slide={slide}>
         {slide.layout === "rank_comparison" && slide.rankComparison ? <RankComparisonVisual comparison={slide.rankComparison} /> : null}
         {slide.layout === "stat_callouts" && slide.stats?.length ? (

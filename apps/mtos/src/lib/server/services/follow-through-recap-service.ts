@@ -1,7 +1,11 @@
+import { readBookedNextMeeting } from "@/src/lib/server/services/next-touch-booking-service";
+import { loomEvidence } from "@/src/lib/contracts/no-show";
+import { recapCommunicationViolations } from "@/src/lib/contracts/recap-client-content";
+import { readTouchTranscriptPayload } from "@/src/lib/server/services/transcript-watch-service";
 import { recapContactName } from "@/src/lib/contracts/recap-contact";
 import { generateRecapContent } from "@/src/lib/server/services/recap-content-service";
 import { resolveClientTimeZone } from "@/src/lib/contracts/client-time-zone";
-import { blockedTaskTitles, clientText, internalTaskText } from "@/src/lib/contracts/client-content";
+import { blockedTaskTitles, clientText } from "@/src/lib/contracts/client-content";
 import type { TenantContext } from "@/src/lib/contracts/mtos";
 import {
   buildRecapEmailDraft,
@@ -104,15 +108,36 @@ export async function buildFollowThroughRecap(
 
   const blocked = blockedTaskTitles(touch);
   const safeSummary = clientText(notes.summary, blocked);
-  const evidence = ["Internal call notes (extract supported client-safe facts only):", notes.summary, "Performance metrics:", notes.bullets.metrics || "", "Verified completed work:", ...wins.map(win => win.what)].filter(Boolean).join("\n");
-  const content = await generateRecapContent(env, evidence, blocked);
+  const transcript = touch.noShow?.resolution === "loom" ? undefined : await readTouchTranscriptPayload(context, touchId, touch.postMeeting?.transcript);
+  const alternative = loomEvidence(touch);
+  const presentation = JSON.stringify({ slides: touch.presentation?.slides.map(slide => ({ title: slide.title, subtitle: slide.subtitle, bullets: slide.bullets, columns: slide.columns, presenterNotes: slide.presenterNotes, presenterScript: slide.presenterScript })), callGuide: touch.callGuide, preparationQuestions: touch.prepPack?.recapQuestions, goalQuestions: touch.prepPack?.leadQualityQuestions });
+  const evidence = ["Meeting context:", JSON.stringify({ meetingDate: touch.scheduledLocalDate, meetingStartedAt: touch.scheduledAt, clientTimeZone: timeZone }), "Internal call notes (extract supported client-safe facts only):", notes.summary, JSON.stringify({ bullets: notes.bullets, departmentActions: notes.departments, clientActions: notes.clientActions, pending: notes.pending }), alternative || "", "Performance metrics:", notes.bullets.metrics || "", "Verified completed work:", ...wins.map(win => win.what)].filter(Boolean).join("\n");
+  const content = await generateRecapContent(env, evidence, blocked, { transcript, presentation });
+  const reviewGaps = [...(content?.reviewGaps || [])];
+  const liveBooking = touch.nextMeetingBooking ? await readBookedNextMeeting(context, touchId).catch(error => { reviewGaps.push(error instanceof Error ? error.message : "Verify the saved next meeting in Google Calendar."); return undefined; }) : undefined;
+  const nextScheduledAt = liveBooking?.scheduledAt || next?.scheduledAt;
+  let nextLabel = nextScheduledAt && timeZone ? new Intl.DateTimeFormat("en-US", { dateStyle: "full", timeStyle: "short", timeZone }).format(new Date(nextScheduledAt!)) + " (" + timeZone + ")" : "";
+  let nextMeetingAgreed = false;
+  if (content?.nextMeeting) {
+    const agreed = content.nextMeeting;
+    const calendarDate = nextScheduledAt && timeZone ? new Intl.DateTimeFormat("en-CA", { year: "numeric", month: "2-digit", day: "2-digit", timeZone }).format(new Date(nextScheduledAt!)) : "";
+    if (calendarDate && agreed.date && calendarDate !== agreed.date) {
+      reviewGaps.push("The next meeting date agreed in the transcript differs from the calendar. Confirm it before sending."); nextLabel = "";
+    } else if (agreed.date) {
+      nextMeetingAgreed = true;
+      if (!nextLabel) nextLabel = new Intl.DateTimeFormat("en-US", { dateStyle: "full", timeZone: "UTC" }).format(new Date(agreed.date + "T12:00:00Z"));
+    } else {
+      reviewGaps.push("Verify the next meeting date: " + agreed.label); nextLabel = "";
+    }
+  }
   const draft = buildRecapEmailDraft(
     {
       businessName: client.name,
       contactName: recapContactName(client.contact, [notes.summary, touch.postMeeting?.recapSummary].filter(Boolean).join("\n")),
-      ...(content ? { overview: content.overview, highlights: content.highlights } : {}),
+      ...(content ? { overview: content.overview, highlights: content.highlights, meetingCommitments: content.agencyCommitments, meetingRequests: content.clientRequests, next30Days: content.next30Days, promisedInclusions: content.promisedInclusions } : {}),
+      nextMeetingAgreed,
       metLabel: dayLabel(touch.scheduledAt, timeZone),
-      nextCheckInLabel: dayLabel(next?.scheduledAt, timeZone),
+      nextCheckInLabel: nextLabel,
       nextCheckInUrl: "",
       signoff: preferences.emailSignoff?.trim() || (
         preferences.jobTitle?.trim() && (profile.name || client.accountManager)
@@ -129,12 +154,11 @@ export async function buildFollowThroughRecap(
 
   return {
     recap: { subject: draft.subject, html: draft.html },
-    blockingGaps: draft.blockingGaps,
-    ...(wins.length
-      ? {
-          note: "The wins are the Map Ranking commitments marked complete. MTOS has no record of the day each one actually shipped, so those dates are blank — add them, or the email will go out without them.",
-        }
-      : {}),
+    blockingGaps: [...draft.blockingGaps, ...reviewGaps],
+    note: [
+      !transcript && !alternative ? "No transcript was available. Verify the agreed follow-ups and promised email content against your call notes before approving." : "",
+      wins.length ? "Completed work dates are omitted where no actual completion date is recorded." : "",
+    ].filter(Boolean).join(" "),
   };
 }
 
@@ -146,7 +170,7 @@ export async function saveFollowThroughRecap(
   // Cleaned on the way in, so the stored draft is exactly what the client would receive. The AM
   // wrote it, so this is not defence against an attacker -- it is defence against what lands in
   // a contentEditable when someone pastes from a web page.
-  if (internalTaskText(`${recap.subject} ${recap.html}`)) throw new Error("Client recaps may include completed work only. Keep unfinished task details in internal notes.");
+  if (recapCommunicationViolations(`${recap.subject} ${recap.html}`).length) throw new Error("Keep internal team information out of the client recap. Include only the agreed client-facing follow-ups.");
   const cleaned: RecapEmailState = { ...recap, html: sanitizeRecapEmailHtml(recap.html) };
   const db = getFirebaseAdminDb();
   if (db) {

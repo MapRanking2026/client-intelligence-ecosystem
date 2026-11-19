@@ -72,6 +72,12 @@ export interface RecapAsk {
 export interface RecapEmailFacts {
   businessName: string;
   contactFirstName: string;
+  meetingCommitments?: RecapCommitment[];
+  meetingRequests?: RecapAsk[];
+  next30Days?: RecapCommitment[];
+  promisedInclusions?: { text: string; requiresReply: boolean; due?: string }[];
+  nextMeetingAgreed?: boolean;
+
   /** `Fri, 2 November` -- the call we are recapping. */
   metLabel: string;
   /** The next monthly touch, or empty when none is booked yet. */
@@ -105,6 +111,12 @@ export interface RecapEmailDraft {
 export interface RecapEmailSource {
   businessName: string;
   contactName: string;
+  meetingCommitments?: RecapCommitment[];
+  meetingRequests?: RecapAsk[];
+  next30Days?: RecapCommitment[];
+  promisedInclusions?: { text: string; requiresReply: boolean; due?: string }[];
+  nextMeetingAgreed?: boolean;
+
   metLabel: string;
   nextCheckInLabel: string;
   nextCheckInUrl: string;
@@ -180,10 +192,19 @@ export function buildRecapEmailDraft(
     goalLabel: notes.goalText.trim(),
     intro: source.overview?.trim() || notes.summary.trim().split(/(?<=[.!?])\s+(?=[A-Z])/).slice(0, 3).join("\n\n"),
     highlights: source.highlights,
+    meetingCommitments: source.meetingCommitments,
+    meetingRequests: source.meetingRequests,
+    next30Days: source.next30Days,
+    promisedInclusions: source.promisedInclusions,
+    nextMeetingAgreed: source.nextMeetingAgreed,
     wins: (source.wins || []).filter((win) => win.what.trim()),
     commitments: commitments.filter((commitment) => commitment.what),
     asks: asks.filter((ask) => ask.what),
-    followUpChannel: source.followUpChannel?.trim() || "Just reply to this email and it comes straight to me.",
+    followUpChannel: source.followUpChannel?.trim() || (source.promisedInclusions?.some(item => item.requiresReply)
+      ? "Please reply with your answers to the questions above. If you have any questions or concerns, include them in the same reply. Your email comes straight to me, and I’m happy to help."
+      : source.meetingRequests?.length
+        ? "Please reply with the information above, and include any questions or concerns in the same reply. Your email comes straight to me, and I’m happy to help."
+        : "If you have any questions or concerns, please reply to this email. It comes straight to me, and I’m happy to help."),
     signoff,
     logoUrl,
   };
@@ -259,13 +280,13 @@ function commitmentsBlock(commitments: RecapCommitment[]): string {
         `<tr><td style="padding:9px 0;vertical-align:middle;width:52px"><div style="width:38px;height:38px;border-radius:38px;background:${BLUE};color:#ffffff;text-align:center;line-height:38px;font-size:17px;font-weight:700">${index + 1}</div></td>` +
         `<td style="padding:9px 0;vertical-align:middle;border-bottom:1px solid ${HAIR}">` +
         `<div style="font-weight:700;color:${NAVY};font-size:16px">${esc(commitment.what)}</div>` +
-        (commitment.due ? `<div style="color:${BODY};font-size:14px;margin-top:2px">By ${esc(commitment.due)}</div>` : "") +
+        (commitment.due ? `<div style="color:${BODY};font-size:14px;margin-top:2px">Agreed timing: ${esc(commitment.due)}</div>` : "") +
         `</td></tr>`,
     )
     .join("");
 
   return [
-    `<div style="font-size:12px;letter-spacing:1.6px;text-transform:uppercase;font-weight:700;color:${BLUE};padding-bottom:6px;border-bottom:2px solid ${HAIR};margin-top:22px">What Map Ranking will do</div>`,
+    `<div style="font-size:12px;letter-spacing:1.6px;text-transform:uppercase;font-weight:700;color:${BLUE};padding-bottom:6px;border-bottom:2px solid ${HAIR};margin-top:22px">What you can expect from us</div>`,
     `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;margin-top:4px">${rows}</table>`,
   ].join("");
 }
@@ -276,7 +297,7 @@ function asksBlock(asks: RecapAsk[]): string {
     .map(
       (ask) =>
         `<li style="margin:4px 0"><span style="font-weight:700;color:${NAVY}">${esc(ask.what)}</span>` +
-        (ask.due ? `<span style="color:${BODY}"> — by ${esc(ask.due)}${ask.tentative ? " (we said roughly)" : ""}</span>` : "") +
+        (ask.due ? `<span style="color:${BODY}"> — ${esc(ask.due)}${ask.tentative ? " (we said roughly)" : ""}</span>` : "") +
         `</li>`,
     )
     .join("");
@@ -287,6 +308,19 @@ function asksBlock(asks: RecapAsk[]): string {
     `<ul style="margin:8px 0 0;padding-left:20px;color:${BODY}">${items}</ul>`,
     `</div>`,
   ].join("");
+}
+
+function next30DaysBlock(items: RecapCommitment[]): string {
+  if (!items.length) return "";
+  return '<div style="margin-top:22px;font-size:12px;letter-spacing:1.5px;text-transform:uppercase;font-weight:700;color:' + BLUE + '">The next 30 days</div><ul style="padding-left:20px;color:' + BODY + '">' + items.map(item => '<li style="margin:8px 0">' + esc(item.what) + (item.due ? ' <strong>— ' + esc(item.due) + '</strong>' : '') + '</li>').join('') + '</ul>';
+}
+
+function promisedInclusionsBlock(items: { text: string; requiresReply: boolean; due?: string }[]): string {
+  if (!items.length) return "";
+  const questions = items.filter(item => item.requiresReply);
+  const other = items.filter(item => !item.requiresReply);
+  const section = (title: string, values: typeof items) => !values.length ? '' : '<div style="margin:22px 0;background:' + PALE + ';border-left:5px solid ' + BLUE + ';padding:16px 20px;border-radius:0 10px 10px 0"><div style="font-weight:700;color:' + NAVY + '">' + title + '</div><ol style="padding-left:20px;color:' + BODY + '">' + values.map(item => '<li style="margin:8px 0">' + esc(item.text) + (item.due ? '<div style="margin-top:4px;font-weight:700">Agreed timing: ' + esc(item.due) + '</div>' : '') + '</li>').join('') + '</ol></div>';
+  return section('As promised', other) + section('Questions for your reply', questions);
 }
 
 function footerBlock(logoUrl: string): string {
@@ -317,16 +351,18 @@ export function buildRecapEmailHtml(facts: RecapEmailFacts): string {
     facts.intro ? '<div style="margin:18px 0 8px;font-size:12px;letter-spacing:1.5px;text-transform:uppercase;font-weight:700;color:' + BLUE + '">Our conversation</div>' + facts.intro.split(/\n\s*\n/).filter(Boolean).map(paragraph => '<p style="margin:0 0 14px;color:' + BODY + '">' + esc(paragraph) + '</p>').join('') : "",
     facts.highlights?.length ? '<div style="margin:22px 0 10px;font-size:12px;letter-spacing:1.5px;text-transform:uppercase;font-weight:700;color:' + BLUE + '">Performance highlights</div>' + facts.highlights.map((item, index) => '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:10px;border-collapse:separate;background:' + PALE + ';border:1px solid ' + HAIR + ';border-radius:10px"><tr><td width="40" style="padding:16px 0 16px 16px;color:' + BLUE + ';font-size:20px;font-weight:700;vertical-align:top">' + (index + 1) + '</td><td style="padding:16px"><div style="font-weight:700;color:' + NAVY + '">' + esc(item.title) + '</div><div style="margin-top:4px;color:' + BODY + '">' + esc(item.detail) + '</div></td></tr></table>').join('') : "",
     winsBlock(facts.wins),
-    // Approved tickets and client asks are still unfinished work, so stay in internal notes.
-    commitmentsBlock([]),
-    asksBlock([]),
+    // Only transcript-supported agreements enter these sections; the general backlog stays private.
+    commitmentsBlock(facts.meetingCommitments || []),
+    asksBlock(facts.meetingRequests || []),
+    next30DaysBlock(facts.next30Days || []),
+    promisedInclusionsBlock(facts.promisedInclusions || []),
     facts.goalLabel
       ? `<p style="margin:18px 0 0;color:${BODY}">All of it points at the same thing: <span style="font-weight:700;color:${NAVY}">${esc(facts.goalLabel)}</span>.</p>`
       : "",
     bookUrl
       ? `<div style="text-align:center;margin:24px 0 20px"><a href="${esc(bookUrl)}" style="display:inline-block;padding:14px 30px;border-radius:10px;background:${BLUE};color:#ffffff;font-weight:700;text-decoration:none;font-size:16px">🗓️ ${facts.nextCheckInLabel ? `Next check-in · ${esc(facts.nextCheckInLabel)}` : "Book the next check-in"}</a></div>`
       : facts.nextCheckInLabel
-        ? `<p style="margin:18px 0 0;color:${BODY}">Next check-in: <span style="font-weight:700;color:${NAVY}">${esc(facts.nextCheckInLabel)}</span>.</p>`
+        ? `<p style="margin:18px 0 0;color:${BODY}">A quick reminder: ${facts.nextMeetingAgreed ? "we set" : "your next Monthly Touch is scheduled"} ${facts.nextMeetingAgreed ? "our next Monthly Touch for" : "for"} <span style="font-weight:700;color:${NAVY}">${esc(facts.nextCheckInLabel)}</span>. You can reach out to me anytime before then.</p>`
         : "",
     `<p style="margin:16px 0 0;color:${BODY}">${esc(facts.followUpChannel)}</p>`,
     facts.signoff.length

@@ -1,3 +1,4 @@
+import { readBookedNextMeeting } from "@/src/lib/server/services/next-touch-booking-service";
 import { blockedTaskTitles } from "@/src/lib/contracts/client-content";
 import { loomReady } from "@/src/lib/contracts/no-show";
 import { FieldValue } from "firebase-admin/firestore";
@@ -517,6 +518,7 @@ async function sendRecap(state: StepContext): Promise<StepResult> {
   }
 
   const outcome = await sendClientEmail(state.context, {
+    contentPolicy: "agreed-recap",
     idempotencyKey: `monthly-touch:${state.touch.id}:recap`,
     recipient: state.client.contact || "",
     blockedTaskTitles: blockedTaskTitles(state.touch),
@@ -598,6 +600,12 @@ async function postBrief(state: StepContext): Promise<StepResult> {
  * retains the reminder fallback, including after a user grants the new write scope.
  */
 async function bookNextTouch(state: StepContext): Promise<StepResult> {
+  if (state.touch.nextMeetingBooking) {
+    try {
+      const booked = await readBookedNextMeeting(state.context, state.touch.id);
+      if (booked) return step("booking", "done", "Next Monthly Touch is booked in Google Calendar for " + booked.scheduledAt + (booked.htmlLink ? ": " + booked.htmlLink : "."));
+    } catch (error) { return step("booking", "warning", error instanceof Error ? error.message : "Verify the saved next meeting in Google Calendar."); }
+  }
   const isLoom = state.touch.noShow?.resolution === "loom";
   const reminder = state.touch.followThrough;
   if (isLoom && reminder?.bookingReminderId) return step("booking", "warning", `The next-meeting reminder already exists (${reminder.bookingReminderId}). Book the meeting yourself; no duplicate reminder was created.`);
@@ -610,7 +618,7 @@ async function bookNextTouch(state: StepContext): Promise<StepResult> {
   const listId = process.env.CLICKUP_GROWTH_PILOT_LIST_ID;
   const due = state.touch.followThrough?.dueAt;
   const base = canWrite
-    ? "Calendar write access supports rescheduling existing events; automatic next-touch booking is not implemented."
+    ? "The next meeting has not been booked. Use Book next Monthly Touch on the closing presentation slide."
     : "MTOS cannot create calendar events: the connected Google account granted read-only calendar access.";
 
   if (!token || !listId) {

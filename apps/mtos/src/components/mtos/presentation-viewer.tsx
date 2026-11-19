@@ -1,5 +1,6 @@
 "use client";
 
+import { NextTouchBookingControl } from "@/src/components/mtos/next-touch-booking";
 import { clientSlides } from "@/src/lib/contracts/client-content";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
@@ -121,7 +122,7 @@ export function PresentationViewer({
     const onKey = (event: KeyboardEvent) => {
       // Never steal keys from a field the AM is typing in.
       const target = event.target as HTMLElement | null;
-      if (target && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return;
+      if (document.querySelector("dialog[open]") || (target && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName))) return;
 
       if (event.key === "ArrowRight" || event.key === "PageDown" || event.key === " ") {
         event.preventDefault();
@@ -364,7 +365,7 @@ export function PresentationViewer({
                 height: DECK.height,
               }}
             >
-              <PresentationSlideCanvas {...slideProps} slide={current} slideNumber={index + 1} />
+              <PresentationSlideCanvas {...slideProps} slide={current} slideNumber={index + 1} bookingAction={!editing && index === count - 1 && (!isFullscreen || document.fullscreenElement === fullscreenRef.current) ? <NextTouchBookingControl touchId={touchId} /> : undefined} />
             </div>
           </div>
 
@@ -512,7 +513,7 @@ export function PresentationViewer({
               flexShrink: 0,
             }}
           >
-            <PresentationSlideCanvas {...slideProps} slide={current} slideNumber={index + 1} />
+            <PresentationSlideCanvas {...slideProps} slide={current} slideNumber={index + 1} bookingAction={index === count - 1 ? <NextTouchBookingControl touchId={touchId} /> : undefined} />
           </div>
         ) : null}
       </div>

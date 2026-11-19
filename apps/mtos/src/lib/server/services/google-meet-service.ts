@@ -65,6 +65,15 @@ async function tokenFor(context: TenantContext) {
   return token;
 }
 
+/** Use the signed-in user's existing Google connection, never another AM's token. */
+export async function calendarAccessToken(context: TenantContext, write = false) {
+  if (write) {
+    const connection = await getIntegrationConnection(context, "google-meet");
+    if (!connection?.scopes?.includes("https://www.googleapis.com/auth/calendar.events")) throw new Error("Reconnect Google Meet in Settings > Integrations and grant Calendar event write access before booking.");
+  }
+  return tokenFor(context);
+}
+
 /** Patch the linked event only; retain attendees, conference and all other event fields. */
 export async function rescheduleLinkedEvent(context: TenantContext, eventId: string, scheduledAt: string) {
   const connection = await getIntegrationConnection(context, "google-meet");

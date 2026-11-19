@@ -20,20 +20,22 @@ export interface NoShowState {
 }
 
 export interface RescheduleAvailability {
+  currentBooking?: { start: string; end: string };
   durationMinutes: number;
   until: string;
   timeZone?: string;
-  busy: { start?: string; end?: string }[];
+  calendarCount?: number;
+  busy: { start?: string; end?: string; timeZone?: string }[];
 }
 
 export function calendarSlotAvailable(startIso: string, availability: RescheduleAvailability, now: number): boolean {
   const start = Date.parse(startIso);
   const end = start + availability.durationMinutes * 60000;
   if (!Number.isFinite(start) || start <= now || end > Date.parse(availability.until)) return false;
-  const localDay = (instant: number) => new Intl.DateTimeFormat("en-CA", { timeZone: availability.timeZone || "UTC", year: "numeric", month: "2-digit", day: "2-digit" }).format(instant);
+  const localDay = (instant: number, timeZone = availability.timeZone || "UTC") => new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).format(instant);
   return !availability.busy.some((period) => {
     if (!period.start || !period.end) return true;
-    if (period.start.length === 10) return localDay(start) < period.end && localDay(end - 1) >= period.start;
+    if (period.start.length === 10) return localDay(start, period.timeZone) < period.end && localDay(end - 1, period.timeZone) >= period.start;
     return start < Date.parse(period.end) && end > Date.parse(period.start);
   });
 }

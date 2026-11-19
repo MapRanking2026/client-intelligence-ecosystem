@@ -1,3 +1,4 @@
+import type { NextTouchBooking } from "@/src/lib/contracts/next-touch-booking";
 import type { NotesDraft } from "@/src/lib/contracts/follow-through-notes";
 import type { ProcessingResult } from "@/src/lib/contracts/follow-through-finish";
 import type { RecapEmailState } from "@/src/lib/contracts/follow-through-recap-email";
@@ -1511,6 +1512,7 @@ export interface TouchFollowThroughState {
 }
 
 export interface MonthlyTouchRecord {
+  nextMeetingBooking?: NextTouchBooking;
   approvedRankComparisons?: PresentationRankComparison[];
   presentationInstructions?: string;
   presentationInstructionsUpdatedAt?: string;

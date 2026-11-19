@@ -6,6 +6,7 @@ import { ChevronLeft, ChevronRight, Eye, Monitor, PhoneOff, Play, X } from "luci
 
 import { Linkified } from "@/src/components/mtos/annotate";
 import { formatSpeakingTime, notesBullets, scriptParagraphs } from "@/src/lib/contracts/presenter-script";
+import { NextTouchBookingControl } from "@/src/components/mtos/next-touch-booking";
 import { DECK, PresentationSlideCanvas } from "@/src/components/mtos/presentation-slide";
 import { SourceChips } from "@/src/components/mtos/source-chip";
 import { useTouchAutosave } from "@/src/components/mtos/use-touch-autosave";
@@ -68,6 +69,7 @@ const TONE_CLASS: Record<"neutral" | "good" | "watch" | "info", { chip: string; 
 
 /** The deck as the client sees it, at whatever size it is being shown at. */
 function Slide({
+  touchId,
   presentation,
   slides,
   index,
@@ -75,6 +77,7 @@ function Slide({
   presentation?: Presentation;
   slides: PresentationSlide[];
   index: number;
+  touchId?: string;
 }) {
   const slide = slides[index];
   if (!slide) return null;
@@ -90,6 +93,7 @@ function Slide({
       // it does not count slides the client never sees.
       slideNumber={index + 1}
       slideCount={slides.length}
+      bookingAction={touchId && index === slides.length - 1 ? <NextTouchBookingControl touchId={touchId} /> : undefined}
     />
   );
 }
@@ -468,7 +472,7 @@ export function LiveCallStep({
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
-      if (target && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return;
+      if (document.querySelector("dialog[open]") || (target && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName))) return;
       if (target?.isContentEditable || target?.closest('[aria-label="No-show resolution"], dialog')) return;
       if (event.key === "ArrowRight" || event.key === "PageDown") {
         event.preventDefault();
@@ -569,7 +573,7 @@ export function LiveCallStep({
                 </button>
               </div>
             </div>
-            <LiveDeckStage presentation={presentation} slides={slides} index={slideIndex} />
+            <LiveDeckStage touchId={touchId} presentation={presentation} slides={slides} index={slideIndex} />
             <div className="live-slide-navigation">
               <div className="flex gap-2">
                 <button
@@ -823,7 +827,7 @@ export function LiveCallStep({
             </button>
           </div>
           <div className="grid place-items-center" style={{ padding: 18, overflow: "auto" }}>
-            <Slide presentation={presentation} slides={slides} index={slideIndex} />
+            <Slide touchId={touchId} presentation={presentation} slides={slides} index={slideIndex} />
           </div>
         </div>
       ) : null}
@@ -832,7 +836,7 @@ export function LiveCallStep({
 }
 
 /** The single presenter canvas scales to the available width. */
-function LiveDeckStage({ presentation, slides, index }: { presentation?: Presentation; slides: PresentationSlide[]; index: number }) {
+function LiveDeckStage({ touchId, presentation, slides, index }: { touchId: string; presentation?: Presentation; slides: PresentationSlide[]; index: number }) {
   const host = useRef<HTMLDivElement>(null);
   const [scale, setScale] = useState(0.5);
   useEffect(() => {

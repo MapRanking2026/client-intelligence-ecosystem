@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 
+import { NextTouchBookingControl } from "@/src/components/mtos/next-touch-booking";
 import { DECK, PresentationSlideCanvas } from "@/src/components/mtos/presentation-slide";
 import {
   clientScreenChannel,
@@ -94,6 +95,7 @@ export function ClientScreen({
               preparedBy={presentation?.preparedBy}
               slideNumber={Math.min(Math.max(index, 0), Math.max(slides.length - 1, 0)) + 1}
               slideCount={slides.length}
+              bookingAction={index === slides.length - 1 ? <NextTouchBookingControl touchId={touchId} mirror /> : undefined}
             />
           </div>
         </div>

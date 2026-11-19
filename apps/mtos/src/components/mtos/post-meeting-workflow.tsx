@@ -80,15 +80,17 @@ const PRIORITIES: { value: TicketPriority; label: string }[] = [
 ];
 
 const TIME_ESTIMATES: { minutes: number; label: string }[] = [
-  { minutes: 5, label: "5m" },
-  { minutes: 10, label: "10m" },
-  { minutes: 30, label: "30m" },
-  { minutes: 60, label: "1h" },
-  { minutes: 120, label: "2h" },
-  { minutes: 180, label: "3h" },
-  { minutes: 240, label: "4h" },
-  { minutes: 360, label: "6h" },
-  { minutes: 480, label: "8h" },
+  { minutes: 5, label: "5 min" },
+  { minutes: 10, label: "10 min" },
+  { minutes: 15, label: "15 min" },
+  { minutes: 30, label: "30 min" },
+  { minutes: 60, label: "1 hour" },
+  { minutes: 90, label: "1 hour 30 min" },
+  { minutes: 120, label: "2 hours" },
+  { minutes: 180, label: "3 hours" },
+  { minutes: 240, label: "4 hours" },
+  { minutes: 360, label: "6 hours" },
+  { minutes: 480, label: "8 hours" },
 ];
 
 interface ClickUpMemberOption {

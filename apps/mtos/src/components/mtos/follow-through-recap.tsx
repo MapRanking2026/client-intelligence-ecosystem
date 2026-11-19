@@ -116,8 +116,8 @@ export function FollowThroughRecap({
     return (
       <div className="grid gap-3">
         <p className="text-[0.86rem] leading-7" style={{ color: "var(--text-2)" }}>
-          The recap is built from the notes and the tickets you approved — nothing else goes in it,
-          because this email is the commitment.
+          The recap uses the call notes, supported performance results and verified completed work.
+          Review the draft before approving it.
         </p>
         <div>
           <button type="button" className="btn btn-primary" disabled={Boolean(busy)} onClick={() => void build()}>
@@ -165,6 +165,31 @@ export function FollowThroughRecap({
         </div>
       </div>
 
+      <div className="flex flex-wrap items-center gap-2">
+        {confirmRebuild ? (
+          <>
+            <span className="chip watch">This replaces what you have written.</span>
+            <button type="button" className="btn btn-risk btn-sm" disabled={Boolean(busy)} onClick={() => void build()}>
+              {busy === "build" ? "Regenerating…" : "Replace draft and regenerate"}
+            </button>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setConfirmRebuild(false)}>
+              Keep what I wrote
+            </button>
+          </>
+        ) : (
+          <button
+            type="button"
+            className="btn btn-primary btn-sm"
+            disabled={Boolean(busy) || Boolean(state.sentAt)}
+            onClick={() => (state.edited ? setConfirmRebuild(true) : void build())}
+          >
+            <RefreshCw />
+            {busy === "build" ? "Regenerating recap…" : "Regenerate recap email"}
+          </button>
+        )}
+      </div>
+      <p className="muted text-[0.78rem]">Regenerate from the latest saved call notes using the updated email structure, then review and approve the new draft.</p>
+
       <div className="field">
         <label className="field-label" htmlFor="recap-subject">
           Subject
@@ -174,7 +199,7 @@ export function FollowThroughRecap({
           className="input"
           value={state.subject}
           disabled={!editable}
-          onChange={(event) => setState((previous) => (previous ? { ...previous, subject: event.target.value } : previous))}
+          onChange={(event) => setState((previous) => (previous ? { ...previous, subject: event.target.value, edited: true } : previous))}
         />
       </div>
 
@@ -197,6 +222,9 @@ export function FollowThroughRecap({
 
       <div
         ref={attach}
+        role="textbox"
+        aria-label="Recap email body"
+        aria-multiline="true"
         contentEditable={editable}
         suppressContentEditableWarning
         onInput={() => {
@@ -206,7 +234,7 @@ export function FollowThroughRecap({
           }
         }}
         className="card"
-        style={{ padding: 16, background: "#ffffff", maxHeight: 620, overflow: "auto" }}
+        style={{ padding: 24, background: "#EDF3FB", overflowWrap: "anywhere" }}
       />
 
       {blockers.length ? (
@@ -227,27 +255,6 @@ export function FollowThroughRecap({
           <Save />
           {busy === "save" ? "Saving…" : "Save recap and continue to finish"}
         </button>
-        {confirmRebuild ? (
-          <>
-            <span className="chip watch">This replaces what you have written.</span>
-            <button type="button" className="btn btn-risk btn-sm" disabled={Boolean(busy)} onClick={() => void build()}>
-              {busy === "build" ? "Rebuilding…" : "Yes, rebuild from the notes"}
-            </button>
-            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setConfirmRebuild(false)}>
-              Keep what I wrote
-            </button>
-          </>
-        ) : (
-          <button
-            type="button"
-            className="btn btn-ghost btn-sm"
-            disabled={Boolean(busy)}
-            onClick={() => (state.edited ? setConfirmRebuild(true) : void build())}
-          >
-            <RefreshCw />
-            Rebuild from notes
-          </button>
-        )}
         <span className="muted text-[0.78rem]">It sends through your connected Gmail account from support@mapranking.com when you finish the follow-through.</span>
       </div>
 

@@ -1,3 +1,4 @@
+import { knownContactName } from "@/src/lib/contracts/recap-contact";
 import { emailSignatureLines, sanitizeAgendaEmailHtml } from "@/src/lib/contracts/agenda-email";
 import {
   approvedItems,
@@ -79,6 +80,7 @@ export interface RecapEmailFacts {
   /** The quarterly goal in one line, for the facts row and the closing line. */
   goalLabel: string;
   intro: string;
+  highlights?: { title: string; detail: string }[];
   wins: RecapWin[];
   commitments: RecapCommitment[];
   asks: RecapAsk[];
@@ -112,6 +114,8 @@ export interface RecapEmailSource {
   /** Wins since the last touch, with the dates they actually shipped. */
   wins?: RecapWin[];
   followUpChannel?: string;
+  overview?: string;
+  highlights?: { title: string; detail: string }[];
 }
 
 function firstName(value: string): string {
@@ -169,12 +173,13 @@ export function buildRecapEmailDraft(
 
   const facts: RecapEmailFacts = {
     businessName: source.businessName,
-    contactFirstName: firstName(source.contactName),
+    contactFirstName: firstName(knownContactName(source.contactName)),
     metLabel: source.metLabel,
     nextCheckInLabel: source.nextCheckInLabel,
     nextCheckInUrl: source.nextCheckInUrl,
     goalLabel: notes.goalText.trim(),
-    intro: notes.summary.trim(),
+    intro: source.overview?.trim() || notes.summary.trim().split(/(?<=[.!?])\s+(?=[A-Z])/).slice(0, 3).join("\n\n"),
+    highlights: source.highlights,
     wins: (source.wins || []).filter((win) => win.what.trim()),
     commitments: commitments.filter((commitment) => commitment.what),
     asks: asks.filter((ask) => ask.what),
@@ -241,7 +246,7 @@ function winsBlock(wins: RecapWin[]): string {
     .join("");
 
   return [
-    `<div style="font-size:12px;letter-spacing:1.6px;text-transform:uppercase;font-weight:700;color:${GREEN};padding-bottom:6px;border-bottom:2px solid ${HAIR};margin-top:18px">What we shipped since last time</div>`,
+    `<div style="font-size:12px;letter-spacing:1.6px;text-transform:uppercase;font-weight:700;color:${GREEN};padding-bottom:6px;border-bottom:2px solid ${HAIR};margin-top:18px">Completed work</div>`,
     `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;margin-top:4px">${rows}</table>`,
   ].join("");
 }
@@ -292,14 +297,15 @@ function footerBlock(logoUrl: string): string {
     `<div style="background:${NAVY};color:#c9d4e3;padding:18px 30px;font-size:12px">`,
     `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse"><tr>`,
     `<td style="vertical-align:middle"><table role="presentation" cellpadding="0" cellspacing="0" style="border-collapse:collapse"><tr>${mark}<td style="vertical-align:middle;font-size:14px;font-weight:700;color:#ffffff">MapRanking</td></tr></table></td>`,
-    `<td style="vertical-align:middle;text-align:right"><a href="https://mapranking.com" style="color:#8FB8F6;text-decoration:none;font-weight:700">mapranking.com</a> &nbsp;·&nbsp; support@mapranking.com</td>`,
+    `<td style="vertical-align:middle;text-align:right;color:#c9d4e3"><a href="https://mapranking.com" style="color:#8FB8F6;text-decoration:none;font-weight:700">mapranking.com</a> &nbsp;·&nbsp; support@mapranking.com</td>`,
     `</tr></table></div>`,
   ].join("");
 }
 
 /** The whole recap, as a client's inbox receives it. */
 export function buildRecapEmailHtml(facts: RecapEmailFacts): string {
-  const greeting = facts.contactFirstName ? `Hi ${esc(facts.contactFirstName)} 👋` : "Hi 👋";
+  const name = knownContactName(facts.contactFirstName);
+  const greeting = name ? `Hello ${esc(name)},` : "Hello,";
   const bookUrl = safeUrl(facts.nextCheckInUrl);
 
   return [
@@ -308,7 +314,8 @@ export function buildRecapEmailHtml(facts: RecapEmailFacts): string {
     headerBlock(facts),
     `<div style="padding:4px 30px 8px">`,
     `<p style="margin:18px 0 6px">${greeting}</p>`,
-    facts.intro ? `<p style="margin:0 0 14px;color:${BODY}">${esc(facts.intro)}</p>` : "",
+    facts.intro ? '<div style="margin:18px 0 8px;font-size:12px;letter-spacing:1.5px;text-transform:uppercase;font-weight:700;color:' + BLUE + '">Our conversation</div>' + facts.intro.split(/\n\s*\n/).filter(Boolean).map(paragraph => '<p style="margin:0 0 14px;color:' + BODY + '">' + esc(paragraph) + '</p>').join('') : "",
+    facts.highlights?.length ? '<div style="margin:22px 0 10px;font-size:12px;letter-spacing:1.5px;text-transform:uppercase;font-weight:700;color:' + BLUE + '">Performance highlights</div>' + facts.highlights.map((item, index) => '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:10px;border-collapse:separate;background:' + PALE + ';border:1px solid ' + HAIR + ';border-radius:10px"><tr><td width="40" style="padding:16px 0 16px 16px;color:' + BLUE + ';font-size:20px;font-weight:700;vertical-align:top">' + (index + 1) + '</td><td style="padding:16px"><div style="font-weight:700;color:' + NAVY + '">' + esc(item.title) + '</div><div style="margin-top:4px;color:' + BODY + '">' + esc(item.detail) + '</div></td></tr></table>').join('') : "",
     winsBlock(facts.wins),
     // Approved tickets and client asks are still unfinished work, so stay in internal notes.
     commitmentsBlock([]),

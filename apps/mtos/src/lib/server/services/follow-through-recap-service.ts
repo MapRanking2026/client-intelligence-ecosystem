@@ -1,3 +1,5 @@
+import { recapContactName } from "@/src/lib/contracts/recap-contact";
+import { generateRecapContent } from "@/src/lib/server/services/recap-content-service";
 import { resolveClientTimeZone } from "@/src/lib/contracts/client-time-zone";
 import { blockedTaskTitles, clientText, internalTaskText } from "@/src/lib/contracts/client-content";
 import type { TenantContext } from "@/src/lib/contracts/mtos";
@@ -100,10 +102,15 @@ export async function buildFollowThroughRecap(
 
   const wins = await winsSinceLastTouch(context, client.id);
 
+  const blocked = blockedTaskTitles(touch);
+  const safeSummary = clientText(notes.summary, blocked);
+  const evidence = ["Internal call notes (extract supported client-safe facts only):", notes.summary, "Performance metrics:", notes.bullets.metrics || "", "Verified completed work:", ...wins.map(win => win.what)].filter(Boolean).join("\n");
+  const content = await generateRecapContent(env, evidence, blocked);
   const draft = buildRecapEmailDraft(
     {
       businessName: client.name,
-      contactName: client.contact || "",
+      contactName: recapContactName(client.contact, [notes.summary, touch.postMeeting?.recapSummary].filter(Boolean).join("\n")),
+      ...(content ? { overview: content.overview, highlights: content.highlights } : {}),
       metLabel: dayLabel(touch.scheduledAt, timeZone),
       nextCheckInLabel: dayLabel(next?.scheduledAt, timeZone),
       nextCheckInUrl: "",
@@ -116,7 +123,7 @@ export async function buildFollowThroughRecap(
       ...(env.appUrl ? { appUrl: env.appUrl } : {}),
       wins,
     },
-    { ...notes, summary: clientText(notes.summary, blockedTaskTitles(touch)), clientActions: [], pending: [], departments: notes.departments.map((group) => ({ ...group, actions: [] })) },
+    { ...notes, summary: content?.overview || safeSummary, clientActions: [], pending: [], departments: notes.departments.map((group) => ({ ...group, actions: [] })) },
     [],
   );
 

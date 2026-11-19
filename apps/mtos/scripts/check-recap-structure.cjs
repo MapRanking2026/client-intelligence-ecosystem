@@ -1,0 +1,14 @@
+/* eslint-disable @typescript-eslint/no-require-imports -- Synthetic evidence and model responses; no client email is sent. */
+require('tsx/cjs');const assert=require('node:assert/strict'),Module=require('node:module'),original=Module._load;let output;
+Module._load=function(request,parent,...rest){if(parent?.filename.endsWith('recap-content-service.ts')&&request==='@/src/lib/server/services/mtos-ai')return{hasAnyLlmProvider:()=>true,callLlmForJson:async()=>({data:output})};return original.call(this,request,parent,...rest);};
+(async()=>{try{
+const {recapContactName}=require('../src/lib/contracts/recap-contact.ts');const {buildRecapEmailDraft}=require('../src/lib/contracts/follow-through-recap-email.ts');const {generateRecapContent}=require('../src/lib/server/services/recap-content-service.ts');
+assert.equal(recapContactName('Unknown','Competitor Teardown touch with Jay Frias (Synthetic Plumbing) on Nov 18.'),'Jay Frias');assert.equal(recapContactName('Unknown','No participant identified.'),'');assert.equal(recapContactName('Mara','We reviewed results.'),'Mara');
+const evidence='We reviewed local visibility. Pasadena ranking improved from 17.5 to 12.4. Call volume was 26 versus 34.';
+output={overview:[{text:'We reviewed local visibility.',evidence:'We reviewed local visibility.'}],highlights:[{title:'Pasadena ranking',detail:'Ranking improved from 17.5 to 12.4.',evidence:'Pasadena ranking improved from 17.5 to 12.4.'},{title:'Call volume',detail:'Calls were 999.',evidence:'Call volume was 26 versus 34.'},{title:'Invented result',detail:'Everything doubled.',evidence:'No such evidence exists.'}]};
+const content=await generateRecapContent({},evidence);assert.equal(content.highlights.length,1);assert.equal(content.highlights[0].title,'Pasadena ranking');
+const source={businessName:'Synthetic Plumbing',contactName:recapContactName('Unknown','Touch with Jay Frias (Synthetic Plumbing).'),metLabel:'Wed 18 November',nextCheckInLabel:'',nextCheckInUrl:'',signoff:'Best regards,\nSynthetic AM\nMap Ranking',accountManagerName:'Synthetic AM',...content};
+const notes={summary:'We reviewed local visibility.',goalText:'',clientActions:[],departments:[],pending:[]};const draft=buildRecapEmailDraft(source,notes,[]);assert.ok(draft.html.includes('Hello Jay,'));assert.ok(!draft.html.includes('Unknown'));assert.ok(draft.html.includes('Performance highlights'));assert.ok(draft.html.includes('17.5 to 12.4'));assert.ok(!draft.html.includes('999'));assert.ok(!draft.html.includes('What Map Ranking will do'));
+const generic=buildRecapEmailDraft({...source,contactName:'Unknown'},notes,[]);assert.ok(generic.html.includes('Hello,'));assert.ok(!generic.html.includes('Hello Unknown'));
+console.log('PASS actual named participant greeting, unknown suppression, structured performance cards, exact evidence and numeric validation, internal work exclusion');
+}finally{Module._load=original;}})().catch(error=>{console.error(error);process.exitCode=1;});

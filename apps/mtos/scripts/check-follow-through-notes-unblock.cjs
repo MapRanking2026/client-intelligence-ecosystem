@@ -99,8 +99,16 @@ async function main() {
     });
     await page.goto(`http://127.0.0.1:${server.address().port}`);
 
-    // Every blocked field is reachable, and the screen says why it is there.
+    // The draft opens as something to read: what is outstanding is stated, but nothing is editable
+    // until the AM asks for it.
     await page.getByText("Before the follow-through can be finished", { exact: true }).waitFor();
+    assert.equal(await page.getByRole("textbox", { name: "Action 1 due", exact: true }).count(), 0,
+      "the notes should not open in an editable state");
+    assert.equal(await page.getByRole("button", { name: "Save notes", exact: true }).count(), 0,
+      "and there should be nothing to save while reading");
+    await page.getByRole("button", { name: "Edit these notes", exact: true }).click();
+
+    // Every blocked field is reachable once it is open.
     await page.getByRole("textbox", { name: "Action 1 due", exact: true }).fill("2026-12-01");
     await page.getByRole("textbox", { name: "Pending 1 from", exact: true }).fill("The client");
     await page.getByRole("textbox", { name: "Pending 1 reminder", exact: true }).fill("2026-11-25");
@@ -109,6 +117,9 @@ async function main() {
 
     await page.getByRole("button", { name: "Save notes", exact: true }).click();
     await page.getByText("Notes saved.", { exact: true }).waitFor();
+
+    // A save is the end of an edit, so the screen goes back to reading.
+    await page.getByRole("button", { name: "Edit these notes", exact: true }).waitFor();
 
     const saved = posted.find((body) => body.action === "save_notes");
     assert.ok(saved, "the screen should post the notes it edited");

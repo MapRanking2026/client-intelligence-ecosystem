@@ -32,6 +32,15 @@ import {
  * fact and is why fixing one does not fix the other.
  */
 
+/** One drafted value, as it reads before anybody has touched it. */
+function Read({ label, value }: { label: string; value: string }) {
+  const written = value.trim();
+  return <div className="field">
+    <span className="field-label">{label}</span>
+    <p className="text-sm" style={{ whiteSpace: "pre-wrap", color: written ? "var(--text)" : "var(--text-2)" }}>{written || "Nothing written yet"}</p>
+  </div>;
+}
+
 /** Approve, deny or delete, in the shape the tickets step uses for the same decision. */
 function Decide({ label, decision, onDecide }: {
   label: string; decision?: ClientAction["decision"]; onDecide: (next: NonNullable<ClientAction["decision"]>) => void;
@@ -54,6 +63,9 @@ export function FollowThroughNotes({ touchId, notes, draftNote, autoPrepare = fa
   const [note, setNote] = useState(draftNote || "");
   const [preview, setPreview] = useState(false);
   const [confirmRedraft, setConfirmRedraft] = useState(false);
+  // A drafted document opens as something to read. Editing is a decision the AM makes, not the
+  // state they are dropped into, so nothing here can be changed by a stray keystroke on arrival.
+  const [editing, setEditing] = useState(false);
   const budget = summaryBudget(draft?.summary || "");
   const post = useCallback(async (body: Record<string, unknown>) => {
     const response = await fetch(`/api/monthly-touches/${touchId}`, {
@@ -111,12 +123,14 @@ export function FollowThroughNotes({ touchId, notes, draftNote, autoPrepare = fa
     try {
       await post({ action: "save_notes", notes: draft });
       await post({ action: "prepare_follow_through" });
-      setNote("Notes saved."); router.refresh();
+      // Back to reading: a save is the end of an edit, not the middle of one.
+      setNote("Notes saved."); setEditing(false); router.refresh();
     } catch (caught) { setError(caught instanceof Error ? caught.message : "The notes were not saved."); }
     finally { setBusy(""); }
   }
   // What step 6 will refuse, listed here while the fields for it are still on screen.
   const undecided = (draft?.clientActions || []).filter(item => !item.decision).length;
+  const changed = JSON.stringify(draft ?? null) !== JSON.stringify(notes ?? null);
   const blockers = draft ? notesBlockers(draft) : [];
   const brokenActions = (draft?.departments || []).flatMap(group =>
     group.actions.filter(action => actionLineIssues(action).length).map(action => ({ department: group.department, action })));
@@ -125,11 +139,60 @@ export function FollowThroughNotes({ touchId, notes, draftNote, autoPrepare = fa
     {error ? <p role="alert" style={{ color: "var(--risk)" }}>{error}</p> : null}
     {note ? <p role="status" className="muted text-sm">{note}</p> : null}
     {!draft ? <div className="flex flex-wrap gap-2"><button type="button" className="btn btn-primary" disabled={Boolean(busy)} onClick={() => void generate()}>{busy ? "Preparing notes…" : "Draft notes from the call"}</button><button type="button" className="btn btn-ghost btn-sm" disabled={Boolean(busy)} onClick={() => void generate(true)}>Write notes manually</button></div> : <>
-      <div className="flex flex-wrap items-center gap-2">
+      {editing ? <div className="flex flex-wrap items-center gap-2">
         <button type="button" className="btn btn-primary btn-sm" disabled={Boolean(busy)} onClick={() => void save()}>{busy === "save" ? "Saving…" : "Save notes"}</button>
         <button type="button" className="btn btn-ghost btn-sm" onClick={() => setPreview(value => !value)}>{preview ? "Hide preview" : "Preview final notes"}</button>
         <button type="button" className="btn btn-ghost btn-sm" disabled={Boolean(busy)} onClick={() => setConfirmRedraft(true)}>Re-draft from the call</button>
-      </div>
+        <button type="button" className="ilink text-sm" disabled={Boolean(busy)} onClick={() => { if (changed) setDraft(notes); setEditing(false); }}>{changed ? "Discard changes" : "Stop editing"}</button>
+      </div> : <div className="flex flex-wrap items-center gap-3">
+        <span className="chip muted">Rough draft</span>
+        <button type="button" className="ilink text-sm" onClick={() => setEditing(true)}>Edit these notes</button>
+        <button type="button" className="btn btn-ghost btn-sm" onClick={() => setPreview(value => !value)}>{preview ? "Hide preview" : "Preview final notes"}</button>
+      </div>}
+      {!editing ? <>
+        <p className="muted text-sm">The draft as it stands, for reading. Nothing is filed until step 6, and nothing here changes until you open it for editing.</p>
+        <section className="card grid gap-3">
+          <div className="card-title">Meeting details</div>
+          <Read label="Title" value={draft.title} />
+          <div className="grid gap-3 md:grid-cols-2">
+            <Read label="Quarter" value={draft.goalQuarter} />
+            <Read label="Goal status" value={draft.goalStatus} />
+          </div>
+          <Read label="Client goal" value={draft.goalText} />
+          <Read label="Goal evidence" value={draft.goalEvidence} />
+        </section>
+        <section className="card grid gap-2">
+          <Read label="Meeting summary" value={draft.summary} />
+        </section>
+        {draft.clientActions.length ? <section className="card grid gap-2">
+          <div className="card-head">
+            <div className="card-title">What the client agreed to do</div>
+            <span className={`chip ${undecided ? "watch" : "good"}`}>{undecided ? `${undecided} still to decide` : "all decided"}</span>
+          </div>
+          <ul className="grid gap-2">{draft.clientActions.map(item => <li key={item.id} className="text-sm" style={{ color: "var(--text-2)" }}>
+            · {item.what.trim() || "Nothing written yet"}{item.due.trim() ? ` — by ${item.due.trim()}` : ""} <span className={`chip ${item.decision ? "good" : "watch"}`}>{item.decision || "no decision yet"}</span>
+          </li>)}</ul>
+        </section> : null}
+        {brokenActions.length ? <section className="card grid gap-2">
+          <div className="card-head">
+            <div className="card-title">Action lines that cannot be filed yet</div>
+            <span className="chip watch">{brokenActions.length === 1 ? "1 to finish" : `${brokenActions.length} to finish`}</span>
+          </div>
+          <ul className="grid gap-2">{brokenActions.map(({ department, action }) => <li key={action.id} className="text-sm" style={{ color: "var(--text-2)" }}>
+            · {department}: {action.what.trim() || "an unnamed action"} — {actionLineIssues(action).join(" ")}
+          </li>)}</ul>
+        </section> : null}
+        {brokenPending.length ? <section className="card grid gap-2">
+          <div className="card-head">
+            <div className="card-title">Pending items waiting on information</div>
+            <span className="chip watch">{brokenPending.length === 1 ? "1 to finish" : `${brokenPending.length} to finish`}</span>
+          </div>
+          <ul className="grid gap-2">{brokenPending.map(item => <li key={item.id} className="text-sm" style={{ color: "var(--text-2)" }}>
+            · {item.missing.trim() || "Something unnamed"} — {item.from.trim() ? `from ${item.from.trim()}` : "no source"}, {item.reminderDate.trim() ? `chase on ${item.reminderDate.trim()}` : "no chase date"}
+          </li>)}</ul>
+        </section> : null}
+      </> : null}
+      {editing ? <>
       {confirmRedraft ? <div role="alert" className="card flex flex-wrap items-center gap-2">
         <span>This replaces your current notes. Keep any edits you need before continuing.</span>
         <button type="button" className="btn btn-risk btn-sm" disabled={Boolean(busy)} onClick={() => void generate()}>Replace notes</button>
@@ -193,6 +256,7 @@ export function FollowThroughNotes({ touchId, notes, draftNote, autoPrepare = fa
           </div>
         </div>)}
       </section> : null}
+      </> : null}
       {blockers.length || undecided ? <section className="card">
         <div className="eyebrow muted">Before the follow-through can be finished</div>
         <ul className="mt-2 grid gap-2">

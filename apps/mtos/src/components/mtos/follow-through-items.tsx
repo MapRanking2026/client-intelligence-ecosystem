@@ -281,17 +281,18 @@ function TicketForm({
 
       <div className="grid gap-3 md:grid-cols-3">
         <div className="field">
-          <label className="field-label">⏳ Time Estimate * (minutes)</label>
-          <input
-            className="input"
-            type="number"
-            min={5}
-            step={5}
-            value={form.timeEstimateMinutes || ""}
-            onChange={(e) =>
-              onChange({ ...form, timeEstimateMinutes: Number(e.target.value) || undefined })
-            }
-          />
+          <label className="field-label">⏳ Time Estimate *</label>
+          <div className="flex items-center gap-2">
+            <input className="input" type="number" min={0} step={1} aria-label="Estimated hours"
+              value={form.timeEstimateMinutes ? Math.floor(form.timeEstimateMinutes / 60) : ""}
+              onChange={e => onChange({ ...form, timeEstimateMinutes: Math.max(0, Math.floor(Number(e.target.value))) * 60 + (form.timeEstimateMinutes || 0) % 60 || undefined })} />
+            <span>hours</span>
+            <input className="input" type="number" min={0} max={59} step={1} aria-label="Estimated minutes"
+              value={form.timeEstimateMinutes ? form.timeEstimateMinutes % 60 : ""}
+              onChange={e => onChange({ ...form, timeEstimateMinutes: Math.floor((form.timeEstimateMinutes || 0) / 60) * 60 + Math.min(59, Math.max(0, Math.floor(Number(e.target.value)))) || undefined })} />
+            <span>minutes</span>
+          </div>
+          <span className="field-hint">Estimate the work itself. Adjust before approving.</span>
         </div>
 
         <div className="field">
@@ -529,6 +530,31 @@ export function FollowThroughItems({
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
 
+  /**
+   * Keeping the working copy honest when storage moves underneath it.
+   *
+   * This list is a working copy, but it is not the only writer: saving the notes re-derives the
+   * tickets and stores them, and the page then re-renders with a different `items`. Left alone,
+   * a working copy initialised once from a prop would go on showing the old list and the next
+   * save would write it straight back over the rebuilt one -- which is how a ticket the rebuild
+   * dropped, a redundant recap-email ticket among them, comes back from the dead.
+   *
+   * So the new list is adopted whenever nothing here is unsaved, and when something is, the AM is
+   * asked rather than having either version thrown away behind their back.
+   *
+   * Adjusted during render rather than in an effect, which is the documented way to react to a
+   * changed prop: the alternative renders the stale list once before correcting itself.
+   */
+  const stored = JSON.stringify(items ?? null);
+  const [baseline, setBaseline] = useState(stored);
+  const [rebuilt, setRebuilt] = useState(false);
+  if (stored !== baseline) {
+    const untouched = JSON.stringify(list ?? null) === baseline;
+    setBaseline(stored);
+    setRebuilt(!untouched);
+    if (untouched) setList(items);
+  }
+
   const blockers = useMemo(() => (list ? itemBlockers(list) : []), [list]);
 
   const post = useCallback(
@@ -606,6 +632,33 @@ export function FollowThroughItems({
   return (
     <div className="grid gap-4">
       {message ? <div className="callout"><div className="callout-body">{message}</div></div> : null}
+      {rebuilt ? (
+        <div role="alert" className="callout">
+          <div>
+            <div className="callout-title">The tickets were rebuilt from the saved notes</div>
+            <div className="callout-body">
+              You have unsaved changes on this list, so nothing has been replaced. Take the rebuilt
+              list and your changes here are lost; keep yours and the rebuilt one is overwritten
+              when you save.
+            </div>
+            <div className="mt-2 flex flex-wrap gap-2">
+              <button
+                type="button"
+                className="btn btn-primary btn-sm"
+                onClick={() => {
+                  setList(items);
+                  setRebuilt(false);
+                }}
+              >
+                Take the rebuilt list
+              </button>
+              <button type="button" className="btn btn-ghost btn-sm" onClick={() => setRebuilt(false)}>
+                Keep mine
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
       {tagsReason ? (
         <p className="muted text-[0.8rem]">Tags are unavailable: {tagsReason}</p>
       ) : null}

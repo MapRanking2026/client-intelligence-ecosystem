@@ -1,3 +1,6 @@
+import { readSeoDashboardOwner } from "@/src/lib/server/services/clickup-specialist-owner";
+import { isWorkflowRecapTask, suggestedEffortMinutes, suggestChatOwner } from "@/src/lib/contracts/follow-through-task-policy";
+import { fetchClickupClientContext } from "@/src/lib/server/services/clickup-client-context";
 import type { TenantContext } from "@/src/lib/contracts/mtos";
 import type { ActionLine, PendingItem } from "@/src/lib/contracts/follow-through-notes";
 import { actionWordCount, pendingMarker } from "@/src/lib/contracts/follow-through-notes";
@@ -180,6 +183,7 @@ function ticketFromAction(
     ...(matched ? { department: matched } : {}),
     assignee: action.assignee?.trim() || owner || OWNER_NEEDED,
     priority: "normal",
+    ...(suggestedEffortMinutes(action.what) ? { timeEstimateMinutes: suggestedEffortMinutes(action.what) } : {}),
     ...(agreed
       ? { dueDate: agreed, dueDateAgreedOnCall: true }
       : { ...(dueDateForPriority("normal", options.today) ? { dueDate: dueDateForPriority("normal", options.today)! } : {}) }),
@@ -272,10 +276,16 @@ export async function buildFollowThroughItems(
   }
   const client = await dataSource.getClientById(touch.clientId);
   const businessName = client?.name || "";
-  const owners = await readDepartmentOwners(context);
+  const needsSeo = notes.departments.some(group => /\bseo\b|search engine|local visibility/i.test(group.department) && group.actions.length);
+  const [owners, seoOwner, liveChat] = await Promise.all([
+    readDepartmentOwners(context),
+    needsSeo ? readSeoDashboardOwner(context, businessName) : Promise.resolve(undefined),
+    notes.departments.some(group => group.actions.length) ? fetchClickupClientContext(context, businessName).catch(() => null) : Promise.resolve(null),
+  ]);
   const today = new Date();
   const touchDate = touch.scheduledLocalDate || (touch.scheduledAt || today.toISOString()).slice(0, 10);
 
+  const chatContext = liveChat || touch.prepPack?.clickupContext;
   const existing = touch.followThrough?.items || [];
   const byActionId = new Map(existing.filter((item) => item.actionId).map((item) => [item.actionId!, item]));
 
@@ -285,6 +295,7 @@ export async function buildFollowThroughItems(
 
   for (const department of notes.departments) {
     for (const action of department.actions) {
+      if (isWorkflowRecapTask(action.what) && !byActionId.get(action.id)?.decision) continue;
       if (actionWordCount(action) > 20) overLongActionIds.push(action.id);
 
       const kept = byActionId.get(action.id);
@@ -319,15 +330,27 @@ export async function buildFollowThroughItems(
   }
 
   for (const item of notes.pending) {
+    if (isWorkflowRecapTask(item.missing)) continue;
     const kept = byActionId.get(item.id);
     items.push(kept || ticketFromPending(item, { businessName, owners, today }));
   }
 
   // Items the AM added by hand have no action line behind them, so they survive every rebuild.
   for (const item of existing) {
-    if (!item.actionId) items.push(item);
+    if (!item.actionId && !(item.formType === "ticket" && isWorkflowRecapTask(item.taskName) && !item.decision)) items.push(item);
   }
 
+  for (const item of items) {
+    if (item.formType !== "ticket" || item.decision || byActionId.has(item.actionId || "")) continue;
+    const action = notes.departments.flatMap(group => group.actions).find(action => action.id === item.actionId);
+    if (action?.assignee?.trim()) continue;
+    const suggestion = /\bseo\b|search engine|local visibility/i.test(item.department || "") && seoOwner
+      ? seoOwner : suggestChatOwner(chatContext, item.department, client?.accountManager || "", today);
+    if (suggestion) {
+      item.assignee = suggestion.name;
+      item.description = [item.description, suggestion.source].filter(Boolean).join("\n\n");
+    }
+  }
   const unowned = items.filter(
     (item) => item.formType === "ticket" && item.assignee === OWNER_NEEDED,
   ).length;

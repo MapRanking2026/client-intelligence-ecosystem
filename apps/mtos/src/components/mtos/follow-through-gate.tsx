@@ -6,9 +6,9 @@ import { AlertTriangle, Check, Clock, PenLine, RotateCcw, Sparkles, X } from "lu
 import { readJsonResponse } from "@/src/lib/api/read-json-response";
 import {
   RED_FLAGS,
+  recommendedCap,
   aboveCapWarning,
   fallbackJustification,
-  recommendedCap,
   scoreBand,
   scoreGateBlockers,
   scoreObligations,
@@ -321,15 +321,6 @@ export function FollowThroughGate({
 
       <div className="card">
         <div className="flex flex-wrap items-center gap-3">
-          {state.suggested ? (
-            <span className="chip info">
-              <Sparkles />
-              MTOS suggests {state.suggested}/10
-            </span>
-          ) : (
-            <span className="chip muted">MTOS has no suggestion for this call</span>
-          )}
-          <span className={`chip ${cap.cap === null ? "muted" : cap.cap <= 4 ? "risk" : "watch"}`}>{cap.sentence}</span>
           <button
             type="button"
             className="btn btn-ghost btn-sm ml-auto"

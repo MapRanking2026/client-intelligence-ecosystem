@@ -80,6 +80,8 @@ const PRIORITIES: { value: TicketPriority; label: string }[] = [
 ];
 
 const TIME_ESTIMATES: { minutes: number; label: string }[] = [
+  { minutes: 5, label: "5m" },
+  { minutes: 10, label: "10m" },
   { minutes: 30, label: "30m" },
   { minutes: 60, label: "1h" },
   { minutes: 120, label: "2h" },
@@ -362,7 +364,7 @@ export function PostMeetingWorkflow({ touchId, postMeeting, qaReview, hasQc }: P
       assigneeId: ticket.assigneeId,
       businessOptionId: ticket.businessOptionId,
       priority: ticket.priority || "normal",
-      timeEstimateMinutes: ticket.timeEstimateMinutes ?? 60,
+      timeEstimateMinutes: ticket.timeEstimateMinutes ?? 0,
       dueDate: ticket.dueDate,
       ticketType: ticket.ticketType || "regular",
       billingChangeType: ticket.billingChangeType,
@@ -569,7 +571,7 @@ export function PostMeetingWorkflow({ touchId, postMeeting, qaReview, hasQc }: P
         assigneeId: undefined,
         businessOptionId: defaultBusinessOptionId,
         priority: "normal",
-        timeEstimateMinutes: 60,
+        timeEstimateMinutes: 0,
         ticketType: "regular",
         decision: "approved",
       },
@@ -1352,14 +1354,16 @@ export function PostMeetingWorkflow({ touchId, postMeeting, qaReview, hasQc }: P
                       <div>
                         <label className="text-[11px] uppercase tracking-[0.2em] text-slate-400">Time estimate</label>
                         <select
-                          value={String(ticket.timeEstimateMinutes)}
+                          value={ticket.timeEstimateMinutes ? String(ticket.timeEstimateMinutes) : ""}
                           onChange={(event) =>
                             updateTicket(ticket.id, { timeEstimateMinutes: Number(event.target.value) })
                           }
                           style={{ color: "#e2e8f0" }}
                           className="mt-1 w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-slate-200 outline-none"
                         >
-                          {(TIME_ESTIMATES.some((option) => option.minutes === ticket.timeEstimateMinutes)
+                          <option value="">Choose effort</option>
+                          {(!ticket.timeEstimateMinutes
+                            || TIME_ESTIMATES.some((option) => option.minutes === ticket.timeEstimateMinutes)
                             ? TIME_ESTIMATES
                             : [
                                 {

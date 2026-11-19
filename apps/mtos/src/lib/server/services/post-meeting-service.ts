@@ -1,3 +1,4 @@
+import { isWorkflowRecapTask, suggestedEffortMinutes } from "@/src/lib/contracts/follow-through-task-policy";
 import { nanoid } from "nanoid";
 import { CLIENT_CONTENT_RULE, clientText } from "@/src/lib/contracts/client-content";
 import { z } from "zod";
@@ -368,7 +369,8 @@ async function analyzeWithClaude(
   // The analysis emits a recap, up to 10 commitments, up to 8 draft tickets
   // (title + description + department each), plus a full client email subject
   // and body -- 1800 truncated the JSON mid-array, which then fails to parse.
-  const result = await callLlmForJson({ env, system: `${system}\n\n${CLIENT_CONTENT_RULE}`, userText, maxTokens: 8000 });
+  const result = await callLlmForJson({ env, system: `${system}\n\n${CLIENT_CONTENT_RULE}
+Do not create a ticket for preparing or sending the standard Monthly Touch recap email: this workflow already generates and sends it. Estimate active effort per task scope, not elapsed waiting time. Simple email, invite or access follow-ups normally need 5–15 minutes, not an hour; leave unknown effort unset for AM review.`, userText, maxTokens: 8000 });
   // Normalize before validating so the model returning objects-as-commitments or
   // overshooting the item caps degrades gracefully instead of failing schema validation.
   const analysis = analysisSchema.parse(normalizePostMeetingAnalysis(result.data));
@@ -466,7 +468,7 @@ async function analyzePostMeetingTranscriptUnlocked(context: TenantContext, touc
   // Default "date it was requested" for billing tickets = the touch/meeting date.
   const touchDateString = toDateInputValue(touch.scheduledAt) || toDateInputValue(getNowIso());
 
-  const draftTickets: DraftTicket[] = analysis.draftTickets.map((ticket) => {
+  const draftTickets: DraftTicket[] = analysis.draftTickets.filter(ticket => !isWorkflowRecapTask(ticket.title)).map((ticket) => {
     const isBilling = ticket.ticketType === "billing";
 
     // Match the model's suggested assignee to a real member (unambiguously) so the
@@ -479,7 +481,7 @@ async function analyzePostMeetingTranscriptUnlocked(context: TenantContext, touc
     const timeEstimateMinutes =
       typeof ticket.timeEstimateHours === "number" && ticket.timeEstimateHours > 0
         ? Math.round(ticket.timeEstimateHours * 60)
-        : 60;
+        : suggestedEffortMinutes(ticket.title);
 
     return {
       id: `ticket-${nanoid(8)}`,

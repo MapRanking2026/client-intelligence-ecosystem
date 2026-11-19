@@ -1,3 +1,4 @@
+import { isWorkflowRecapTask } from "@/src/lib/contracts/follow-through-task-policy";
 import type { TenantContext } from "@/src/lib/contracts/mtos";
 import { hasMeetingNotes } from "@/src/lib/contracts/follow-through-notes";
 import type { MonthlyTouchRecord } from "@/src/lib/mtos-data";
@@ -24,11 +25,12 @@ export async function persistGeneratedFollowThroughDraft<Field extends DraftFiel
     if (!touch.followThrough?.score?.confirmedAt) throw new Error("Confirm the health score before preparing drafts.");
     const current = touch.followThrough[field];
     if (field === "items") {
-      const saved = touch.followThrough.items || [];
+      const original = touch.followThrough.items || [];
+      const saved = original.filter(item => item.formType !== "ticket" || item.decision || !isWorkflowRecapTask(item.taskName));
       const generated = draft as NonNullable<FollowThrough["items"]>;
       const missing = generated.filter(item => !saved.some(existing => existing.id === item.id || (item.actionId && existing.actionId === item.actionId)));
       const merged = [...saved, ...missing];
-      if (missing.length || current === undefined) transaction.update(ref, { "followThrough.items": stripUndefinedDeep(merged) });
+      if (missing.length || current === undefined || saved.length !== original.length) transaction.update(ref, { "followThrough.items": stripUndefinedDeep(merged) });
       return merged as NonNullable<FollowThrough[Field]>;
     }
     if (current !== undefined && (field !== "notes" || hasMeetingNotes(touch.followThrough.notes))) {

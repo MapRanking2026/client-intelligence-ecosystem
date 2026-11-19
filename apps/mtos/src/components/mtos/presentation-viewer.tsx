@@ -80,6 +80,7 @@ export function PresentationViewer({
   const fullscreenRef = useRef<HTMLDivElement | null>(null);
 
   const editing = draft !== null;
+  const savedForReload = useRef(false);
   const [undoHistory, setUndoHistory] = useState<PresentationSlide[][]>([]);
   const [redoHistory, setRedoHistory] = useState<PresentationSlide[][]>([]);
   function updateDraft(next: PresentationSlide[]) {
@@ -193,6 +194,7 @@ export function PresentationViewer({
       if (!response.ok) throw new Error(payload?.error || "These slide edits could not be saved.");
       // Reload rather than patching local state: the saved slides come back with their generated
       // snapshots and reattached rank captures, and every other panel on the page reads the touch.
+      savedForReload.current = true;
       globalThis.location.reload();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "These slide edits could not be saved.");
@@ -224,7 +226,7 @@ export function PresentationViewer({
   // A reload or a tab close with unsaved slides asks first. The browser shows its own wording.
   useEffect(() => {
     if (!dirty) return;
-    const onLeave = (event: BeforeUnloadEvent) => event.preventDefault();
+    const onLeave = (event: BeforeUnloadEvent) => { if (!savedForReload.current) event.preventDefault(); };
     window.addEventListener("beforeunload", onLeave);
     return () => window.removeEventListener("beforeunload", onLeave);
   }, [dirty]);
@@ -249,6 +251,7 @@ export function PresentationViewer({
   }
 
   function startEditing() {
+    savedForReload.current = false;
     setError(null);
     setUndoHistory([]);
     setRedoHistory([]);

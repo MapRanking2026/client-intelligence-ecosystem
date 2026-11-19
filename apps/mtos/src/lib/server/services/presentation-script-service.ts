@@ -11,6 +11,7 @@ import { getServerEnv } from "@/src/lib/server/env";
 import { callLlmForJson, getNowIso, hasAnyLlmProvider } from "@/src/lib/server/services/mtos-ai";
 import { getPromptText } from "@/src/lib/server/prompt-store";
 import { getAccountManagerProfile } from "@/src/lib/server/services/user-service";
+import { presentationIdentity, withPresentationIdentity } from "./presentation-identity-service";
 
 /**
  * Writing what the account manager actually says, slide by slide.
@@ -145,7 +146,7 @@ export async function generatePresenterScripts(
   if (!touch) {
     throw new Error("Monthly touch not found");
   }
-  const presentation = target === "loom" ? touch.noShow?.presentation : touch.presentation;
+  let presentation = target === "loom" ? touch.noShow?.presentation : touch.presentation;
   if (!presentation || presentation.status !== "generated" || !presentation.slides?.length) {
     throw new Error("Generate the presentation first — the script is written from the slides it will be presenting.");
   }
@@ -156,6 +157,8 @@ export async function generatePresenterScripts(
   }
 
   const client = await getMtosDataSource(context).getClientById(touch.clientId);
+  if (!client) throw new Error("The client for this Monthly Touch is not available.");
+  presentation = withPresentationIdentity(presentation, await presentationIdentity(context, client, touch))!;
   const profile = await getAccountManagerProfile(context);
   const system = await systemPrompt();
 

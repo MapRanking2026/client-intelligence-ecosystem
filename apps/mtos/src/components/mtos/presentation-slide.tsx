@@ -1,4 +1,6 @@
 import { RankComparisonVisual } from "./rank-comparison-visual";
+import { Children, Fragment, cloneElement, isValidElement, type ComponentProps, type CSSProperties, type ReactNode } from "react";
+import { normalizePresentationDesign, type PresentationDesign } from "@/src/lib/contracts/presentation-design";
 import type { PresentationSlide, PresentationTone } from "@/src/lib/mtos-data";
 
 /**
@@ -33,6 +35,28 @@ export const DECK = {
   coverTintSoft: "#A0C4FF",
   font: "Arial, Helvetica, sans-serif",
 } as const;
+
+/** Style native deck text and shapes without changing the provider's captured scan image. */
+function withDesign(node: ReactNode, design: PresentationDesign | undefined, root = true): ReactNode {
+  if (!design || !isValidElement<{ children?: ReactNode; style?: CSSProperties }>(node)) return node;
+  if (node.type === Fragment) return cloneElement(node, { children: Children.map(node.props.children, child => withDesign(child, design, false)) });
+  if (node.type === Chrome) return withDesign(Chrome(node.props as ComponentProps<typeof Chrome>), design, false);
+  if (node.type === Bullets) return withDesign(Bullets(node.props as ComponentProps<typeof Bullets>), design, false);
+  if (node.type === CoverField) return withDesign(CoverField(node.props as ComponentProps<typeof CoverField>), design, false);
+  const style: CSSProperties = { ...node.props.style };
+  if (root) { style.background = design.background || style.background; style.fontFamily = design.fontFamily || style.fontFamily; }
+  if (design.textColor && (style.color === DECK.navy || style.color === DECK.gray)) style.color = design.textColor;
+  for (const property of ["color", "background", "borderLeft", "borderTop", "borderBottom"] as const) {
+    const value = style[property];
+    if (design.accentColor && typeof value === "string") style[property] = value.replaceAll(DECK.blue, design.accentColor).replaceAll(DECK.brightBlue, design.accentColor);
+  }
+  if (node.type === "h1" || node.type === "h2") {
+    if (design.titleSize) style.fontSize = design.titleSize;
+    if (design.titleBold !== undefined) style.fontWeight = design.titleBold ? 700 : 400;
+  } else if (typeof style.fontSize === "number" && design.textScale) style.fontSize *= design.textScale;
+  if (design.alignment && style.fontSize) style.textAlign = design.alignment;
+  return cloneElement(node, { style, children: Children.map(node.props.children, child => withDesign(child, design, false)) });
+}
 
 function toneColor(tone?: PresentationTone): string {
   if (tone === "good") return DECK.good;
@@ -139,11 +163,12 @@ export function PresentationSlideCanvas({
     overflow: "hidden",
     color: DECK.navy,
   };
+  const design = normalizePresentationDesign(slide.design);
 
   // Cover and closing share the branded title treatment.
   if (slide.layout === "cover" || slide.layout === "closing") {
     const isCover = slide.layout === "cover";
-    return (
+    return withDesign(
       <div style={base}>
       {bookingAction ? <div style={{ position: "absolute", right: 64, bottom: 100, width: 350, zIndex: 4 }}>{bookingAction}</div> : null}
         <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 10, background: DECK.blue }} />
@@ -223,10 +248,10 @@ export function PresentationSlideCanvas({
           </div>
         ) : null}
       </div>
-    );
+    , design);
   }
 
-  return (
+  return withDesign(
     <div style={base}>
       {bookingAction ? <div style={{ position: "absolute", right: 64, bottom: 100, width: 350, zIndex: 4 }}>{bookingAction}</div> : null}
       <Chrome slide={slide}>
@@ -482,7 +507,7 @@ export function PresentationSlideCanvas({
         </span>
       </div>
     </div>
-  );
+  , design);
 }
 
 function CoverField({ label, value }: { label: string; value: string }) {

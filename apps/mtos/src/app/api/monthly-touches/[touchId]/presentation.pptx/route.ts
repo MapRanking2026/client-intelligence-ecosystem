@@ -8,6 +8,7 @@ import { resolveTenantContext } from "@/src/lib/auth/resolve-tenant-context";
 import { getMtosDataSource } from "@/src/lib/server/data/seed-mtos-data-source";
 import { loadRankImage } from "@/src/lib/server/services/original-rank-report-service";
 import { buildPptx } from "@/src/lib/server/services/pptx-builder";
+import { presentationIdentity, withPresentationIdentity } from "@/src/lib/server/services/presentation-identity-service";
 
 /**
  * Downloads the stored deck as a real .pptx.
@@ -36,7 +37,10 @@ export async function GET(request: Request, { params }: { params: Promise<{ touc
     return NextResponse.json({ error: "Monthly touch not found" }, { status: 404 });
   }
 
-  const presentation = clientPresentation(touch.noShow?.resolution === "loom" ? touch.noShow.presentation : touch.presentation, touch);
+  const client = await getMtosDataSource(context).getClientById(touch.clientId);
+  if (!client) return NextResponse.json({ error: "Client not found" }, { status: 404 });
+  const identity = await presentationIdentity(context, client, touch);
+  const presentation = clientPresentation(withPresentationIdentity(touch.noShow?.resolution === "loom" ? touch.noShow.presentation : touch.presentation, identity), touch);
   if (!presentation || presentation.status !== "generated" || !presentation.slides?.length) {
     return NextResponse.json(
       { error: "No presentation has been generated for this touch yet." },

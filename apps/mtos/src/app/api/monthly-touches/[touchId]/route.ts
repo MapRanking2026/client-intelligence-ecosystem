@@ -86,6 +86,16 @@ const toneSchema = z.enum(["neutral", "good", "watch", "risk"]);
  * measurement, or something dressed as one, onto a client slide.
  */
 const presentationSlideSchema = z.object({
+  design: z.object({
+    background: z.string().regex(/^#[0-9a-f]{6}$/i).optional(),
+    textColor: z.string().regex(/^#[0-9a-f]{6}$/i).optional(),
+    accentColor: z.string().regex(/^#[0-9a-f]{6}$/i).optional(),
+    fontFamily: z.enum(["Arial", "Aptos", "Georgia", "Verdana"]).optional(),
+    titleSize: z.number().min(24).max(68).optional(),
+    textScale: z.number().min(0.75).max(1.4).optional(),
+    titleBold: z.boolean().optional(),
+    alignment: z.enum(["left", "center", "right"]).optional(),
+  }).optional(),
   generatedIndex: z.number().int().min(0).max(500).optional(),
   layout: z.enum([
     "cover",

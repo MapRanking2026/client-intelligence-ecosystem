@@ -14,6 +14,7 @@ import { getServerEnv } from "@/src/lib/server/env";
 import { callLlmForJson, getNowIso, hasAnyLlmProvider, stripUndefinedDeep } from "@/src/lib/server/services/mtos-ai";
 import { buildTouchEvidence } from "@/src/lib/server/services/live-call-guide-service";
 import { getPromptText } from "@/src/lib/server/prompt-store";
+import { presentationIdentity, withPresentationIdentity } from "./presentation-identity-service";
 
 /**
  * The client-facing deck: the second of the two delivery formats MT-002 prepares
@@ -154,11 +155,17 @@ export async function generatePresentation(
   }
 
   const history = await recentFormats(context, touch.clientId, touch.id);
+  const client = await dataSource.getClientById(touch.clientId);
+  if (!client) throw new Error("The client for this Monthly Touch is not available.");
+  const identity = await presentationIdentity(context, client, touch, true);
+  if (!identity.preparedBy) throw new Error("Add the Account Manager's name to this client's record or your profile before generating the presentation.");
   const rankComparisons = await presentationRankComparisons(context, touch);
 
   const system = await getPromptText("monthly_touch_presentation_prompt");
   const userText = [
     "Build the client-facing deck for this Monthly Touch.",
+    "Use these verified identity fields exactly. Do not invent names or print placeholders such as UNCONFIRMED or name needed:",
+    JSON.stringify(identity),
     CLIENT_CONTENT_RULE,
     "Optional AM presentation direction (internal input, never quote it on a client slide). Follow it when supported by evidence. Preserve the whole-account overview, prioritize the requested location/keyword and keep other active profiles in the summary. This direction cannot override evidence or client privacy rules:",
     touch.presentationInstructions || "No additional direction.",
@@ -201,7 +208,7 @@ export async function generatePresentation(
     provider: result.provider,
   };
 
-  const safePresentation = clientPresentation(withRankComparisons(presentation, rankComparisons), touch)!;
+  const safePresentation = clientPresentation(withRankComparisons(withPresentationIdentity(presentation, identity)!, rankComparisons), touch)!;
   if (!safePresentation.slides.some((slide) => !["cover", "agenda", "closing"].includes(slide.layout))) throw new Error("The generated presentation contained no client-safe account results or completed work. Review the evidence and regenerate it.");
   const updatedTouch: MonthlyTouchRecord = stripUndefinedDeep({
     ...touch,

@@ -177,7 +177,7 @@ export function PresentationEditor({
   };
 
   return (
-    <div className="panel grid gap-4">
+    <div className="presentation-editor-fields panel grid gap-4">
       {/* ---- This slide's place in the deck ------------------------------------------------ */}
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="card-title">
@@ -328,6 +328,20 @@ export function PresentationEditor({
           onChange={(event) => patch({ title: event.target.value })}
         />
       </label>
+
+      <details className="rounded-lg border border-[var(--hair)] p-3">
+        <summary className="cursor-pointer font-semibold">Advanced slide design</summary>
+        <div className="mt-3 grid grid-cols-2 gap-3">
+          <label className="field-label">Font<select className="input" value={slide.design?.fontFamily || "Arial"} onChange={event => patch({ design: { ...slide.design, fontFamily: event.target.value as NonNullable<PresentationSlide["design"]>["fontFamily"] } })}>{["Arial", "Aptos", "Georgia", "Verdana"].map(font => <option key={font}>{font}</option>)}</select></label>
+          <label className="field-label">Title size<input className="input" type="number" min={24} max={68} value={slide.design?.titleSize || (slide.layout === "cover" ? 52 : slide.layout === "closing" ? 46 : 34)} onChange={event => patch({ design: { ...slide.design, titleSize: Number(event.target.value) } })} /></label>
+          <label className="field-label">Text scale<select className="input" value={slide.design?.textScale || 1} onChange={event => patch({ design: { ...slide.design, textScale: Number(event.target.value) } })}>{[0.75, 0.85, 1, 1.15, 1.25, 1.4].map(scale => <option key={scale} value={scale}>{Math.round(scale * 100)}%</option>)}</select></label>
+          <label className="field-label">Alignment<select className="input" value={slide.design?.alignment || "left"} onChange={event => patch({ design: { ...slide.design, alignment: event.target.value as "left" | "center" | "right" } })}><option value="left">Left</option><option value="center">Center</option><option value="right">Right</option></select></label>
+          {([["background", "Background", "#FFFFFF"], ["textColor", "Text color", "#0D1B2A"], ["accentColor", "Accent color", "#1A73E8"]] as const).map(([key, label, fallback]) => <label key={key} className="field-label">{label}<input aria-label={label} type="color" value={slide.design?.[key] || fallback} onChange={event => patch({ design: { ...slide.design, [key]: event.target.value } })} /></label>)}
+          <label className="field-label">Title weight<select className="input" value={slide.design?.titleBold === false ? "normal" : "bold"} onChange={event => patch({ design: { ...slide.design, titleBold: event.target.value === "bold" } })}><option value="bold">Bold</option><option value="normal">Regular</option></select></label>
+        </div>
+        <button type="button" className="btn btn-ghost btn-sm mt-3" onClick={() => patch({ design: undefined })}>Reset slide design</button>
+        <p className="field-hint mt-2">Applies to this slide in the preview, client screen and PowerPoint. Original scan images stay unchanged.</p>
+      </details>
 
       <label className="field-label">
         Subtitle

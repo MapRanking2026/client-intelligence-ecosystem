@@ -1,4 +1,5 @@
 import { clientSlides } from "@/src/lib/contracts/client-content";
+import { normalizePresentationDesign } from "./presentation-design";
 import type {
   PresentationItem,
   PresentationLayout,
@@ -159,6 +160,7 @@ function normalizeItems(items: PresentationItem[] | undefined): PresentationItem
 export function normalizeSlide(slide: PresentationSlide): PresentationSlide {
   const body = bodyFieldFor(slide.layout);
   const base: PresentationSlide = {
+    ...(normalizePresentationDesign(slide.design) ? { design: normalizePresentationDesign(slide.design) } : {}),
     ...(slide.generatedIndex !== undefined ? { generatedIndex: slide.generatedIndex } : {}),
     layout: slide.layout,
     ...(slide.sectionId ? { sectionId: slide.sectionId } : {}),

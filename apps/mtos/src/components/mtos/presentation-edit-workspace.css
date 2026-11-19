@@ -1,0 +1,14 @@
+.presentation-edit-dialog{margin:auto;width:calc(100vw - 32px);max-width:1500px;height:calc(100dvh - 32px);max-height:100dvh;padding:0;border:1px solid var(--hair);border-radius:16px;background:var(--surface);color:var(--text);overflow:hidden}
+.presentation-edit-dialog::backdrop{background:rgb(10 22 37 / .6);backdrop-filter:blur(3px)}
+.presentation-edit-dialog>header{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 20px;border-bottom:1px solid var(--hair)}
+.presentation-edit-dialog>header p{font-size:12px;color:var(--text-2);margin-top:3px}
+.presentation-edit-body{height:calc(100% - 78px);padding:16px;overflow:hidden}
+.presentation-edit-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(340px,430px);grid-template-rows:minmax(0,1fr) auto auto 100px;gap:12px;height:100%;min-height:0}
+.presentation-edit-grid>*{min-width:0;margin:0!important}
+.presentation-edit-grid>.presentation-edit-preview{grid-column:1;grid-row:1;max-height:100%;height:100%;aspect-ratio:auto!important}
+.presentation-edit-grid>.presentation-edit-controls{grid-column:1;grid-row:2;flex-wrap:wrap}
+.presentation-edit-grid>.presentation-edit-save{grid-column:1;grid-row:3}
+.presentation-edit-grid>.presentation-editor-fields{grid-column:2;grid-row:1/4;overflow:auto;min-height:0;align-content:start;padding:16px}
+.presentation-edit-grid>.presentation-edit-thumbnails{grid-column:1/3;grid-row:4}
+.presentation-editor-fields .textarea{min-height:70px}
+@media(max-width:850px){.presentation-edit-dialog{width:calc(100vw - 16px);height:calc(100dvh - 16px)}.presentation-edit-body{overflow:auto;padding:10px}.presentation-edit-grid{display:flex;flex-direction:column;height:auto}.presentation-edit-grid>.presentation-edit-preview{height:28dvh;min-height:150px;flex-shrink:0}.presentation-edit-grid>.presentation-editor-fields{overflow:visible}.presentation-edit-grid>.presentation-edit-thumbnails{order:3;min-height:100px}.presentation-edit-save{position:sticky;top:0;background:var(--surface);padding:8px;z-index:2}}

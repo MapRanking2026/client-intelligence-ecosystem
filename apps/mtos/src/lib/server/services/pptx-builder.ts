@@ -1,5 +1,6 @@
 import { rankSummary } from "@/src/lib/contracts/rank-comparison";
 import { clientPresentation } from "@/src/lib/contracts/client-content";
+import { normalizePresentationDesign } from "@/src/lib/contracts/presentation-design";
 import JSZip from "jszip";
 
 import type { Presentation, PresentationSlide, PresentationTone } from "@/src/lib/mtos-data";
@@ -50,6 +51,24 @@ const C = {
 } as const;
 
 const px = (value: number) => Math.round(value * EMU_PER_PX);
+
+function designShapes(xml: string, slide: PresentationSlide): string {
+  const design = normalizePresentationDesign(slide.design);
+  if (!design) return xml;
+  let styled = xml.replace(/<p:sp>[\s\S]*?<\/p:sp>/g, shape => {
+    if (!shape.includes("<p:txBody>")) return shape;
+    const title = shape.includes(`<a:t>${esc(slide.title)}</a:t>`);
+    const originalTitleSize = slide.layout === "cover" ? 52 : slide.layout === "closing" ? 46 : 34;
+    shape = shape.replace(/\bsz="(\d+)"/g, (_, size) => `sz="${Math.round(Number(size) * (title && design.titleSize ? design.titleSize / originalTitleSize : title ? 1 : design.textScale || 1))}"`);
+    if (title && design.titleBold !== undefined) shape = shape.replace(/\bb="[01]"/g, `b="${design.titleBold ? 1 : 0}"`);
+    if (design.fontFamily) shape = shape.replace(/typeface="Arial"/g, `typeface="${design.fontFamily}"`);
+    if (design.alignment) shape = shape.replace(/algn="(?:l|ctr|r)"/g, `algn="${design.alignment === "left" ? "l" : design.alignment === "center" ? "ctr" : "r"}"`);
+    if (design.textColor) shape = shape.replace(/val="(?:0D1B2A|444444)"/g, `val="${design.textColor.slice(1)}"`);
+    return shape;
+  });
+  if (design.accentColor) styled = styled.replace(/val="(?:1A73E8|2979FF)"/g, `val="${design.accentColor.slice(1)}"`);
+  return styled;
+}
 
 /** XML text escape. Also strips control characters, which make the file unreadable. */
 function esc(value: string): string {
@@ -275,7 +294,7 @@ function buildSlideShapes(
         }),
       );
     }
-    return { xml: parts.join(""), usesLogo, usesRankImage };
+    return { xml: designShapes(parts.join(""), slide), usesLogo, usesRankImage };
   }
 
   // Shared chrome for every content slide.
@@ -458,10 +477,11 @@ function buildSlideShapes(
     textBox(900, 650, 316, 28, [`MapRanking  |  ${number} / ${total}`], { size: 10, color: C.gray, align: "r" }),
   );
 
-  return { xml: parts.join(""), usesLogo, usesRankImage };
+  return { xml: designShapes(parts.join(""), slide), usesLogo, usesRankImage };
 }
 
-function slideXml(body: string): string {
+function slideXml(body: string, background?: string): string {
+  if (background) body = rect(0, 0, SLIDE_W, SLIDE_H, background.slice(1)) + body;
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <p:sld xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"><p:cSld><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/><a:chOff x="0" y="0"/><a:chExt cx="0" cy="0"/></a:xfrm></p:grpSpPr>${body}</p:spTree></p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:sld>`;
 }
@@ -584,7 +604,8 @@ export async function buildPptx(
 
   slides.forEach((slide, index) => {
     const n = index + 1;
-    zip.file(`ppt/slides/slide${n}.xml`, slideXml(built[index].xml));
+    const background = normalizePresentationDesign(slides[index].design)?.background;
+    zip.file(`ppt/slides/slide${n}.xml`, slideXml(built[index].xml, background));
 
     const rels = [
       `<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout" Target="../slideLayouts/slideLayout1.xml"/>`,

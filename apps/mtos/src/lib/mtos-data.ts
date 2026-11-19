@@ -717,6 +717,7 @@ export interface PresentationItem {
 }
 
 export interface PresentationSlide {
+  design?: import("@/src/lib/contracts/presentation-design").PresentationDesign;
   /** Original generation position for saved AM capture notes; display numbering stays contiguous. */
   generatedIndex?: number;
   layout: PresentationLayout;

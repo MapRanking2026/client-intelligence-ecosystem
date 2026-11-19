@@ -7,6 +7,7 @@ import { clientPath, monthlyTouchPath } from "@/src/lib/server/firebase/collecti
 import type { TenantContext } from "@/src/lib/contracts/mtos";
 import { getMtosDataSource } from "@/src/lib/server/data/seed-mtos-data-source";
 import { withVerifiedLeadMix } from "@/src/lib/contracts/lead-mix";
+import { presentationIdentity, withPresentationIdentity } from "./presentation-identity-service";
 
 export async function getMonthlyTouchQueueView(context: TenantContext) {
   const dataSource = getMtosDataSource(context);
@@ -65,11 +66,12 @@ export async function getMonthlyTouchWorkspaceView(context: TenantContext, touch
           },
         }
       : touch;
+  const identity = touch.presentation || touch.noShow?.presentation ? await presentationIdentity(context, client, touch) : { clientName: client.name, preparedBy: undefined, preparedFor: undefined };
 
   return {
     context,
-    touch: { ...touchWithLeadMix, callGuide: clientCallGuide(touchWithLeadMix.callGuide, touchWithLeadMix), presentation: clientPresentation(touchWithLeadMix.presentation, touchWithLeadMix),
-      ...(touchWithLeadMix.noShow?.resolution === "loom" ? { noShow: { ...touchWithLeadMix.noShow, presentation: clientPresentation(touchWithLeadMix.noShow.presentation, touchWithLeadMix), script: clientText(touchWithLeadMix.noShow.script, blockedTaskTitles(touchWithLeadMix)) } } : {}) },
+    touch: { ...touchWithLeadMix, callGuide: clientCallGuide(touchWithLeadMix.callGuide, touchWithLeadMix), presentation: clientPresentation(withPresentationIdentity(touchWithLeadMix.presentation, identity), touchWithLeadMix),
+      ...(touchWithLeadMix.noShow?.resolution === "loom" ? { noShow: { ...touchWithLeadMix.noShow, presentation: clientPresentation(withPresentationIdentity(touchWithLeadMix.noShow.presentation, identity), touchWithLeadMix), script: clientText(touchWithLeadMix.noShow.script, blockedTaskTitles(touchWithLeadMix)) } } : {}) },
     standby: Boolean(touch.noShow?.standbyUntil && Date.parse(touch.noShow.standbyUntil) > Date.now()),
     client,
     commitments,

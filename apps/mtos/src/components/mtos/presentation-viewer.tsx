@@ -19,6 +19,7 @@ import {
 
 import { AiProgressPanel, useAiRun } from "@/src/components/mtos/ai-progress";
 import { PresentationEditor } from "@/src/components/mtos/presentation-editor";
+import { PresentationEditWorkspace } from "@/src/components/mtos/presentation-edit-workspace";
 import { DECK, PresentationSlideCanvas } from "@/src/components/mtos/presentation-slide";
 import { readJsonResponse } from "@/src/lib/api/read-json-response";
 import { editableSlide, normalizeSlide, slideIsHiddenFromClient } from "@/src/lib/contracts/presentation-edit";
@@ -79,6 +80,25 @@ export function PresentationViewer({
   const fullscreenRef = useRef<HTMLDivElement | null>(null);
 
   const editing = draft !== null;
+  const [undoHistory, setUndoHistory] = useState<PresentationSlide[][]>([]);
+  const [redoHistory, setRedoHistory] = useState<PresentationSlide[][]>([]);
+  function updateDraft(next: PresentationSlide[]) {
+    if (draft) setUndoHistory(previous => [...previous.slice(-49), draft]);
+    setRedoHistory([]);
+    setDraft(next);
+  }
+  function undoDraft() {
+    if (!draft || !undoHistory.length) return;
+    setRedoHistory(previous => [...previous, draft]);
+    setDraft(undoHistory[undoHistory.length - 1]!);
+    setUndoHistory(previous => previous.slice(0, -1));
+  }
+  function redoDraft() {
+    if (!draft || !redoHistory.length) return;
+    setUndoHistory(previous => [...previous, draft]);
+    setDraft(redoHistory[redoHistory.length - 1]!);
+    setRedoHistory(previous => previous.slice(0, -1));
+  }
   const slides = editing ? draft : clientSlides(presentation?.slides);
   const count = slides.length;
   const current = slides[Math.min(index, Math.max(count - 1, 0))];
@@ -104,12 +124,15 @@ export function PresentationViewer({
     };
     measure();
     window.addEventListener("resize", measure);
+    const observer = new ResizeObserver(measure);
+    if (stageRef.current) observer.observe(stageRef.current);
     const timer = window.setTimeout(measure, 60);
     return () => {
       window.removeEventListener("resize", measure);
       window.clearTimeout(timer);
+      observer.disconnect();
     };
-  }, [isFullscreen, count]);
+  }, [isFullscreen, count, editing]);
 
   useEffect(() => {
     const onChange = () => setIsFullscreen(Boolean(document.fullscreenElement));
@@ -227,6 +250,8 @@ export function PresentationViewer({
 
   function startEditing() {
     setError(null);
+    setUndoHistory([]);
+    setRedoHistory([]);
     setDraft((presentation?.slides || []).map((slide) => ({ ...slide })));
     setIndex(0);
   }
@@ -348,10 +373,11 @@ export function PresentationViewer({
       {presentation?.errorMessage ? <p className="text-sm text-amber-200">{presentation.errorMessage}</p> : null}
 
       {(!toolsOnly || editing) && count && current ? (
-        <div className="space-y-3">
+        <PresentationEditWorkspace open={editing} onClose={stopEditing}>
+        <div className={editing ? "presentation-edit-grid" : "space-y-3"}>
           <div
             ref={stageRef}
-            className="relative w-full overflow-hidden rounded-[20px] border border-[color:var(--hair-strong)] bg-[color:var(--surface-2)]"
+            className="presentation-edit-preview relative w-full overflow-hidden rounded-[20px] border border-[color:var(--hair-strong)] bg-[color:var(--surface-2)]"
             style={{ aspectRatio: `${DECK.width} / ${DECK.height}` }}
           >
             <div
@@ -369,7 +395,7 @@ export function PresentationViewer({
             </div>
           </div>
 
-          <div className="flex items-center justify-between gap-3">
+          <div className="presentation-edit-controls flex items-center justify-between gap-3">
             <div className="flex items-center gap-2">
               <button
                 type="button"
@@ -407,7 +433,7 @@ export function PresentationViewer({
 
           {editing ? (
             <>
-              <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="presentation-edit-save flex flex-wrap items-center justify-between gap-2">
                 <p className="text-xs text-slate-400">
                   {dirty ? "Unsaved changes" : "All changes saved"}
                   {presentation?.editedAt && !dirty
@@ -416,6 +442,8 @@ export function PresentationViewer({
                   {" · ⌘/Ctrl+S saves"}
                 </p>
                 <div className="flex gap-2">
+                  <button type="button" className="btn btn-ghost btn-sm" disabled={saving || !undoHistory.length} onClick={undoDraft}>Undo</button>
+                  <button type="button" className="btn btn-ghost btn-sm" disabled={saving || !redoHistory.length} onClick={redoDraft}>Redo</button>
                   <button type="button" className="btn btn-ghost btn-sm" disabled={saving} onClick={stopEditing}>
                     Discard
                   </button>
@@ -429,12 +457,13 @@ export function PresentationViewer({
                     {saving ? "Saving…" : "Save slides"}
                   </button>
                 </div>
+                {error ? <p role="alert" className="w-full text-sm" style={{ color: "var(--risk)" }}>{error}</p> : null}
               </div>
               <PresentationEditor
                 slides={draft}
                 index={Math.min(index, count - 1)}
                 blockedTitles={blockedTitles}
-                onSlides={setDraft}
+                onSlides={updateDraft}
                 onIndex={setIndex}
               />
             </>
@@ -453,7 +482,7 @@ export function PresentationViewer({
 
           {/* Thumbnail rail. Each one is the real slide at 1/8 scale, so what you pick
               is exactly what you present. */}
-          <div className="flex gap-3 overflow-x-auto pb-2">
+          <div className="presentation-edit-thumbnails flex gap-3 overflow-x-auto pb-2">
             {slides.map((slide, slideIndex) => (
               <button
                 key={slideIndex}
@@ -494,6 +523,7 @@ export function PresentationViewer({
             ))}
           </div>
         </div>
+        </PresentationEditWorkspace>
       ) : null}
 
       {/* The full-screen surface. Always mounted so requestFullscreen has a target,

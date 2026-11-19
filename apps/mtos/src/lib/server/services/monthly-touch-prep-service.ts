@@ -53,6 +53,7 @@ import {
 import { getFirebaseAdminDb } from "@/src/lib/server/firebase/admin";
 import { getServerEnv } from "@/src/lib/server/env";
 import { callLlmForJson, hasAnyLlmProvider } from "@/src/lib/server/services/mtos-ai";
+import { getModelRouteForPrompt } from "@/src/lib/server/prompt-model-route";
 import { fetchClickupClientContext } from "@/src/lib/server/services/clickup-client-context";
 import { runLeadVerification } from "@/src/lib/server/services/lead-verification-service";
 import { listPrepAdditions } from "@/src/lib/server/services/section-notes-service";
@@ -1786,6 +1787,7 @@ async function generateClaudeTouchOutput(
   const llmResult = await callLlmForJson({
         env,
         system,
+        route: await getModelRouteForPrompt(env, "monthly_touch_preparation_prompt"),
         userText: [
           groundingBlock,
           varietyDirective,

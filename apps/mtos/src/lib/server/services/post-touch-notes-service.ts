@@ -17,6 +17,7 @@ import { writePostNotesToClientBook } from "@/src/lib/server/services/client-boo
 import { buildTouchEvidence } from "@/src/lib/server/services/live-call-guide-service";
 import { splitTranscriptPayload } from "@/src/lib/server/services/meeting-transcript-service";
 import { callLlmForText, getNowIso, hasAnyLlmProvider } from "@/src/lib/server/services/mtos-ai";
+import { getModelRouteForPrompt } from "@/src/lib/server/prompt-model-route";
 
 /**
  * The Post-Monthly Touch Notes document.
@@ -191,7 +192,7 @@ export async function generatePostTouchNotes(
 
   // A full touch document -- header, summary, a block per department, the health block -- against a
   // transcript and the whole prep bundle. The deck is the only MTOS answer that runs longer.
-  const { text, model } = await callLlmForText({ env, system, userText, maxTokens: 16000 });
+  const { text, model } = await callLlmForText({ env, system, userText, maxTokens: 16000, route: await getModelRouteForPrompt(env, "internal_notes_prompt") });
   const markdown = stripCodeFence(text);
   if (!markdown.trim()) {
     return { markdown: "", generatedAt, model, errorMessage: "The model returned empty post-meeting notes." };

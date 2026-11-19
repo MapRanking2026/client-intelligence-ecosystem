@@ -12,6 +12,7 @@ import { monthlyTouchPath } from "@/src/lib/server/firebase/collections";
 import { getFirebaseAdminDb } from "@/src/lib/server/firebase/admin";
 import { getServerEnv } from "@/src/lib/server/env";
 import { callLlmForJson, getNowIso, hasAnyLlmProvider, stripUndefinedDeep } from "@/src/lib/server/services/mtos-ai";
+import { getModelRouteForPrompt } from "@/src/lib/server/prompt-model-route";
 import { buildTouchEvidence } from "@/src/lib/server/services/live-call-guide-service";
 import { getPromptText } from "@/src/lib/server/prompt-store";
 import { presentationIdentity, withPresentationIdentity } from "./presentation-identity-service";
@@ -188,7 +189,7 @@ export async function generatePresentation(
 
   // A 20-slide deck with presenter notes on every slide is the largest single
   // answer MTOS asks for, and the thinking is charged to the same ceiling.
-  const result = await callLlmForJson({ env, system, userText, maxTokens: 32000 });
+  const result = await callLlmForJson({ env, system, userText, maxTokens: 32000, route: await getModelRouteForPrompt(env, "monthly_touch_presentation_prompt") });
   const parsed = presentationSchema.parse(result.data);
 
   const presentation: Presentation = {

@@ -7,6 +7,7 @@ import { monthlyTouchPath } from "@/src/lib/server/firebase/collections";
 import { getFirebaseAdminDb } from "@/src/lib/server/firebase/admin";
 import { getServerEnv } from "@/src/lib/server/env";
 import { callClaudeForJson, getNowIso, hasAnyLlmProvider, stripUndefinedDeep } from "@/src/lib/server/services/mtos-ai";
+import { getModelRouteForPrompt } from "@/src/lib/server/prompt-model-route";
 import { getPromptText } from "@/src/lib/server/prompt-store";
 import { legacyQaBlockedReason } from "@/src/lib/contracts/qc-legacy";
 
@@ -59,7 +60,7 @@ async function evaluateWithClaude(
 
   // A 7-category scorecard (score + notes each) plus summary ran past 1400 tokens
   // and truncated the JSON mid-array. Give it headroom so the parse doesn't fail.
-  return qaSchema.parse(await callClaudeForJson({ env, system, userText, maxTokens: 4000 }));
+  return qaSchema.parse(await callClaudeForJson({ env, system, userText, maxTokens: 4000, route: await getModelRouteForPrompt(env, "qa_evaluation_prompt") }));
 }
 
 export async function generateQaReview(context: TenantContext, touchId: string) {

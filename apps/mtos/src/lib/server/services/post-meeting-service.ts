@@ -24,6 +24,7 @@ import { getServerEnv } from "@/src/lib/server/env";
 import { getIntegrationConnection, getIntegrationCredentials } from "@/src/lib/server/integrations";
 import { splitTranscriptPayload } from "@/src/lib/server/services/meeting-transcript-service";
 import { callLlmForJson, getNowIso, hasAnyLlmProvider, stripUndefinedDeep } from "@/src/lib/server/services/mtos-ai";
+import { getModelRouteForPrompt } from "@/src/lib/server/prompt-model-route";
 import { getPromptText } from "@/src/lib/server/prompt-store";
 import { generatePostTouchNotes } from "@/src/lib/server/services/post-touch-notes-service";
 import { getAccountManagerIdentity } from "@/src/lib/server/services/user-service";
@@ -371,7 +372,7 @@ async function analyzeWithClaude(
   // The analysis emits a recap, up to 10 commitments, up to 8 draft tickets
   // (title + description + department each), plus a full client email subject
   // and body -- 1800 truncated the JSON mid-array, which then fails to parse.
-  const result = await callLlmForJson({ env, system: `${system}\n\n${CLIENT_CONTENT_RULE}
+  const result = await callLlmForJson({ env, route: await getModelRouteForPrompt(env, "meeting_transcript_analysis_prompt"), system: `${system}\n\n${CLIENT_CONTENT_RULE}
 Do not create a ticket for preparing or sending the standard Monthly Touch recap email: this workflow already generates and sends it. Estimate active effort per task scope, not elapsed waiting time. Simple email, invite or access follow-ups normally need 5–15 minutes, not an hour; leave unknown effort unset for AM review.`, userText, maxTokens: 8000 });
   // Normalize before validating so the model returning objects-as-commitments or
   // overshooting the item caps degrades gracefully instead of failing schema validation.

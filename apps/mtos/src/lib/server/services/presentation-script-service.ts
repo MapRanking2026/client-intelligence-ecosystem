@@ -9,6 +9,7 @@ import { getFirebaseAdminDb } from "@/src/lib/server/firebase/admin";
 import { monthlyTouchPath } from "@/src/lib/server/firebase/collections";
 import { getServerEnv } from "@/src/lib/server/env";
 import { callLlmForJson, getNowIso, hasAnyLlmProvider } from "@/src/lib/server/services/mtos-ai";
+import { getModelRouteForPrompt } from "@/src/lib/server/prompt-model-route";
 import { getPromptText } from "@/src/lib/server/prompt-store";
 import { getAccountManagerProfile } from "@/src/lib/server/services/user-service";
 import { presentationIdentity, withPresentationIdentity } from "./presentation-identity-service";
@@ -185,7 +186,7 @@ export async function generatePresenterScripts(
     JSON.stringify(presentation.slides.map(slideForScript), null, 2),
   ].join("\n");
 
-  const result = await callLlmForJson({ env, system, userText, maxTokens: 16000 });
+  const result = await callLlmForJson({ env, system, userText, maxTokens: 16000, route: await getModelRouteForPrompt(env, "monthly_touch_presentation_script_prompt") });
   const parsed = scriptSchema.parse(result.data);
 
   const byNumber = new Map(parsed.scripts.map((entry) => [entry.slide, entry.script]));

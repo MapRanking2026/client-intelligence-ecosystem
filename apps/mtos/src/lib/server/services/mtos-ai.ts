@@ -1,4 +1,5 @@
 import type { getServerEnv } from "@/src/lib/server/env";
+import type { ModelRoute } from "@/src/lib/server/model-router";
 
 export function getNowIso() {
   return new Date().toISOString();
@@ -207,6 +208,49 @@ function resolveChain(env: ServerEnv, preferred?: LlmProvider): LlmProvider[] {
   return configured;
 }
 
+interface LlmAttempt {
+  provider: LlmProvider;
+  apiKey: string;
+  model: string;
+}
+
+/**
+ * Build the ordered list of provider+model attempts. Without a route this is the
+ * default chain, one model per provider, exactly as before. With a route (see
+ * model-router.ts) the routed model goes first, then its configured fallback,
+ * then the default chain -- so routing can only add attempts, never remove the
+ * safety net. A route naming a provider with no API key is skipped.
+ */
+function resolveAttempts(
+  env: ServerEnv,
+  preferred?: LlmProvider,
+  route?: ModelRoute | null,
+): LlmAttempt[] {
+  const attempts: LlmAttempt[] = [];
+  const push = (provider: LlmProvider, model?: string) => {
+    const config = providerConfig(env, provider);
+    if (!config) {
+      return;
+    }
+    const resolvedModel = model || config.model;
+    if (attempts.some((entry) => entry.provider === provider && entry.model === resolvedModel)) {
+      return;
+    }
+    attempts.push({ provider, apiKey: config.apiKey, model: resolvedModel });
+  };
+
+  if (route) {
+    push(route.provider, route.model);
+    if (route.fallback) {
+      push(route.fallback.provider, route.fallback.model);
+    }
+  }
+  for (const provider of resolveChain(env, preferred)) {
+    push(provider);
+  }
+  return attempts;
+}
+
 async function callAnthropic(params: AdapterParams): Promise<string> {
   // No `temperature`. Anthropic removed the sampling parameters -- every current model rejects
   // temperature/top_p/top_k with a 400, which is what took this provider down with "`temperature`
@@ -395,6 +439,11 @@ interface CallLlmForJsonParams {
   temperature?: number;
   /** Move this provider to the front of the failover chain (e.g. a prompt's own provider). */
   preferredProvider?: LlmProvider;
+  /**
+   * Model route for the prompt being executed (getModelRouteForPrompt). When set,
+   * the routed model is tried first, then its fallback, then the default chain.
+   */
+  route?: ModelRoute | null;
 }
 
 export interface LlmJsonResult {
@@ -416,9 +465,9 @@ async function callLlmCore<T>(
   params: CallLlmForJsonParams,
   transform: (text: string) => T,
 ): Promise<{ data: T; provider: LlmProvider; model: string }> {
-  const { env, system, userText, maxTokens = 1400, temperature = 0.2, preferredProvider } = params;
+  const { env, system, userText, maxTokens = 1400, temperature = 0.2, preferredProvider, route } = params;
 
-  const chain = resolveChain(env, preferredProvider);
+  const chain = resolveAttempts(env, preferredProvider, route);
   if (!chain.length) {
     throw new Error(
       "No LLM provider is configured. Set ANTHROPIC_API_KEY, OPENAI_API_KEY, or GEMINI_API_KEY.",
@@ -428,11 +477,8 @@ async function callLlmCore<T>(
   const errors: string[] = [];
   const chainStartedAt = Date.now();
 
-  for (const provider of chain) {
-    const config = providerConfig(env, provider);
-    if (!config) {
-      continue;
-    }
+  for (const config of chain) {
+    const { provider } = config;
 
     const remaining = LLM_CHAIN_BUDGET_MS - (Date.now() - chainStartedAt);
     if (remaining < LLM_MIN_USEFUL_ATTEMPT_MS) {
@@ -500,6 +546,7 @@ interface CallClaudeForJsonParams {
   maxTokens?: number;
   temperature?: number;
   preferredProvider?: LlmProvider;
+  route?: ModelRoute | null;
 }
 
 /**

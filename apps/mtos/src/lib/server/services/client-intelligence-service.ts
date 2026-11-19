@@ -23,6 +23,7 @@ import { monthlyTouchPath } from "@/src/lib/server/firebase/collections";
 import { getFirebaseAdminDb } from "@/src/lib/server/firebase/admin";
 import { getIntegrationConnection, getIntegrationCredentials } from "@/src/lib/server/integrations";
 import { callLlmForJson, getNowIso, hasAnyLlmProvider, stripUndefinedDeep } from "@/src/lib/server/services/mtos-ai";
+import { getModelRouteForPrompt } from "@/src/lib/server/prompt-model-route";
 import { getAccountManagerIdentity } from "@/src/lib/server/services/user-service";
 import { getPromptText } from "@/src/lib/server/prompt-store";
 import {
@@ -262,7 +263,7 @@ async function generateClientHealthSuggestion(
     ),
   ].join("\n");
 
-  const { data, model } = await callLlmForJson({ env, system, userText, maxTokens: 3000 });
+  const { data, model } = await callLlmForJson({ env, system, userText, maxTokens: 3000, route: await getModelRouteForPrompt(env, "nps_client_health_prompt") });
 
   const suggestedNps = npsScore(data.suggestedNps);
   const ladder = npsReasonLadder(data.npsReasonsByScore);
@@ -327,7 +328,7 @@ export async function generateClientIntelligence(
     ),
   ].join("\n");
 
-  const { data, model } = await callLlmForJson({ env, system, userText, maxTokens: 6000 });
+  const { data, model } = await callLlmForJson({ env, system, userText, maxTokens: 6000, route: await getModelRouteForPrompt(env, "client_intelligence_dashboard_updater_prompt") });
 
   const report = str(data.report) || str(data.summary) || "No report was generated.";
   const factors = (data.factors ?? {}) as Record<string, unknown>;

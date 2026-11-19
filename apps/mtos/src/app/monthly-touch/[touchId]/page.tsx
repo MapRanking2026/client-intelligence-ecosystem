@@ -3,7 +3,7 @@ import { blockedTaskTitles } from "@/src/lib/contracts/client-content";
 import { canDeleteTestTouch } from "@/src/lib/contracts/touch-progress";
 import { StartNewMonthlyTouch } from "@/src/components/mtos/start-new-monthly-touch";
 import { GoogleMeetingPanel } from "@/src/components/mtos/google-meeting-panel";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { ArrowLeft, ClipboardCheck, ExternalLink, FileText, Sparkles } from "lucide-react";
@@ -260,6 +260,9 @@ export default async function MonthlyTouchRunSheetPage({
       ? STEP_FOR_STAGE[requestedView as RunSheetStage]
       : undefined;
   const step = resolveOpeningStep(progress, requestedStage || legacyStep);
+  // Follow-through is the working stage, including its recap editor, rather than a second
+  // landing page asking the AM to open the same stage again.
+  if (step === "follow") redirect(`/monthly-touch/${touch.id}/follow-through`);
   const view: RunSheetStage = STAGE_FOR_STEP[step];
   const profile = await getAccountManagerProfile(context);
   const resume = resumeNotice({

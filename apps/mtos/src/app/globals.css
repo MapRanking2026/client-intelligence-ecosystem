@@ -585,6 +585,20 @@ a { color: inherit; text-decoration: none; }
   background: color-mix(in srgb, var(--surface) 96%, transparent);
   backdrop-filter: blur(10px);
 }
+.follow-through-workspace [data-follow-section] { scroll-margin-top: calc(var(--topbar-h) + var(--follow-rail-height, 240px) + 16px); }
+.follow-section-nav { display:flex; gap:6px; margin-top:14px; padding-top:12px; border-top:1px solid var(--hair); overflow-x:auto; }
+.follow-section-nav > a, .follow-section-locked { display:inline-flex; flex-shrink:0; align-items:center; gap:7px; padding:7px 10px; border-radius:8px; font-size:0.78rem; color:var(--text-2); white-space:nowrap; }
+.follow-section-nav > a:hover { background:var(--surface-2); }
+.follow-section-nav > a[aria-current="location"] { color:var(--accent-ink); background:var(--accent-soft); font-weight:700; }
+.follow-through-workspace [data-follow-section] { scroll-margin-top:calc(var(--topbar-h) + var(--follow-rail-height, 240px) + 16px); }
+.follow-section-nav > a > span, .follow-section-locked > span { display:grid; place-items:center; width:20px; height:20px; border:1px solid var(--hair); border-radius:50%; font-size:0.7rem; }
+.follow-section-locked { opacity:0.5; }
+.follow-through-workspace .stage-rail > nav { overflow-x:auto; }
+.follow-through-workspace .stage-track { flex-wrap:nowrap; }
+.follow-through-workspace .recap-rich-toolbar { top:calc(var(--topbar-h) + var(--follow-rail-height, 240px) + 8px); }
+@media (min-width:1280px) {
+  .follow-through-workspace aside > .card { top:calc(var(--topbar-h) + var(--follow-rail-height, 240px) + 16px); }
+}
 /* Printing a brief should not leave the rail floating in the middle of page two. */
 @media print {
   .stage-rail { position: static; }

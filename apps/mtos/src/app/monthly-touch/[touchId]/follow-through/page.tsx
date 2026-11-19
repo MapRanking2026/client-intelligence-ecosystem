@@ -15,6 +15,8 @@ import { FollowThroughFinish } from "@/src/components/mtos/follow-through-finish
 import { FollowThroughItems } from "@/src/components/mtos/follow-through-items";
 import { FollowThroughNotes } from "@/src/components/mtos/follow-through-notes";
 import { FollowThroughRecap } from "@/src/components/mtos/follow-through-recap";
+import { FollowThroughNavigation } from "@/src/components/mtos/follow-through-navigation";
+import { TouchProgressRail } from "@/src/components/mtos/touch-progress-rail";
 import { FollowThroughTrackers } from "@/src/components/mtos/follow-through-trackers";
 import { SectionCard } from "@/src/components/mtos/section-card";
 import { resolveTenantContext } from "@/src/lib/auth/resolve-tenant-context";
@@ -27,6 +29,8 @@ import {
 import { getMonthlyTouchWorkspaceView } from "@/src/lib/server/services/monthly-touch-service";
 import { listAssignableMembers } from "@/src/lib/server/services/post-meeting-service";
 import { getAccountManagerProfile } from "@/src/lib/server/services/user-service";
+import { deriveRunSheetStage } from "@/src/lib/server/services/prep-readiness-service";
+import { isTouchStep, type TouchStep } from "@/src/lib/contracts/touch-progress";
 
 /**
  * Rendered per request, never prerendered.
@@ -79,15 +83,17 @@ export default async function FollowThroughPage({
   // and a time zone cannot be guessed from the server's.
   const profile = await getAccountManagerProfile(context);
   const checklist = followThroughChecklist(touch);
+  const stage = deriveRunSheetStage(touch);
+  const progress: TouchStep = isTouchStep(touch.progress) ? touch.progress : stage === "follow_through" ? "follow" : stage;
 
   return (
     <AppShell
-      title={`${client.name} — follow-through`}
+      title={client.name}
       subtitle="Everything the call commits us to, drafted for you to approve. Nothing is created in ClickUp, written to a tracker or sent to the client until you finish this screen."
     >
       <div className="mb-4 flex flex-wrap justify-between gap-2">
-        <Link href={`/monthly-touch/${touch.id}/summary`} className="ilink text-[0.8rem]">
-          Earlier post-meeting screen
+        <Link href="/monthly-touch" className="ilink text-[0.8rem]">
+          <ArrowLeft className="inline size-4" /> All Monthly Touches
         </Link>
         <StartNewMonthlyTouch
           touchId={touch.id}
@@ -95,10 +101,20 @@ export default async function FollowThroughPage({
           canDelete={canDeleteTestTouch(touch)}
         />
       </div>
+      <div className="follow-through-workspace">
+      <TouchProgressRail
+        touchId={touch.id}
+        progress={progress}
+        current="follow"
+        followThroughDueAt={touch.followThrough?.dueAt}
+        timeZone={profile.timeZone}
+      >
+        <FollowThroughNavigation confirmed={confirmed} hasNotes={hasNotes} canFinish={!legacyFiled} />
+      </TouchProgressRail>
       {legacyFiled ? (
         <p className="card mb-4">Follow-up was already filed from the earlier screen. Open it to review what was sent.</p>
       ) : null}
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_280px]">
+      <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1fr)_280px]">
         <div className="min-w-0">
       <LoomSupportingMaterials touch={touch} />
       {touch.noShow?.resolution === "loom" ? null : touch.postMeeting?.transcript && !touch.transcript ? (
@@ -110,6 +126,7 @@ export default async function FollowThroughPage({
           {...(touch.transcript ? { transcript: touch.transcript } : {})}
         />
       )}
+      <div id="score" data-follow-section>
       <SectionCard
         eyebrow="Step 1 of the follow-through"
         title="Score the account"
@@ -117,9 +134,10 @@ export default async function FollowThroughPage({
       >
         <FollowThroughGate autoAnalyze={hasTranscript && !legacyFiled} touchId={touch.id} clientName={client.name} {...(gate ? { gate } : {})} />
       </SectionCard>
+      </div>
 
       {confirmed ? (
-        <div id="notes" className="scroll-mt-20">
+        <div id="notes" data-follow-section>
         <SectionCard
           eyebrow="Step 2 of the follow-through"
           title="Post Monthly Touch Notes"
@@ -135,7 +153,7 @@ export default async function FollowThroughPage({
       ) : null}
 
       {confirmed && hasNotes ? (
-        <div id="tickets" className="scroll-mt-20">
+        <div id="tickets" data-follow-section>
         <SectionCard
           eyebrow="Step 3 of the follow-through"
           title="Tickets"
@@ -154,7 +172,7 @@ export default async function FollowThroughPage({
       ) : null}
 
       {confirmed && hasNotes ? (
-        <div id="trackers" className="scroll-mt-20">
+        <div id="trackers" data-follow-section>
         <SectionCard
           eyebrow="Step 4 of the follow-through"
           title="Tracker rows"
@@ -169,11 +187,11 @@ export default async function FollowThroughPage({
       ) : null}
 
       {confirmed && hasNotes ? (
-        <div id="recap" className="scroll-mt-20">
+        <div id="recap" data-follow-section>
         <SectionCard
           eyebrow="Step 5 of the follow-through"
           title="Client recap email"
-          subtitle="Built from the notes and the tickets you approved, in the same design as the agenda that went out before the call."
+          subtitle="Review and edit the recap from this Monthly Touch, approve the draft, then continue to Finish to process the follow-through. Saving here does not send the email."
         >
           <FollowThroughRecap
             touchId={touch.id}
@@ -184,7 +202,7 @@ export default async function FollowThroughPage({
       ) : null}
 
       {confirmed && hasNotes && !legacyFiled ? (
-        <div id="finish" className="scroll-mt-20">
+        <div id="finish" data-follow-section>
         <SectionCard
           eyebrow="Step 6 of the follow-through"
           title="Finish and process"
@@ -215,9 +233,10 @@ export default async function FollowThroughPage({
           {...(profile.timeZone ? { timeZone: profile.timeZone } : {})}
         />
       </div>
+      </div>
 
       <div className="mt-4">
-        <Link href={`/monthly-touch/${touch.id}`} className="btn btn-ghost btn-sm">
+        <Link href={`/monthly-touch/${touch.id}?stage=live`} className="btn btn-ghost btn-sm">
           <ArrowLeft />
           Back to the call
         </Link>

@@ -55,6 +55,7 @@ export function TouchProgressRail({
   timeZone,
   action,
   wideAction = false,
+  children,
 }: {
   touchId: string;
   /** The furthest step reached. Steps beyond it are locked. */
@@ -73,6 +74,7 @@ export function TouchProgressRail({
    */
   action?: ReactNode;
   wideAction?: boolean;
+  children?: ReactNode;
 }) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -136,7 +138,7 @@ export function TouchProgressRail({
                   body
                 ) : (
                   <Link
-                    href={`/monthly-touch/${touchId}?stage=${step}`}
+                    href={step === "follow" ? `/monthly-touch/${touchId}/follow-through` : `/monthly-touch/${touchId}?stage=${step}`}
                     className="flex flex-col"
                     style={{ color: "inherit" }}
                   >
@@ -159,6 +161,7 @@ export function TouchProgressRail({
       </div>
 
       {action && wideAction ? <div className="mt-3">{action}</div> : null}
+      {children}
 
       {deadline ? (
         <div className="mt-3 flex flex-wrap items-center gap-2">

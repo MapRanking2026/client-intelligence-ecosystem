@@ -87,7 +87,7 @@ const draft = buildRecapEmailDraft(source, notes, [
   ticket({ id: "t3", taskName: "Add the new service area", dueDate: "2026-11-21" }),
 ]);
 
-check("the subject names the call", draft.subject.includes("Mon, 2 November"));
+check("the subject follows the client recap template", draft.subject === "Monthly Touch Recap & Next Steps | Oakline Dental");
 check("one approved item makes one commitment", draft.facts.commitments.length === 1);
 check("it is the approved one", draft.facts.commitments[0].what === "Rebuild the Tempe service page");
 
@@ -101,7 +101,7 @@ check("firm client task dates stay internal", !draft.html.includes("by Fri 7 Nov
 
 check("the summary opens the email", draft.facts.intro === notes.summary);
 check("the goal is carried into the facts row", draft.facts.goalLabel === "40 booked implant consults a month");
-check("and into the closing line", draft.html.includes("All of it points at the same thing"));
+check("the goal appears in the business goals section", draft.html.includes("Business Goals &amp; Growth Targets") && draft.html.includes("40 booked implant consults a month"));
 
 // ---------------------------------------------------------------------------
 // Ship dates: real or absent, never guessed
@@ -131,10 +131,10 @@ check(
 // The design
 // ---------------------------------------------------------------------------
 
-check("the header says it is a recap", draft.html.includes("✅ Monthly check-in recap"));
-check("the facts row carries Met", draft.html.includes("🤝 Met"));
-check("and the next check-in", draft.html.includes("🗓️ Next check-in"));
-check("and the goal", draft.html.includes("🎯 Goal"));
+check("the header says it is a recap", draft.html.includes("Recap &amp; Next Steps"));
+check("the meeting date is shown", draft.html.includes(source.metLabel));
+check("and the next check-in", draft.html.includes(source.nextCheckInLabel));
+check("and the goal", draft.html.includes(notes.goalText));
 check("unfinished client asks are not rendered", !draft.html.includes("📋 B &middot; What we need from you"));
 check("unfinished team commitments are not rendered", !draft.html.includes("What Map Ranking will do"));
 check("the next check-in is a button when there is a link", draft.html.includes("https://calendar.google.com/event?eid=abc"));

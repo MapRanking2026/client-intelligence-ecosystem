@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { calendarSlotAvailable, type RescheduleAvailability } from "@/src/lib/contracts/no-show";
 import { readJsonResponse } from "@/src/lib/api/read-json-response";
 import "./reschedule-calendar.css";
@@ -14,6 +14,7 @@ const clock = (date: Date) => date.toLocaleTimeString("en-US", { hour: "numeric"
 
 export function RescheduleCalendar({ touchId, saving, submissionError, onConfirm, intent = "reschedule", durationMinutes = 60, eventDetails, view, onViewChange, onAvailability }: { touchId: string; saving: boolean; submissionError?: string; onConfirm: (scheduledAt: string) => Promise<void>; intent?: "reschedule" | "next-touch"; durationMinutes?: number; eventDetails?: React.ReactNode; view?: SharedCalendarView; onViewChange?: (next: SharedCalendarView) => void; onAvailability?: (data: RescheduleAvailability & Record<string, unknown>) => void }) {
   const [today] = useState(() => new Date());
+  const [now, setNow] = useState(() => Date.now());
   const [localDay, setDay] = useState(() => addDays(new Date(), intent === "next-touch" ? 28 : 1));
   const [localMonth, setMonth] = useState(() => { const initial = addDays(today, intent === "next-touch" ? 28 : 1); return new Date(initial.getFullYear(), initial.getMonth(), 1); });
   const [availability, setAvailability] = useState<RescheduleAvailability>();
@@ -25,7 +26,8 @@ export function RescheduleCalendar({ touchId, saving, submissionError, onConfirm
   const dialog = useRef<HTMLDialogElement>(null);
   const day = view?.day ? new Date(view.day + "T12:00:00") : localDay;
   const month = view?.month ? new Date(view.month + "T12:00:00") : localMonth;
-  const selected = onViewChange ? (view?.selected ? new Date(view.selected) : undefined) : localSelected;
+  const synchronized = Boolean(onViewChange);
+  const selected = useMemo(() => synchronized ? (view?.selected ? new Date(view.selected) : undefined) : localSelected, [synchronized, view, localSelected]);
   const fullDay = view?.fullDay ?? localFullDay;
   const select = (date?: Date) => { setSelected(date); onViewChange?.({ ...view, selected: date?.toISOString() }); };
   const changeMonth = (date: Date) => { setMonth(date); onViewChange?.({ ...view, month: dayKey(date) }); };
@@ -36,7 +38,7 @@ export function RescheduleCalendar({ touchId, saving, submissionError, onConfirm
         const response = await fetch(`/api/monthly-touches/${encodeURIComponent(touchId)}/${intent === "next-touch" ? "next-meeting?durationMinutes=" + durationMinutes : "no-show"}`, { signal: controller.signal });
         const result = await readJsonResponse<{ data?: RescheduleAvailability; error?: string }>(response);
         if (!response.ok || !result.data) throw new Error(result.error || "Calendar availability could not be loaded.");
-        if (!controller.signal.aborted) { setAvailability(result.data); onAvailability?.(result.data as RescheduleAvailability & Record<string, unknown>); setError(""); }
+        if (!controller.signal.aborted) { setAvailability(result.data); setNow(Date.now()); onAvailability?.(result.data as RescheduleAvailability & Record<string, unknown>); setError(""); }
       } catch (cause) { if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : "Calendar availability could not be loaded."); }
       finally { if (!controller.signal.aborted) setLoading(false); }
     }
@@ -59,7 +61,7 @@ export function RescheduleCalendar({ touchId, saving, submissionError, onConfirm
   const free = (date: Date) => {
     const current = availability?.currentBooking;
     if (current && date.getTime() !== Date.parse(current.start) && date.getTime() < Date.parse(current.end) && date.getTime() + durationMinutes * 60000 > Date.parse(current.start)) return false;
-    return Boolean(availability && (intent !== "next-touch" || availability.durationMinutes === durationMinutes) && calendarSlotAvailable(date.toISOString(), availability, Date.now()));
+    return Boolean(availability && (intent !== "next-touch" || availability.durationMinutes === durationMinutes) && calendarSlotAvailable(date.toISOString(), availability, now));
   };
   const changeDay = (date: Date) => { setDay(date); setMonth(new Date(date.getFullYear(), date.getMonth(), 1)); onViewChange?.({ ...view, day: dayKey(date), month: dayKey(new Date(date.getFullYear(), date.getMonth(), 1)) }); };
   const refresh = () => { setLoading(true); setError(""); setAvailability(undefined); setRevision((value) => value + 1); };

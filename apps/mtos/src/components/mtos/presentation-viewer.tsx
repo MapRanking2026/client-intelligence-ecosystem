@@ -365,7 +365,7 @@ export function PresentationViewer({
                 height: DECK.height,
               }}
             >
-              <PresentationSlideCanvas {...slideProps} slide={current} slideNumber={index + 1} bookingAction={!editing && index === count - 1 && (!isFullscreen || document.fullscreenElement === fullscreenRef.current) ? <NextTouchBookingControl touchId={touchId} /> : undefined} />
+              <PresentationSlideCanvas {...slideProps} slide={current} slideNumber={index + 1} bookingAction={!editing && index === count - 1 && !isFullscreen ? <NextTouchBookingControl touchId={touchId} /> : undefined} />
             </div>
           </div>
 

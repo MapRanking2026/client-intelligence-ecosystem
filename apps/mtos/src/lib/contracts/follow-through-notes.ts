@@ -468,16 +468,8 @@ export function notesBlockers(draft: NotesDraft): string[] {
     blockers.push("Write the meeting summary. It is the part the next person actually reads.");
   }
 
-  const brokenActions = draft.departments.flatMap((department) =>
-    department.actions
-      .filter((line) => actionLineIssues(line).some((issue) => !issue.includes("over ")))
-      .map((line) => `${department.department}: ${line.what.trim() || "an unnamed action"}`),
-  );
-  if (brokenActions.length) {
-    blockers.push(
-      `${brokenActions.length === 1 ? "An action line is" : `${brokenActions.length} action lines are`} missing what, who or when — ${brokenActions.join("; ")}.`,
-    );
-  }
+  // Department action lines are draft source material. The reviewed ticket forms own their
+  // validation; missing source-line details and draft counts must not block completion.
 
   const namelessClientAction = draft.clientActions.filter((item) => !item.what.trim()).length;
   if (namelessClientAction) {

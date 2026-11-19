@@ -846,7 +846,7 @@ function LiveDeckStage({ touchId, presentation, slides, index }: { touchId: stri
     observer.observe(element);
     return () => observer.disconnect();
   }, []);
-  return <div ref={host} className="live-deck-stage" style={{ aspectRatio: DECK.width / DECK.height }}><div style={{ width: DECK.width, height: DECK.height, transform: "scale(" + scale + ")", transformOrigin: "top left" }}><Slide presentation={presentation} slides={slides} index={index} /></div></div>;
+  return <div ref={host} className="live-deck-stage" style={{ aspectRatio: DECK.width / DECK.height }}><div style={{ width: DECK.width, height: DECK.height, transform: "scale(" + scale + ")", transformOrigin: "top left" }}><Slide touchId={touchId} presentation={presentation} slides={slides} index={index} /></div></div>;
 }
 
 export { formatClock };

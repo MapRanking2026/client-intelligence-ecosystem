@@ -87,6 +87,16 @@ const complete: FinishInputs = {
   recap,
 };
 
+// The reviewed ticket list, not the number/completeness of source note lines, owns the action gate.
+for (const count of [0, 1, 3, 5, 9]) {
+  check("reviewed tickets can finish at count " + count, finishBlockers({
+    ...complete,
+    notes: { ...notes, departments: [{ department: "SEO", clientFeedback: "", actions: Array.from({ length: 5 }, (_, index) => ({ id: "stale-" + index, what: "", team: "", due: "" })) }] },
+    items: Array.from({ length: count }, (_, index) => ({ ...item, id: "approved-" + index })),
+  }).length === 0);
+}
+check("a draft line removed from the reviewed tickets does not block", finishBlockers({ ...complete, notes: { ...notes, departments: [{ department: "SEO", clientFeedback: "", actions: [{ id: "ignored", what: "Draft only", team: "", due: "" }] }] }, items: [{ ...item, decision: "deleted" }] }).length === 0);
+
 // ---------------------------------------------------------------------------
 // The gate
 // ---------------------------------------------------------------------------
@@ -166,9 +176,9 @@ check(
   "there is no 'approve the notes' blocker",
   !finishBlockers(complete).some((line) => line.toLowerCase().includes("approve the notes")),
 );
-// But they do have to be usable.
+// Only the reviewed ticket forms are mandatory; old note lines are source material.
 check(
-  "notes with an ownerless action still block",
+  "ownerless draft notes do not block a complete approved ticket",
   finishBlockers({
     ...complete,
     notes: {
@@ -177,7 +187,7 @@ check(
         { department: "SEO", clientFeedback: "x", actions: [{ id: "a1", what: "Do it", team: "", due: "Fri" }] },
       ],
     },
-  }).length === 1,
+  }).length === 0,
 );
 
 // ---------------------------------------------------------------------------

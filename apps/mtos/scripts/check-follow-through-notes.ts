@@ -264,16 +264,12 @@ check(
   notesBlockers(draft({ summary: "  " })).some((line) => line.includes("meeting summary")),
 );
 check(
-  "an action with no owner blocks",
-  notesBlockers(
-    draft({ departments: [{ department: "SEO", clientFeedback: "x", actions: [act({ team: "" })] }] }),
-  ).length === 1,
+  "an incomplete draft action does not block notes completion",
+  notesBlockers(draft({ departments: [{ department: "SEO", clientFeedback: "x", actions: [act({ team: "", due: "" })] }] })).length === 0,
 );
 check(
-  "and the blocker names the department and the action",
-  notesBlockers(
-    draft({ departments: [{ department: "SEO", clientFeedback: "x", actions: [act({ team: "" })] }] }),
-  )[0].includes("SEO: Rebuild the Tempe service page"),
+  "five incomplete source lines do not create a completion quota",
+  notesBlockers(draft({ departments: [{ department: "SEO", clientFeedback: "", actions: Array.from({ length: 5 }, (_, index) => act({ id: "draft-" + index, what: "", team: "", due: "" })) }] })).length === 0,
 );
 
 // The soft budget stays soft: it is shown, never enforced.

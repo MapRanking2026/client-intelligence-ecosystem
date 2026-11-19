@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation";
 import { readJsonResponse } from "@/src/lib/api/read-json-response";
 import {
   GOAL_STATUSES,
-  actionLineIssues,
   hasMeetingNotes,
   notesBlockers,
   renderNotesMarkdown,
@@ -18,12 +17,10 @@ import {
 /**
  * Edit the summary once; task details are reviewed in the ticket forms below.
  *
- * The one exception is the three things `finishBlockers` will not let past without them, which no
+ * The exceptions are the client follow-up details `finishBlockers` will not let past without them, which no
  * other screen can supply:
  *
  *   - every client action needs a decision, because each one is a commitment in the recap email;
- *   - an action line needs a what, a team and a date, and the draft prompt deliberately leaves the
- *     date blank when the call did not establish one;
  *   - a pending item needs what is missing, who it is coming from and when to chase.
  *
  * Only the rows that are actually blocking are shown, so this stays a short list that empties
@@ -99,14 +96,6 @@ export function FollowThroughNotes({ touchId, notes, draftNote, autoPrepare = fa
   function editPendingItem(id: string, change: Partial<NotesDraft["pending"][number]>) {
     setDraft(current => current ? { ...current, pending: current.pending.map(item => item.id === id ? { ...item, ...change } : item) } : current);
   }
-  function editAction(id: string, change: Partial<NotesDraft["departments"][number]["actions"][number]>) {
-    setDraft(current => current ? {
-      ...current,
-      departments: current.departments.map(group => ({
-        ...group, actions: group.actions.map(action => action.id === id ? { ...action, ...change } : action),
-      })),
-    } : current);
-  }
   async function generate(manual = false) {
     setBusy("draft"); setError(""); setConfirmRedraft(false);
     try {
@@ -132,8 +121,7 @@ export function FollowThroughNotes({ touchId, notes, draftNote, autoPrepare = fa
   const undecided = (draft?.clientActions || []).filter(item => !item.decision).length;
   const changed = JSON.stringify(draft ?? null) !== JSON.stringify(notes ?? null);
   const blockers = draft ? notesBlockers(draft) : [];
-  const brokenActions = (draft?.departments || []).flatMap(group =>
-    group.actions.filter(action => actionLineIssues(action).length).map(action => ({ department: group.department, action })));
+
   const brokenPending = (draft?.pending || []).filter(item => !item.missing.trim() || !item.from.trim() || !item.reminderDate.trim());
   return <div className="grid gap-4">
     {error ? <p role="alert" style={{ color: "var(--risk)" }}>{error}</p> : null}
@@ -173,15 +161,7 @@ export function FollowThroughNotes({ touchId, notes, draftNote, autoPrepare = fa
             · {item.what.trim() || "Nothing written yet"}{item.due.trim() ? ` — by ${item.due.trim()}` : ""} <span className={`chip ${item.decision ? "good" : "watch"}`}>{item.decision || "no decision yet"}</span>
           </li>)}</ul>
         </section> : null}
-        {brokenActions.length ? <section className="card grid gap-2">
-          <div className="card-head">
-            <div className="card-title">Action lines that cannot be filed yet</div>
-            <span className="chip watch">{brokenActions.length === 1 ? "1 to finish" : `${brokenActions.length} to finish`}</span>
-          </div>
-          <ul className="grid gap-2">{brokenActions.map(({ department, action }) => <li key={action.id} className="text-sm" style={{ color: "var(--text-2)" }}>
-            · {department}: {action.what.trim() || "an unnamed action"} — {actionLineIssues(action).join(" ")}
-          </li>)}</ul>
-        </section> : null}
+        
         {brokenPending.length ? <section className="card grid gap-2">
           <div className="card-head">
             <div className="card-title">Pending items waiting on information</div>
@@ -225,22 +205,7 @@ export function FollowThroughNotes({ touchId, notes, draftNote, autoPrepare = fa
           <div className="md:col-span-2"><Decide label={`Client action ${index + 1} decision`} {...(item.decision ? { decision: item.decision } : {})} onDecide={next => editClientAction(item.id, { decision: next })} /></div>
         </div>)}
       </section> : null}
-      {brokenActions.length ? <section className="card grid gap-3">
-        <div className="card-head">
-          <div className="card-title">Action lines that cannot be filed yet</div>
-          <span className="chip watch">{brokenActions.length === 1 ? "1 to finish" : `${brokenActions.length} to finish`}</span>
-        </div>
-        <p className="muted text-sm">A date is missing whenever the call did not establish one, and the draft leaves it blank rather than inventing it. This is the promise the notes record — the ticket&rsquo;s own due date is set on the ticket.</p>
-        {brokenActions.map(({ department, action }, index) => <div key={action.id} className="grid gap-2">
-          <div className="eyebrow muted">{department}</div>
-          <label className="field">What we will do<textarea className="textarea" rows={2} aria-label={`Action ${index + 1}`} value={action.what} onChange={event => editAction(action.id, { what: event.target.value })} /></label>
-          <div className="grid gap-2 md:grid-cols-2">
-            <label className="field">Team<input className="input" aria-label={`Action ${index + 1} team`} value={action.team} onChange={event => editAction(action.id, { team: event.target.value })} /></label>
-            <label className="field">By when<input className="input" aria-label={`Action ${index + 1} due`} value={action.due} placeholder="YYYY-MM-DD, or what was promised" onChange={event => editAction(action.id, { due: event.target.value })} /></label>
-          </div>
-          <ul className="grid gap-1">{actionLineIssues(action).map(issue => <li key={issue} className="field-hint">{issue}</li>)}</ul>
-        </div>)}
-      </section> : null}
+      
       {brokenPending.length ? <section className="card grid gap-3">
         <div className="card-head">
           <div className="card-title">Pending items waiting on information</div>

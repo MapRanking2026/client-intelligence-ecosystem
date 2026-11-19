@@ -1,8 +1,9 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useState } from "react";
 import { Check, RefreshCw, Save, Trash2, X } from "lucide-react";
 
+import { RecapRichEditor } from "@/src/components/mtos/recap-rich-editor";
 import { readJsonResponse } from "@/src/lib/api/read-json-response";
 import {
   recapBlockers,
@@ -21,17 +22,6 @@ import {
  * re-drafting the notes does -- what they wrote to a client is the part worth protecting.
  */
 
-const TOOLBAR = [
-  { command: "bold", label: "B", title: "Bold" },
-  { command: "italic", label: "I", title: "Italic" },
-  { command: "underline", label: "U", title: "Underline" },
-  { command: "insertUnorderedList", label: "•", title: "Bulleted list" },
-  { command: "insertOrderedList", label: "1.", title: "Numbered list" },
-  { command: "removeFormat", label: "⌫", title: "Clear formatting" },
-  { command: "undo", label: "↶", title: "Undo" },
-  { command: "redo", label: "↷", title: "Redo" },
-];
-
 export function FollowThroughRecap({
   touchId,
   recap,
@@ -49,23 +39,6 @@ export function FollowThroughRecap({
   const [confirmRebuild, setConfirmRebuild] = useState(false);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
-
-  const bodyRef = useRef<HTMLDivElement | null>(null);
-  // Keyed on the html so a rebuild re-attaches a fresh node; otherwise the editor would keep
-  // showing the old body because `dataset.loaded` is already set on it.
-  // Read out of state before the callback closes over it: the React Compiler infers `state` as
-  // the dependency when the body reaches into it, which would re-attach on every keystroke.
-  const html = state?.html;
-  const attach = useCallback(
-    (node: HTMLDivElement | null) => {
-      bodyRef.current = node;
-      if (node && !node.dataset.loaded && html) {
-        node.innerHTML = html;
-        node.dataset.loaded = "1";
-      }
-    },
-    [html],
-  );
 
   const post = useCallback(
     async (body: Record<string, unknown>) => {
@@ -93,7 +66,6 @@ export function FollowThroughRecap({
       if (data?.recap) setState(data.recap);
       setBuildGaps(data?.blockingGaps || []);
       setMessage(data?.note || "");
-      if (bodyRef.current) delete bodyRef.current.dataset.loaded;
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "The recap could not be built.");
     } finally {
@@ -122,10 +94,6 @@ export function FollowThroughRecap({
       }
       // The stored HTML comes back sanitised, so the editor is left showing exactly what was kept
       // rather than the markup that went in.
-      if (bodyRef.current && data?.recap) {
-        bodyRef.current.innerHTML = data.recap.html;
-        bodyRef.current.dataset.loaded = "1";
-      }
       setMessage("Saved. You can keep editing.");
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "The recap was not saved.");
@@ -225,46 +193,8 @@ export function FollowThroughRecap({
         />
       </div>
 
-      {editable ? (
-        <>
-        <p className="muted text-[0.78rem]">
-          Every part of this email is yours to change — the subject, the wording of any section,
-          and the sections themselves. Rewrite, delete or add whatever this client needs; what you
-          save is exactly what they receive.
-        </p>
-        <div className="flex flex-wrap gap-1">
-          {TOOLBAR.map((button) => (
-            <button
-              key={button.command}
-              type="button"
-              className="icon-btn"
-              title={button.title}
-              onMouseDown={(event) => event.preventDefault()}
-              onClick={() => document.execCommand(button.command)}
-            >
-              {button.label}
-            </button>
-          ))}
-        </div>
-        </>
-      ) : null}
-
-      <div
-        ref={attach}
-        role="textbox"
-        aria-label="Recap email body"
-        aria-multiline="true"
-        contentEditable={editable}
-        suppressContentEditableWarning
-        onInput={() => {
-          const node = bodyRef.current;
-          if (node) {
-            setState((previous) => (previous ? { ...previous, html: node.innerHTML, edited: true } : previous));
-          }
-        }}
-        className="card"
-        style={{ padding: 24, background: "#EDF3FB", overflowWrap: "anywhere" }}
-      />
+      <p className="muted text-[0.78rem]">Select text to change its formatting, or click anywhere in the email to edit. Your formatting is kept when you save.</p>
+      <RecapRichEditor html={state.html} editable={editable} onChange={html => setState(previous => previous ? { ...previous, html, edited: true } : previous)} />
 
       {blockers.length ? (
         <div className="card">

@@ -139,8 +139,6 @@ export type SummaryBulletKey = (typeof SUMMARY_BULLETS)[number]["key"];
 export const ACTION_MAX_WORDS = 20;
 
 export interface ActionLine {
-  /** Responsible person explicitly identified in call evidence, when available. */
-  assignee?: string;
   /** Named owner explicitly established by the call; otherwise use department settings. */
   assignee?: string;
   id: string;

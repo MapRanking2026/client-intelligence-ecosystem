@@ -39,6 +39,11 @@
   --info: #2f6feb;  --info-bg: #e7effd;
   --violet: #6d5ae0; --violet-bg: #efecfb;
 
+  /* Text strength of each status colour. `--good` and friends are tuned to sit on their own
+     pale `-bg` chip; these are for coloured text on the PAGE, where the chip tint is not there
+     to carry it. Separating the two is what stopped status text washing out into the card. */
+  --good-ink: #09694a; --watch-ink: #8a5a06; --risk-ink: #a32424; --info-ink: #1c4fc0; --violet-ink: #5243c2;
+
   --teal-200: #7fd6c6; --teal-400: #0d9488; --teal-500: #0f766e;
   --ink-900: #0b1220;
 
@@ -76,6 +81,11 @@
   --risk: #f87171; --risk-bg: #2c1616;
   --info: #6aa1ff; --info-bg: #131f34;
   --violet: #8b7bf0; --violet-bg: #1e1b33;
+
+  /* Text strength of each status colour. `--good` and friends are tuned to sit on their own
+     pale `-bg` chip; these are for coloured text on the PAGE, where the chip tint is not there
+     to carry it. Separating the two is what stopped status text washing out into the card. */
+  --good-ink: #6ee7b7; --watch-ink: #fbd38d; --risk-ink: #fca5a5; --info-ink: #a5c4ff; --violet-ink: #c4b5fd;
   --teal-200: #7fe6d3; --teal-400: #16c19a; --teal-500: #12a082;
   --ink-900: #05221c;
   --sh-sm: 0 1px 2px rgba(0,0,0,0.4);
@@ -97,6 +107,88 @@
   --color-good: var(--good);
   --color-watch: var(--watch);
   --color-risk: var(--risk);
+}
+
+/* ----------------------------------------------------------------------------
+   TAILWIND'S OWN PALETTE, BOUND TO THESE TOKENS
+
+   Large parts of this app were written when it was dark-only, and they still say
+   `text-slate-200`, `text-emerald-100`, `bg-slate-900`. Those are fixed colours from
+   Tailwind's palette: near-white text, chosen to sit on a near-black page. The app is
+   light by default now, so every one of them renders white-ish text on a white-ish
+   card -- the "I can't read it" cards, including the Missed calls tile on the call
+   report.
+
+   Rewriting a thousand class names across two dozen files would be a large, risky diff
+   and would still leave the next one to be written wrong. Rebinding the palette fixes
+   all of them at once and keeps working: `text-slate-200` now means "the second-
+   strongest text colour of whichever theme is on", which is what it was always meant
+   to say, and it flips with the toggle like everything else.
+
+   The scale is read as INTENT, not as a fixed lightness:
+     50-500  text, from strongest to faintest   -> the --slate-* ladder
+     600     the faintest readable text         -> --slate-400
+     700-950 panel surfaces                     -> the --surface-* ladder
+   Each accent family maps to the status colour it stands for. 400/500 are left alone
+   where Tailwind uses them at low alpha for tints and hairlines, which work on either
+   background.
+---------------------------------------------------------------------------- */
+@theme inline {
+  --color-slate-50: var(--slate-100);
+  --color-slate-100: var(--slate-100);
+  --color-slate-200: var(--slate-200);
+  --color-slate-300: var(--slate-300);
+  --color-slate-400: var(--slate-400);
+  --color-slate-500: var(--slate-500);
+  --color-slate-600: var(--slate-400);
+  --color-slate-700: var(--surface-3);
+  --color-slate-800: var(--surface-2);
+  --color-slate-900: var(--surface);
+  --color-slate-950: var(--surface-0);
+
+  --color-emerald-50: var(--good-ink);
+  --color-emerald-100: var(--good-ink);
+  --color-emerald-200: var(--good-ink);
+  --color-emerald-300: var(--good);
+  --color-green-100: var(--good-ink);
+  --color-green-200: var(--good-ink);
+  --color-green-300: var(--good);
+  /* Ink on a solid emerald button: dark in both themes, because the button is bright in both. */
+  --color-emerald-950: var(--ink-900);
+
+  --color-rose-50: var(--risk-ink);
+  --color-rose-100: var(--risk-ink);
+  --color-rose-200: var(--risk-ink);
+  --color-rose-300: var(--risk);
+  --color-red-100: var(--risk-ink);
+  --color-red-200: var(--risk-ink);
+  --color-red-300: var(--risk);
+
+  --color-amber-50: var(--watch-ink);
+  --color-amber-100: var(--watch-ink);
+  --color-amber-200: var(--watch-ink);
+  --color-amber-300: var(--watch);
+  --color-yellow-100: var(--watch-ink);
+  --color-yellow-200: var(--watch-ink);
+
+  --color-sky-50: var(--info-ink);
+  --color-sky-100: var(--info-ink);
+  --color-sky-200: var(--info-ink);
+  --color-sky-300: var(--info);
+  --color-blue-100: var(--info-ink);
+  --color-blue-200: var(--info-ink);
+  --color-cyan-100: var(--info-ink);
+
+  --color-violet-100: var(--violet-ink);
+  --color-violet-200: var(--violet-ink);
+  --color-indigo-100: var(--violet-ink);
+  --color-indigo-200: var(--violet-ink);
+  --color-purple-100: var(--violet-ink);
+  --color-fuchsia-100: var(--violet-ink);
+  --color-fuchsia-200: var(--violet-ink);
+
+  --color-teal-100: var(--accent-ink);
+  --color-teal-200: var(--accent);
 }
 
 /* ---------- BASE ---------- */
@@ -784,3 +876,44 @@ a { color: inherit; text-decoration: none; }
 .live-stage-rail .stage-track{display:grid;grid-template-columns:repeat(5,minmax(0,1fr))}
 .live-stage-rail .stage-step{min-width:0}
 @media(max-width:600px){.live-stage-rail nav{overflow-x:auto;padding-bottom:4px}.live-stage-rail .stage-track{min-width:620px}.live-stage-rail .stage-step{padding:10px}}
+
+
+/* ----------------------------------------------------------------------------
+   WHITE AND BLACK ALPHA UTILITIES, BOUND TO THE THEME
+
+   The same dark-only history as the palette above, in the other direction: panels
+   drawn as `bg-white/4` with a `border-white/10` hairline, and `bg-black/20` wells.
+   On a light page a white veil over white is nothing at all, so those panels lost
+   their edges and anything white written on them vanished.
+
+   These are plain rules rather than `@theme` entries because the utilities bake the
+   alpha into the colour; the only way to reach them is by name. Unlayered CSS beats
+   Tailwind's layered utilities, so these win wherever they apply.
+
+   `text-white` is the careful one. On an element that also carries a background
+   utility it is white ON that background and must stay white, so those are excluded.
+   Three pages are genuinely dark whichever theme is on -- sign-in, sign-up and the
+   public privacy policy -- and they opt out with `.on-dark`.
+---------------------------------------------------------------------------- */
+.border-white\/6, .border-white\/8, .border-white\/10, .border-white\/12, .border-white\/16 { border-color: var(--hair); }
+.border-white\/20, .border-white\/25, .border-white\/30 { border-color: var(--hair-strong); }
+.bg-white\/4, .bg-white\/5, .bg-white\/6, .bg-white\/8, .bg-white\/10 { background-color: var(--surface-2); }
+.bg-black\/15, .bg-black\/20, .bg-black\/25, .bg-black\/30 { background-color: var(--surface-3); }
+
+.text-white:not([class*="bg-"]) { color: var(--text); }
+.text-white\/50, .text-white\/60, .text-white\/80 { color: var(--text-2); }
+
+/* The pages that are dark in both themes keep their own white. */
+.on-dark .text-white, .on-dark .text-white\/50, .on-dark .text-white\/60, .on-dark .text-white\/80 { color: #ffffff; }
+.on-dark .text-white\/50 { color: rgba(255,255,255,0.5); }
+.on-dark .text-white\/60 { color: rgba(255,255,255,0.6); }
+.on-dark .text-white\/80 { color: rgba(255,255,255,0.8); }
+.on-dark .border-white\/6, .on-dark .border-white\/8, .on-dark .border-white\/10, .on-dark .border-white\/12, .on-dark .border-white\/16 { border-color: rgba(255,255,255,0.12); }
+.on-dark .border-white\/20, .on-dark .border-white\/25, .on-dark .border-white\/30 { border-color: rgba(255,255,255,0.25); }
+.on-dark .bg-white\/4, .on-dark .bg-white\/5, .on-dark .bg-white\/6, .on-dark .bg-white\/8, .on-dark .bg-white\/10 { background-color: rgba(255,255,255,0.06); }
+.on-dark .bg-black\/15, .on-dark .bg-black\/20, .on-dark .bg-black\/25, .on-dark .bg-black\/30 { background-color: rgba(0,0,0,0.25); }
+/* ...and their own text ladder, which the rebinding above would otherwise turn to ink. */
+.on-dark .text-slate-50, .on-dark .text-slate-100, .on-dark .text-slate-200 { color: #e6eaf0; }
+.on-dark .text-slate-300 { color: #cbd3de; }
+.on-dark .text-slate-400 { color: #9aa6b6; }
+.on-dark .text-slate-500, .on-dark .text-slate-600 { color: #7b8798; }

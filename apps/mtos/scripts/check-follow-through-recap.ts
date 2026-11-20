@@ -38,6 +38,11 @@ const source: RecapEmailSource = {
   signoff: "Talk soon,\nAna\nMap Ranking",
   accountManagerName: "Ana",
   appUrl: "https://mtos.example.com",
+  // The body of the letter, written to the client. The internal summary below is not a
+  // substitute for it and is never allowed to become one; see the voice checks further down.
+  narrative: [
+    "October was steady for you, and the Tempe page is the one piece I want to move along this month.",
+  ],
   wins: [
     { what: "New Tempe landing page", shipped: "14 October" },
     { what: "Review responses caught up", shipped: "" },
@@ -99,7 +104,42 @@ check("every client action becomes an ask", draft.facts.asks.length === 2);
 check("tentative client task dates stay internal", !draft.html.includes("(we said roughly)"));
 check("firm client task dates stay internal", !draft.html.includes("by Fri 7 Nov"));
 
-check("the summary opens the email", draft.facts.intro === notes.summary);
+// The body is the letter the model wrote, never the internal meeting summary. That summary is
+// written about the client in the third person for the next AM to read; sending it to the client
+// is how "Vivian Song took the call from the front desk with many interruptions" reached an inbox.
+check("the letter body is what the client reads", draft.html.includes("October was steady for you"));
+check("the internal summary never becomes the body", !draft.html.includes(notes.summary));
+check("and it is not quietly kept as the intro either", draft.facts.intro === "");
+
+const reportedAbout = buildRecapEmailDraft(
+  {
+    ...source,
+    contactName: "Mara Oakes",
+    narrative: [
+      "Mara Oakes took the call from the front desk with many interruptions.",
+      "Ana Delgado shared strong ranking gains on every tracked keyword.",
+      "She had seen no change in the tool, but said new patients are up.",
+      "Your Tempe page goes live this month.",
+    ],
+  },
+  notes,
+  [ticket({ decision: "approved" })],
+);
+check(
+  "a paragraph about the reader is dropped",
+  !reportedAbout.html.includes("took the call from the front desk"),
+);
+check(
+  "so is one reporting on them in the third person",
+  !reportedAbout.html.includes("had seen no change in the tool"),
+);
+check("and the one addressed to them survives", reportedAbout.html.includes("Your Tempe page goes live"));
+
+const noBody = buildRecapEmailDraft({ ...source, narrative: [] }, notes, [ticket({ decision: "approved" })]);
+check(
+  "an email with no body is a blocking gap rather than a draft that looks finished",
+  noBody.blockingGaps.some((gap) => gap.includes("body of this email has not been written")),
+);
 check("the goal is carried into the facts row", draft.facts.goalLabel === "40 booked implant consults a month");
 check("the goal appears in the business goals section", draft.html.includes("Business Goals &amp; Growth Targets") && draft.html.includes("40 booked implant consults a month"));
 
@@ -107,12 +147,15 @@ check("the goal appears in the business goals section", draft.html.includes("Bus
 // Ship dates: real or absent, never guessed
 // ---------------------------------------------------------------------------
 
-check("a win with a date says when it shipped", draft.html.includes("shipped 14 October"));
-check("a win without one says nothing rather than guessing", draft.html.includes("Review responses caught up"));
+// The Completed Work list stands in for the body when there is no written body; where the letter
+// itself covers the month, the same work read twice is what made these emails feel like reports.
+check("a win with a date says when it shipped", noBody.html.includes("shipped 14 October"));
+check("a win without one says nothing rather than guessing", noBody.html.includes("Review responses caught up"));
 check(
   "and no vague filler is invented for it",
-  !draft.html.toLowerCase().includes("shipped recently") && !draft.html.toLowerCase().includes("shipped soon"),
+  !noBody.html.toLowerCase().includes("shipped recently") && !noBody.html.toLowerCase().includes("shipped soon"),
 );
+check("a written letter is not followed by the same work as a list", !draft.html.includes("Completed Work"));
 
 const undatedCommitment = buildRecapEmailDraft(source, notes, [
   ticket({ decision: "approved", dueDate: undefined }),

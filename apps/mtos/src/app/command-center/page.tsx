@@ -50,14 +50,17 @@ export const dynamic = "force-dynamic";
  * replaced is still readable at `/legacy`, and the old address still answers (see the alias there).
  */
 
-function formatTime(date: Date | null): string {
+// Every time on this page is read in the AM's own zone, which the view carries. Left to the
+// server's zone a 9am call in Los Angeles is printed as 5pm, and the greeting above it would
+// disagree with the clock in the room.
+function formatTime(date: Date | null, timeZone: string): string {
   if (!date) return "no time set";
-  return new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit" }).format(date);
+  return new Intl.DateTimeFormat("en-US", { timeZone, hour: "numeric", minute: "2-digit" }).format(date);
 }
 
-function formatDay(date: Date | null): string {
+function formatDay(date: Date | null, timeZone: string): string {
   if (!date) return "no date set";
-  return new Intl.DateTimeFormat("en-US", { weekday: "short", month: "short", day: "numeric" }).format(date);
+  return new Intl.DateTimeFormat("en-US", { timeZone, weekday: "short", month: "short", day: "numeric" }).format(date);
 }
 
 function Queue({
@@ -167,6 +170,7 @@ export default async function CommandCenterPage() {
 
   const {
     greeting,
+    timeZone,
     today,
     todaysCalls,
     prepDueWithin48h,
@@ -187,7 +191,7 @@ export default async function CommandCenterPage() {
     {
       label: "Calls today",
       value: String(todaysCalls.length),
-      sub: todaysCalls.length ? `first at ${formatTime(todaysCalls[0].scheduledAt)}` : "nothing scheduled",
+      sub: todaysCalls.length ? `first at ${formatTime(todaysCalls[0].scheduledAt, timeZone)}` : "nothing scheduled",
       icon: <Phone />,
     },
     {
@@ -221,7 +225,7 @@ export default async function CommandCenterPage() {
             <Sparkles />
             <span>
               Your day ·{" "}
-              {new Intl.DateTimeFormat("en-US", { weekday: "long", month: "long", day: "numeric" }).format(today)}
+              {new Intl.DateTimeFormat("en-US", { timeZone, weekday: "long", month: "long", day: "numeric" }).format(today)}
             </span>
           </div>
           <h1 className="h1 mt-3.5">
@@ -280,7 +284,7 @@ export default async function CommandCenterPage() {
               <TouchRow
                 key={entry.touch.id}
                 entry={entry}
-                detail={`${formatTime(entry.scheduledAt)} · ${entry.client.industry}`}
+                detail={`${formatTime(entry.scheduledAt, timeZone)} · ${entry.client.industry}`}
               />
             ))}
           </Queue>
@@ -296,7 +300,7 @@ export default async function CommandCenterPage() {
               <TouchRow
                 key={entry.touch.id}
                 entry={entry}
-                detail={`${formatDay(entry.scheduledAt)} at ${formatTime(entry.scheduledAt)}`}
+                detail={`${formatDay(entry.scheduledAt, timeZone)} at ${formatTime(entry.scheduledAt, timeZone)}`}
               />
             ))}
           </Queue>
@@ -312,7 +316,7 @@ export default async function CommandCenterPage() {
               <TouchRow
                 key={entry.touch.id}
                 entry={entry}
-                detail={`met ${formatDay(entry.scheduledAt)} · ${
+                detail={`met ${formatDay(entry.scheduledAt, timeZone)} · ${
                   entry.touch.postMeeting?.status === "draft_ready"
                     ? "drafts are waiting for your decisions"
                     : "nothing captured yet"
@@ -361,7 +365,7 @@ export default async function CommandCenterPage() {
               <TouchRow
                 key={entry.touch.id}
                 entry={entry}
-                detail={`graded ${entry.touch.qaReview?.overallGrade ?? "—"} · met ${formatDay(entry.scheduledAt)}`}
+                detail={`graded ${entry.touch.qaReview?.overallGrade ?? "—"} · met ${formatDay(entry.scheduledAt, timeZone)}`}
               />
             ))}
           </Queue>
@@ -414,7 +418,7 @@ export default async function CommandCenterPage() {
                 <TouchRow
                   key={entry.touch.id}
                   entry={entry}
-                  detail={`${formatDay(entry.scheduledAt)} at ${formatTime(entry.scheduledAt)}`}
+                  detail={`${formatDay(entry.scheduledAt, timeZone)} at ${formatTime(entry.scheduledAt, timeZone)}`}
                 />
               ))
             )}

@@ -69,7 +69,16 @@ export function healthFromScore(score: number | null | undefined): HealthValue |
 // Field descriptions, shared by the editor and the diff
 // ---------------------------------------------------------------------------
 
-export type FieldKind = "text" | "longText" | "date" | "select" | "multi" | "readonly";
+/**
+ * How a field is edited.
+ *
+ * `person` is a text field with a roster behind it. The names in these columns have to match
+ * the people in ClickUp exactly -- a row assigned to "Fran" or "francisco q" is a row nobody is
+ * assigned to -- and typing a name from memory is how that happens. The roster is offered as a
+ * list and the stored value is kept even when it is not on it, because a name ClickUp gave us
+ * that this app cannot see is still the right answer.
+ */
+export type FieldKind = "text" | "longText" | "date" | "select" | "multi" | "person" | "readonly";
 
 export interface TrackerField<TRow> {
   key: keyof TRow & string;
@@ -82,9 +91,9 @@ export interface TrackerField<TRow> {
 export const HEALTH_TRACKER_FIELDS: TrackerField<HealthTrackerRow>[] = [
   { key: "clientName", label: "Client Name", kind: "text" },
   { key: "startDate", label: "Start date", kind: "date" },
-  { key: "assignee", label: "Assignee", kind: "text" },
+  { key: "assignee", label: "Assignee", kind: "person" },
   { key: "clientType", label: "Client Type", kind: "select", options: CLIENT_TYPES },
-  { key: "accountManager", label: "Account Manager", kind: "text" },
+  { key: "accountManager", label: "Account Manager", kind: "person" },
   { key: "nps", label: "NPS", kind: "readonly" },
   { key: "status", label: "Status", kind: "text" },
   { key: "caseStatus", label: "Case Status", kind: "select", options: CASE_STATUS_VALUES },
@@ -99,7 +108,7 @@ export const HEALTH_TRACKER_FIELDS: TrackerField<HealthTrackerRow>[] = [
 ];
 
 export const RISK_REGISTER_FIELDS: TrackerField<RiskRegisterEntry>[] = [
-  { key: "accountManager", label: "Assignee", kind: "text" },
+  { key: "accountManager", label: "Assignee", kind: "person" },
   { key: "clientType", label: "Client Type", kind: "select", options: CLIENT_TYPES },
   { key: "caseStatus", label: "Case Status", kind: "text" },
   { key: "dateFlagged", label: "Date Flagged", kind: "date" },
@@ -113,7 +122,7 @@ export const RISK_REGISTER_FIELDS: TrackerField<RiskRegisterEntry>[] = [
   { key: "riskTier", label: "Risk Tier", kind: "text" },
   { key: "primaryCategory", label: "Primary Category", kind: "text" },
   { key: "nextAction", label: "Next Action", kind: "text" },
-  { key: "nextActionOwner", label: "Next Action Owner", kind: "text" },
+  { key: "nextActionOwner", label: "Next Action Owner", kind: "person" },
   { key: "dueDate", label: "Due date", kind: "date" },
   { key: "lastMonthlyTouch", label: "Last Client Touchpoint", kind: "date" },
   { key: "latestComments", label: "Latest comment", kind: "longText" },
@@ -121,7 +130,7 @@ export const RISK_REGISTER_FIELDS: TrackerField<RiskRegisterEntry>[] = [
 
 export const STAKEHOLDER_FIELDS: TrackerField<StakeholderMapEntry>[] = [
   { key: "clientName", label: "Client Name", kind: "text" },
-  { key: "assignee", label: "Assignee", kind: "text" },
+  { key: "assignee", label: "Assignee", kind: "person" },
   { key: "clientType", label: "Client Type", kind: "select", options: CLIENT_TYPES },
   { key: "services", label: "Services", kind: "multi" },
   { key: "role", label: "Role / Title", kind: "text" },

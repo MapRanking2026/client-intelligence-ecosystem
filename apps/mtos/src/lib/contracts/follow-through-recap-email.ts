@@ -1,4 +1,5 @@
 import { knownContactName } from "@/src/lib/contracts/recap-contact";
+import { notWrittenToTheClient } from "@/src/lib/contracts/recap-client-content";
 import { emailSignatureHtml, emailSignatureLines, sanitizeAgendaEmailHtml } from "@/src/lib/contracts/agenda-email";
 import {
   approvedItems,
@@ -210,6 +211,26 @@ export function buildRecapEmailDraft(
     ? `${source.appUrl.replace(/\/+$/, "")}/brand/mapranking-mark.png`
     : "";
 
+  /**
+   * The body of the letter, and nothing that is not a letter.
+   *
+   * The internal meeting summary used to be the fallback here, so a touch whose narrative
+   * paragraphs failed verification sent the client a third-person account of their own call --
+   * "Vivian Song took the call from the front desk with many interruptions". That is a true
+   * sentence in the notes and an unsendable one in an email, so there is no longer a path from
+   * the notes into the body: anything that does not read as written TO this client is dropped,
+   * and an empty body becomes a gap the AM has to fill rather than a draft that looks finished
+   * and is not.
+   */
+  const names = { contactName: source.contactName, accountManagerName: source.accountManagerName };
+  const letterBody = (source.narrative || []).filter((paragraph) => !notWrittenToTheClient(paragraph, names));
+  const letterOverview = notWrittenToTheClient(source.overview || "", names) ? "" : (source.overview || "").trim();
+  if (!letterBody.length && !letterOverview) {
+    gaps.push(
+      "The body of this email has not been written. Say in a paragraph or two what the month looked like and what happens next, addressed to the client.",
+    );
+  }
+
   const facts: RecapEmailFacts = {
     businessName: source.businessName,
     contactFirstName: firstName(knownContactName(source.contactName)),
@@ -217,9 +238,9 @@ export function buildRecapEmailDraft(
     nextCheckInLabel: source.nextCheckInLabel,
     nextCheckInUrl: source.nextCheckInUrl,
     goalLabel: notes.goalText.trim(),
-    intro: source.overview?.trim() || notes.summary.trim().split(/(?<=[.!?])\s+(?=[A-Z])/).slice(0, 3).join("\n\n"),
+    intro: letterOverview,
     highlights: source.highlights,
-    narrative: source.narrative,
+    narrative: letterBody,
     locationTargets: source.locationTargets,
     discussionTopics: source.discussionTopics,
     goalTargets: source.goalTargets,

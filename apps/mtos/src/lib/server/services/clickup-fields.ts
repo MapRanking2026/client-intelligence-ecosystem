@@ -257,6 +257,66 @@ export async function updateTaskNative(
   }
 }
 
+/**
+ * One stored custom-field value as the text a person would read.
+ *
+ * Every caller used to do `String(raw)`, which is right for text and wrong for the two field
+ * types that matter most on the Health Tracker: a date comes back as epoch milliseconds, so the
+ * Start date read as "1760918400000" and a date input showed nothing at all; a people field comes
+ * back as an array of user objects, so the Assignee read as "[object Object]". Both looked like
+ * empty columns, which is why the row arrived asking the AM to fill in what ClickUp already knew.
+ *
+ * Returns undefined rather than "" for an empty value, so a caller can tell "ClickUp has nothing
+ * here" from "ClickUp has an empty string here" and leave the field genuinely blank.
+ */
+export function fieldValueText(field: ClickUpCustomField, raw: unknown): string | undefined {
+  if (raw === undefined || raw === null || raw === "") return undefined;
+
+  if (field.type === "date") {
+    // ClickUp sends milliseconds, as a number or as a string of digits. Rendered in UTC: the
+    // value it stores is a day, and shifting it into a local zone moves that day by one.
+    const ms = typeof raw === "number" ? raw : Number(String(raw).trim());
+    if (!Number.isFinite(ms) || ms === 0) return undefined;
+    const date = new Date(ms);
+    return Number.isNaN(date.getTime()) ? undefined : date.toISOString().slice(0, 10);
+  }
+
+  if (field.type === "users") {
+    const people = (Array.isArray(raw) ? raw : [raw])
+      .map((entry) => {
+        if (typeof entry === "string") return entry.trim();
+        const person = entry as { username?: string; name?: string; email?: string } | null;
+        return (person?.username || person?.name || person?.email || "").trim();
+      })
+      .filter(Boolean);
+    return people.length ? people.join(", ") : undefined;
+  }
+
+  if (field.options.length) {
+    const names = (Array.isArray(raw) ? raw : [raw])
+      .map((entry) => {
+        const id = typeof entry === "string" ? entry : (entry as { id?: string })?.id;
+        const byId = field.options.find((option) => option.id === id)?.name;
+        if (byId) return byId;
+        // Some older dropdowns store the option's index rather than its id.
+        if (typeof entry === "number" && field.options[entry]) return field.options[entry].name;
+        return typeof entry === "string" ? entry.trim() : "";
+      })
+      .filter(Boolean);
+    return names.length ? names.join(", ") : undefined;
+  }
+
+  if (typeof raw === "object") {
+    // A shape this does not know is reported as nothing rather than as "[object Object]": an
+    // empty field is honest, a stringified object is a value the AM would have to delete.
+    const value = (raw as { value?: unknown }).value;
+    return typeof value === "string" && value.trim() ? value.trim() : undefined;
+  }
+
+  const text = String(raw).trim();
+  return text || undefined;
+}
+
 /** Read a task's current custom-field values, keyed by field id. Never throws. */
 export async function getTaskFieldValues(taskId: string, authHeader: string): Promise<Map<string, unknown>> {
   try {

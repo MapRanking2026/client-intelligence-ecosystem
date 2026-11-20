@@ -326,6 +326,60 @@ export interface RenderOptions {
   ticketLinks?: Record<string, string>;
   /** The "Tickets created" list at the bottom, once there is one. */
   createdTickets?: { title: string; url: string }[];
+  /**
+   * The approved tickets, which ARE section 3 once they exist.
+   *
+   * An action line and the ticket drafted from it are the same commitment written twice, and the
+   * ticket is the one the AM actually reviewed: they renamed it, routed it, gave it an owner and
+   * a date on the ticket form. Filing the draft line instead would put the pre-review wording in
+   * the Client's Book and leave the ticket list underneath it saying something slightly different.
+   *
+   * So when this is passed the section is built from it, and the separate "Tickets created" list
+   * is dropped -- it would be the same set of rows a second time.
+   */
+  ticketActions?: TicketAction[];
+}
+
+/** One approved ticket, as the action item it becomes in the filed notes. */
+export interface TicketAction {
+  /** The department it was routed to. Tickets without one are grouped under "Unassigned". */
+  department?: string;
+  /** The ticket's name as approved. */
+  what: string;
+  /** Who it was assigned to. */
+  owner?: string;
+  /** Its due date, as the ticket carries it. */
+  due?: string;
+  /** The ClickUp task, once it exists. Absent when the ticket was not filed. */
+  url?: string;
+  /** True when it was approved but ClickUp did not take it -- said rather than quietly linkless. */
+  notFiled?: boolean;
+}
+
+/** The department heading a ticket sits under. */
+export const NO_DEPARTMENT = "Unassigned";
+
+/** One ticket as its line in section 3: what, who, when, and the ticket itself. */
+export function formatTicketAction(ticket: TicketAction): string {
+  const parts = [`**Action:** ${ticket.what.trim()}`];
+  if (ticket.owner?.trim()) parts.push(ticket.owner.trim());
+  if (ticket.due?.trim()) parts.push(ticket.due.trim());
+  let line = parts.join(" — ");
+  if (ticket.url) line += ` — [ticket](${ticket.url})`;
+  else if (ticket.notFiled) line += " _(approved; not filed in ClickUp)_";
+  return line;
+}
+
+/** The tickets grouped under their departments, in the order they were approved. */
+export function ticketsByDepartment(tickets: TicketAction[]): { department: string; tickets: TicketAction[] }[] {
+  const groups: { department: string; tickets: TicketAction[] }[] = [];
+  for (const ticket of tickets) {
+    const department = ticket.department?.trim() || NO_DEPARTMENT;
+    const group = groups.find((candidate) => candidate.department === department);
+    if (group) group.tickets.push(ticket);
+    else groups.push({ department, tickets: [ticket] });
+  }
+  return groups;
 }
 
 /**
@@ -387,18 +441,50 @@ export function renderNotesMarkdown(draft: NotesDraft, options: RenderOptions = 
 
   push("## 3 · Action items by department");
   push();
-  if (!draft.departments.length) {
-    push("No department actions came out of this call.");
-    push();
-  }
-  for (const department of draft.departments) {
-    push(`### ${department.department}`);
-    push();
-    if (department.clientFeedback.trim()) {
-      push(`- **Client feedback:** ${department.clientFeedback.trim()}`);
+  if (options.ticketActions) {
+    // The tickets are the actions. What the client said still comes from the notes, matched to the
+    // department it was said about, because that sentence is the reason the ticket exists and it
+    // lives nowhere on the ticket form.
+    const groups = ticketsByDepartment(options.ticketActions);
+    if (!groups.length) {
+      push("No tickets came out of this call.");
+      push();
     }
-    for (const line of department.actions) action(line);
-    push();
+    for (const group of groups) {
+      push(`### ${group.department}`);
+      push();
+      const feedback = draft.departments.find(
+        (candidate) => candidate.department.trim().toLowerCase() === group.department.trim().toLowerCase(),
+      )?.clientFeedback.trim();
+      if (feedback) push(`- **Client feedback:** ${feedback}`);
+      for (const ticket of group.tickets) push(`- ${formatTicketAction(ticket)}`);
+      push();
+    }
+    // A department the client raised that produced no approved ticket is still worth recording:
+    // "we talked about SEO and committed to nothing" is a fact the next AM needs.
+    for (const department of draft.departments) {
+      if (!department.clientFeedback.trim()) continue;
+      if (groups.some((group) => group.department.trim().toLowerCase() === department.department.trim().toLowerCase())) continue;
+      push(`### ${department.department}`);
+      push();
+      push(`- **Client feedback:** ${department.clientFeedback.trim()}`);
+      push("- No ticket came out of this one.");
+      push();
+    }
+  } else {
+    if (!draft.departments.length) {
+      push("No department actions came out of this call.");
+      push();
+    }
+    for (const department of draft.departments) {
+      push(`### ${department.department}`);
+      push();
+      if (department.clientFeedback.trim()) {
+        push(`- **Client feedback:** ${department.clientFeedback.trim()}`);
+      }
+      for (const line of department.actions) action(line);
+      push();
+    }
   }
 
   if (draft.healthRisk) {
@@ -436,7 +522,8 @@ export function renderNotesMarkdown(draft: NotesDraft, options: RenderOptions = 
   }
   push();
 
-  if (options.createdTickets?.length) {
+  // Only when section 3 was NOT built from the tickets; otherwise this is the same list twice.
+  if (!options.ticketActions && options.createdTickets?.length) {
     push("## Tickets created");
     push();
     for (const ticket of options.createdTickets) {

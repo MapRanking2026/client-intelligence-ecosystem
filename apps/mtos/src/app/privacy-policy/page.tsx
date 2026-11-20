@@ -29,7 +29,7 @@ function Section({ eyebrow, title, children }: { eyebrow: string; title: string;
 
 export default function PrivacyPolicyPage() {
   return (
-    <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,#223554_0%,#08111e_34%,#050a12_100%)] text-slate-100">
+    <div className="on-dark min-h-screen bg-[radial-gradient(circle_at_top_left,#223554_0%,#08111e_34%,#050a12_100%)] text-white">
       <div className="mx-auto max-w-3xl px-5 py-8 md:py-12">
         <main className="space-y-6 rounded-[36px] border border-white/8 bg-[linear-gradient(180deg,rgba(7,13,23,0.88),rgba(6,10,18,0.94))] p-5 shadow-[0_60px_140px_rgba(3,6,14,0.5)] md:p-8">
           <header className="rounded-[28px] border border-white/8 bg-white/5 p-6 md:p-7">

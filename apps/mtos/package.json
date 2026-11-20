@@ -101,7 +101,11 @@
     "check:email-signature": "tsx scripts/check-email-signature.ts",
     "check:agenda-match": "tsx scripts/check-agenda-match.ts",
     "check:presentation-facts": "tsx scripts/check-presentation-facts.ts",
-    "check:score-suggestion": "node scripts/check-score-suggestion.cjs"
+    "check:score-suggestion": "node scripts/check-score-suggestion.cjs",
+    "check:notes-ticket-actions": "tsx scripts/check-notes-ticket-actions.ts",
+    "check:tracker-prefill": "tsx scripts/check-tracker-prefill.ts",
+    "check:greeting": "tsx scripts/check-greeting.ts",
+    "check:theme-contrast": "node scripts/check-theme-contrast.cjs"
   },
   "dependencies": {
     "@cie/contracts": "*",

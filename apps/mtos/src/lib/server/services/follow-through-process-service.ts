@@ -14,7 +14,7 @@ import {
   type StepResult,
   type StepStatus,
 } from "@/src/lib/contracts/follow-through-finish";
-import { renderNotesMarkdown, type NotesDraft } from "@/src/lib/contracts/follow-through-notes";
+import { renderNotesMarkdown, type NotesDraft, type TicketAction } from "@/src/lib/contracts/follow-through-notes";
 import {
   approvedItems,
   itemTitle,
@@ -309,20 +309,31 @@ async function fileNotes(state: StepContext): Promise<StepResult> {
     clientActions: approvedClientActions(state.notes.clientActions),
   };
 
-  const ticketLinks: Record<string, string> = {};
-  for (const item of state.items) {
-    if (item.actionId && state.ticketUrls[item.id]) ticketLinks[item.actionId] = state.ticketUrls[item.id];
-  }
-  const createdTickets = approvedItems(state.items)
-    .filter((item) => state.ticketUrls[item.id])
-    .map((item) => ({ title: itemTitle(item), url: state.ticketUrls[item.id] }));
+  // Section 3 is the approved tickets themselves, in the form the AM approved them in. The
+  // pending ones are left out of it: they already have section 6, and a ticket nobody may start
+  // yet is not an action item -- listing it in both places reads as two commitments.
+  const pendingIds = new Set(state.notes.pending.map((item) => item.id));
+  const ticketActions: TicketAction[] = approvedItems(state.items)
+    .filter((item) => !(item.actionId && pendingIds.has(item.actionId)))
+    .map((item) => {
+      const url = state.ticketUrls[item.id];
+      return {
+        // A billing change is filed on its own form rather than to a delivery team, so it is
+        // grouped as what it is instead of landing under "Unassigned".
+        ...(item.formType === "billing" ? { department: "Billing" } : item.department ? { department: item.department } : {}),
+        what: itemTitle(item),
+        ...(item.assignee?.trim() ? { owner: item.assignee.trim() } : {}),
+        ...(item.dueDate?.trim() ? { due: item.dueDate.trim() } : {}),
+        ...(url ? { url } : { notFiled: true }),
+      };
+    });
 
   const loomHeader = state.touch.noShow?.resolution === "loom" ? `No-Show / Loom Video Update
 Loom recording: ${state.touch.noShow.url}
 Client email: ${state.touch.noShow.sendStatus} (${state.touch.noShow.gmailMessageId || state.touch.noShow.conversationId})
 
 ` : "";
-  const markdown = loomHeader + renderNotesMarkdown(filtered, { ticketLinks, createdTickets });
+  const markdown = loomHeader + renderNotesMarkdown(filtered, { ticketActions });
 
   // The approval step created the "Monthly Touch (date)" page and recorded it. That page IS the
   // parent these notes go under, so its id is handed over as the prep page rather than letting

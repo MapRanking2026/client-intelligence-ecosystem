@@ -16,6 +16,8 @@ import { Linkified, Callout } from "@/src/components/mtos/annotate";
 import { ClientHint } from "@/src/components/mtos/client-hint";
 import { resolveTenantContext } from "@/src/lib/auth/resolve-tenant-context";
 import { getCommandCenterView } from "@/src/lib/server/services/command-center-service";
+import { greetingFor } from "@/src/lib/server/services/command-center-v2-service";
+import { getAccountManagerProfile } from "@/src/lib/server/services/user-service";
 import type { ClientRecord } from "@/src/lib/mtos-data";
 import {
   TONE_CLASS,
@@ -80,9 +82,15 @@ function PriorityIcon({ tone }: { tone: "good" | "watch" | "risk" }) {
 }
 
 export default async function CommandCenterPage() {
+  const context = await resolveTenantContext();
+  // The old screen is still served here, and it greeted everybody with a morning whatever the
+  // hour. Same greeting on the same clock as the current Command Center, so the two cannot
+  // disagree about what time of day it is.
+  const profile = await getAccountManagerProfile(context).catch(() => ({ timeZone: "UTC" }));
+  const greeting = greetingFor(new Date(), profile.timeZone);
   let view: Awaited<ReturnType<typeof getCommandCenterView>>;
   try {
-    view = await getCommandCenterView(await resolveTenantContext());
+    view = await getCommandCenterView(context);
   } catch {
     return (
       <AppShell>
@@ -141,7 +149,7 @@ export default async function CommandCenterPage() {
             <span>Daily Intelligence Briefing · {snapshot.focusDate}</span>
           </div>
           <h1 className="h1 mt-3.5">
-            Good morning.
+            {greeting.label}
             <br />
             <span style={{ color: "var(--accent)" }}>
               {needAttention.length} {needAttention.length === 1 ? "client needs" : "clients need"} your attention today.

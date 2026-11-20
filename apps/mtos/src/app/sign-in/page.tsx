@@ -56,7 +56,7 @@ function SignInContent() {
   const destinationLabel = getDestinationLabel(requestedNextPath);
 
   return (
-    <main className="min-h-screen bg-[#223453] bg-[radial-gradient(circle_at_top,rgba(215,245,236,0.10),rgba(3,10,18,1)_55%)] px-6 py-16 text-white">
+    <main className="on-dark min-h-screen bg-[#223453] bg-[radial-gradient(circle_at_top,rgba(215,245,236,0.10),rgba(3,10,18,1)_55%)] px-6 py-16 text-white">
       <div className="mx-auto w-full max-w-lg">
         <BrandWordmark className="mb-10" />
         <div className="rounded-[28px] border border-[#597f91] bg-[linear-gradient(180deg,rgba(255,255,255,0.06),rgba(255,255,255,0.02))] p-8 text-left shadow-[0_30px_80px_rgba(5,10,18,0.22)] backdrop-blur">

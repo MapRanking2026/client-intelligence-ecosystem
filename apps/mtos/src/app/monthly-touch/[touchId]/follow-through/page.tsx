@@ -186,6 +186,7 @@ export default async function FollowThroughPage({
           <FollowThroughTrackers
             touchId={touch.id}
             {...(touch.followThrough?.trackerCards ? { cards: touch.followThrough.trackerCards } : {})}
+            members={roster.members.map((member) => member.name)}
           />
         </SectionCard>
         </div>

@@ -3,6 +3,7 @@ import type { ClientRecord, CommitmentRecord, MonthlyTouchRecord } from "@/src/l
 import { averageScore, needsAttention } from "@/src/lib/health-display";
 import { getMtosDataSource } from "@/src/lib/server/data/seed-mtos-data-source";
 import { deriveRunSheetStage } from "@/src/lib/server/services/prep-readiness-service";
+import { getAccountManagerProfile } from "@/src/lib/server/services/user-service";
 
 /**
  * The Command Center, organised around the AM's day instead of around client health.
@@ -31,6 +32,8 @@ export interface CommandCenterV2View {
   context: TenantContext;
   /** Server-rendered so the greeting matches the AM's working day, not the hour the page was built. */
   greeting: { part: DayPart; label: string };
+  /** The AM's own zone, from their settings. Everything dated on this page is read in it. */
+  timeZone: string;
   today: Date;
   todaysCalls: TouchWithClient[];
   prepDueWithin48h: TouchWithClient[];
@@ -83,8 +86,35 @@ function weekBounds(date: Date): { start: Date; end: Date } {
   return { start, end };
 }
 
-function greetingFor(date: Date): { part: DayPart; label: string } {
-  const hour = date.getHours();
+/**
+ * The hour on the reader's own clock.
+ *
+ * `date.getHours()` is the SERVER's hour, and the server runs in UTC. For anyone west of
+ * Greenwich that turned their whole evening into UTC's small hours, so the page said "Good
+ * morning" at nine at night -- every night, for every AM in the Americas. The time zone is the
+ * one in the AM's own settings, never guessed from the server or from the data.
+ */
+function hourIn(date: Date, timeZone: string): number {
+  try {
+    const hour = new Intl.DateTimeFormat("en-US", { timeZone, hour: "numeric", hour12: false }).format(date);
+    const parsed = Number(hour);
+    // "24" is midnight in some ICU builds; both ends of the day are the same hour of the clock.
+    return Number.isFinite(parsed) ? parsed % 24 : date.getUTCHours();
+  } catch {
+    // An unknown zone name throws rather than falling back silently inside Intl. UTC is then
+    // the honest answer: wrong for some readers, but not a zone we made up for them.
+    return date.getUTCHours();
+  }
+}
+
+/**
+ * Morning until noon, afternoon until six, evening after that.
+ *
+ * Three parts rather than four: a separate "Good night" would greet an AM finishing at eleven
+ * as though they were going to bed, and "Good evening" is what a person says at that hour.
+ */
+export function greetingFor(date: Date, timeZone: string): { part: DayPart; label: string } {
+  const hour = hourIn(date, timeZone);
   if (hour < 12) return { part: "morning", label: "Good morning." };
   if (hour < 18) return { part: "afternoon", label: "Good afternoon." };
   return { part: "evening", label: "Good evening." };
@@ -104,10 +134,11 @@ export async function getCommandCenterV2View(
   now = new Date(),
 ): Promise<CommandCenterV2View> {
   const dataSource = getMtosDataSource(context);
-  const [clients, commitments, touches] = await Promise.all([
+  const [clients, commitments, touches, profile] = await Promise.all([
     dataSource.getClients(),
     dataSource.getCommitments(),
     dataSource.getMonthlyTouches(),
+    getAccountManagerProfile(context),
   ]);
 
   const clientsById = new Map(clients.map((client) => [client.id, client]));
@@ -171,7 +202,8 @@ export async function getCommandCenterV2View(
 
   return {
     context,
-    greeting: greetingFor(now),
+    greeting: greetingFor(now, profile.timeZone),
+    timeZone: profile.timeZone,
     today: now,
     todaysCalls,
     prepDueWithin48h,

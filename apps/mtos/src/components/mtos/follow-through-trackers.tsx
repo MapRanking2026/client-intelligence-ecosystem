@@ -42,13 +42,20 @@ function DiffRow({
   diff,
   field,
   value,
+  members,
   onChange,
 }: {
   diff: FieldDiff;
   field: TrackerField<AnyRow>;
   value: unknown;
+  members: string[];
   onChange: (next: unknown) => void;
 }) {
+  const current = String(value ?? "");
+  // The stored name goes on the list even when the roster does not have it. A name ClickUp
+  // already has on the row is the right answer whether or not this workspace can see the
+  // person, and a select that silently drops it would blank the column on the next save.
+  const people = members.includes(current) || !current ? members : [current, ...members];
   const readOnly = field.kind === "readonly";
   return (
     <div className="grid gap-1 md:grid-cols-[200px_1fr] md:items-start">
@@ -69,6 +76,24 @@ function DiffRow({
             value={String(value ?? "")}
             onChange={(event) => onChange(event.target.value)}
           />
+        ) : field.kind === "person" ? (
+          people.length ? (
+            <select className="input" value={current} onChange={(event) => onChange(event.target.value || undefined)}>
+              <option value="">— nobody yet</option>
+              {people.map((person) => (
+                <option key={person} value={person}>
+                  {person}
+                </option>
+              ))}
+            </select>
+          ) : (
+            // No roster: ClickUp is not connected, or it returned nobody. Typing a name is then
+            // the only way to fill this, and saying why beats an empty dropdown.
+            <>
+              <input className="input" value={current} onChange={(event) => onChange(event.target.value || undefined)} />
+              <p className="field-hint">The ClickUp roster could not be read, so this one is typed.</p>
+            </>
+          )
         ) : field.kind === "select" ? (
           <select className="input" value={String(value ?? "")} onChange={(event) => onChange(event.target.value || undefined)}>
             <option value="">—</option>
@@ -112,10 +137,13 @@ export function FollowThroughTrackers({
   touchId,
   cards,
   reason,
+  members = [],
 }: {
   touchId: string;
   cards?: TrackerCard[];
   reason?: string;
+  /** The assignable ClickUp people, read on the server. Empty when ClickUp cannot be reached. */
+  members?: string[];
 }) {
   const [list, setList] = useState<TrackerCard[] | undefined>(cards);
   const [message, setMessage] = useState(reason || "");
@@ -298,6 +326,7 @@ export function FollowThroughTrackers({
                         diff={diff}
                         field={field}
                         value={(card.next as AnyRow)[diff.key]}
+                        members={members}
                         onChange={(value) => setField(index, diff.key, value)}
                       />
                     );

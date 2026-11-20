@@ -24,10 +24,10 @@ import {
   getIntegrationCredentials,
 } from "@/src/lib/server/integrations";
 import {
+  fieldValueText,
   findField,
   getListCustomFields,
   getTaskFieldValues,
-  type ClickUpCustomField,
 } from "@/src/lib/server/services/clickup-fields";
 
 /**
@@ -49,25 +49,6 @@ export interface CurrentRowResult {
   row?: Partial<HealthTrackerRow>;
   /** Why the current row is unavailable, when it is. Shown on the card. */
   reason?: string;
-}
-
-function optionName(field: ClickUpCustomField, raw: unknown): string | undefined {
-  if (raw === undefined || raw === null) return undefined;
-  if (Array.isArray(raw)) {
-    const names = raw
-      .map((entry) => {
-        const id = typeof entry === "string" ? entry : (entry as { id?: string })?.id;
-        return field.options.find((option) => option.id === id)?.name;
-      })
-      .filter(Boolean) as string[];
-    return names.length ? names.join(", ") : undefined;
-  }
-  // ClickUp returns a dropdown as the option's id, or as its index on some older fields.
-  const id = typeof raw === "string" ? raw : (raw as { id?: string })?.id;
-  const byId = field.options.find((option) => option.id === id)?.name;
-  if (byId) return byId;
-  if (typeof raw === "number" && field.options[raw]) return field.options[raw].name;
-  return typeof raw === "string" ? raw : undefined;
 }
 
 export async function readHealthTrackerRow(
@@ -101,10 +82,7 @@ export async function readHealthTrackerRow(
     const read = (names: string[]): string | undefined => {
       const field = findField(fields, names);
       if (!field) return undefined;
-      const raw = values.get(field.id);
-      if (field.options.length) return optionName(field, raw);
-      if (raw === undefined || raw === null || raw === "") return undefined;
-      return String(raw);
+      return fieldValueText(field, values.get(field.id));
     };
 
     const services = read(["services"]);
@@ -227,10 +205,28 @@ export async function buildTrackerCards(
   const current = await readHealthTrackerRow(context, client);
 
   // --- the Health Tracker row -------------------------------------------------
+  /**
+   * The row as it stands wins over anything MTOS could work out, on every column it already has.
+   *
+   * Client Name is the clearest case. That column holds the person we deal with -- "Eunjee Song"
+   * -- and this used to overwrite it with the business name on every touch, which both lost the
+   * contact's name and showed up as a "changed" field the AM had to approve or undo each month.
+   * Where the tracker has nothing, the contact is the next best answer and the business name the
+   * last, because an account that trades under its own name is a business name legitimately.
+   *
+   * Assignee, Account Manager and Start date work the same way: carried from the row, and only
+   * filled from what MTOS knows when the row is actually empty. Nothing here is invented -- a
+   * column with no source stays blank for the AM to fill.
+   */
   const healthNext: Partial<HealthTrackerRow> = {
     ...current.row,
-    clientName: client.name,
-    ...(client.accountManager ? { accountManager: client.accountManager } : {}),
+    clientName: current.row?.clientName?.trim() || client.contact?.trim() || client.name,
+    ...(current.row?.accountManager?.trim() || client.accountManager
+      ? { accountManager: current.row?.accountManager?.trim() || client.accountManager! }
+      : {}),
+    ...(current.row?.assignee?.trim() || client.accountManager
+      ? { assignee: current.row?.assignee?.trim() || client.accountManager! }
+      : {}),
     nps: score,
     ...(healthFromScore(score) ? { health: healthFromScore(score) } : {}),
     ...(client.mrr ? { mrr: client.mrr } : {}),
@@ -257,7 +253,9 @@ export async function buildTrackerCards(
     const meetingDay = touch.scheduledLocalDate || touch.scheduledAt?.slice(0, 10);
     const fromFlags: RiskRegisterEntry = {
       ...(intelligence?.riskRegister || {}),
-      ...(client.accountManager ? { accountManager: client.accountManager } : {}),
+      ...(healthNext.accountManager || client.accountManager
+        ? { accountManager: healthNext.accountManager || client.accountManager! }
+        : {}),
       dateFlagged: meetingDay || new Date().toISOString().slice(0, 10),
       ...Object.fromEntries(
         (gate.findings || [])
@@ -286,7 +284,12 @@ export async function buildTrackerCards(
     id: "stakeholder",
     kind: "stakeholder",
     isNewRow: true,
-    next: { ...(client.contact ? { clientName: client.contact } : {}), ...stakeholder },
+    next: {
+      ...(client.contact ? { clientName: client.contact } : {}),
+      ...(healthNext.assignee ? { assignee: healthNext.assignee } : {}),
+      ...(healthNext.clientType ? { clientType: healthNext.clientType } : {}),
+      ...stakeholder,
+    },
   });
 
   const diffs: TrackerCardsResult["diffs"] = {};

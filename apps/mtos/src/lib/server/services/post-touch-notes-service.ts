@@ -12,6 +12,7 @@ import {
   RISK_REGISTER_SKIPPED_NOTE,
   riskRegisterRequired,
 } from "@/src/lib/contracts/post-meeting-review";
+import { EVIDENCE_WINDOW_RULE, NO_PRODUCT_NAME_RULE } from "@/src/lib/contracts/client-book-page";
 import { getPromptText } from "@/src/lib/server/prompt-store";
 import { writePostNotesToClientBook } from "@/src/lib/server/services/client-book-service";
 import { buildTouchEvidence } from "@/src/lib/server/services/live-call-guide-service";
@@ -150,6 +151,8 @@ export async function generatePostTouchNotes(
     // It is there so the notes can be specific, not so they can be transcribed: a Client's Book
     // page that lists scan after scan is unreadable, and the numbers already live in the charts.
     "The preparation evidence is background for what you write, not material to copy out. Do not list measurement records -- no scan-by-scan or grid-by-grid rundowns, no report IDs, heatmap IDs, place IDs, location IDs or image URLs. Where the account's performance matters, say it in a sentence or two with the few figures worth saying out loud.",
+    EVIDENCE_WINDOW_RULE,
+    NO_PRODUCT_NAME_RULE,
     geminiFullNotes
       ? "You are given two views of the call: `transcript` is the verbatim dialogue and the only source of truth, and `geminiFullNotes` is Gemini's automated summary, for orientation only. Where they disagree, the transcript wins."
       : "You are given the verbatim transcript only.",

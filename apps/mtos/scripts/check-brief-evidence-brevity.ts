@@ -13,6 +13,7 @@
  * Run with: npm run check:brief-evidence-brevity
  */
 import { completePrepBrief, evidenceMarkdown, PREP_BRIEF_DEPTH_RULE } from "@/src/lib/contracts/prep-brief-quality";
+import { namesProduct, withoutProductName } from "@/src/lib/contracts/client-book-page";
 import type { ClientRecord, MonthlyTouchPrepPack } from "@/src/lib/mtos-data";
 
 let failures = 0;
@@ -37,8 +38,10 @@ const keywordScanHistory = ["gynecologist near me", "endometriosis specialist lo
   (keyword, keywordIndex) => ({
     keyword,
     businessName: "Synthetic Women's Health",
+    // Weekly scans running back a year: four of them land in the window the touch reviews, the
+    // rest belong to touches that already happened.
     scans: Array.from({ length: 12 }, (_, index) => ({
-      scanDate: `2026-${String(11 - index).padStart(2, "0")}-17T18:55:08.743Z`,
+      scanDate: new Date(Date.parse("2026-11-17T18:55:08.743Z") - index * 7 * 86400000).toISOString(),
       averageRank: 8.6 + index + keywordIndex,
       top3Pins: 9,
       marketSharePercent: 44 - index,
@@ -86,7 +89,9 @@ const prep = {
 
 const client = { name: "Synthetic Women's Health", summary: "Recorded context", industry: "Healthcare", goals: [], healthScore: null } as unknown as ClientRecord;
 
-const appendix = evidenceMarkdown({ seoAndGbp: seoPerformance, caveats: prep.dataGaps });
+/** Fixed rather than "now", so the window this check measures does not move with the calendar. */
+const AS_OF = Date.parse("2026-11-20T12:00:00Z");
+const appendix = evidenceMarkdown({ seoAndGbp: seoPerformance, caveats: prep.dataGaps }, 0, AS_OF);
 
 scenario("The scan history is a sentence, not a list");
 {
@@ -95,10 +100,10 @@ scenario("The scan history is a sentence, not a list");
   check("none of them is written out as a record", !appendix.includes("not Ranking Pins") && !appendix.includes("top3Pins"), appendix.slice(0, 300));
   check("no report IDs reach the page", !/report ?Id/i.test(appendix) && !appendix.includes("6afca30c"));
   check("no place, business or location IDs either", !/place ?Id|business ?Id|location ?Id/i.test(appendix));
-  check("the series says how much there is", appendix.includes("6 records"));
+  check("the series says how much there is, and over what window", appendix.includes("6 records in the last 30 days"));
   check("and how fresh it is", appendix.includes("Nov 17, 2026"));
   check("the latest figure survives", appendix.includes("average rank 8.6"));
-  check("so does the comparison behind it", appendix.includes("was 9.6 on Oct 17, 2026"), appendix.slice(appendix.indexOf("Rank Tracker"), appendix.indexOf("Rank Tracker") + 400));
+  check("so does the comparison across the window", appendix.includes("was 11.6 on Oct 27, 2026"), appendix.slice(appendix.indexOf("Rank Tracker"), appendix.indexOf("Rank Tracker") + 420));
   check("and the share of the market", appendix.includes("44% market share"));
   check("the keywords beyond the first few are counted, not listed", appendix.includes("The remaining 2 are in the charts"));
   check("the last keyword is not written out", !appendix.includes("prenatal care near me"));
@@ -121,7 +126,7 @@ scenario("What is not a measurement series is untouched");
   check("so is a data gap", appendix.includes("No verified revenue supplied"));
   check("a scalar field keeps its label", appendix.includes("**map Check In Count:** 42"), appendix.slice(0, 200));
   const empty = evidenceMarkdown({ seoAndGbp: { keywordScanHistory: [] } });
-  check("an empty series says so rather than vanishing", empty.includes("no records available in MTOS"), empty);
+  check("an empty series says so rather than vanishing", empty.includes("no records available"), empty);
 }
 
 scenario("It is short enough to read");
@@ -137,6 +142,42 @@ scenario("It is short enough to read");
     JSON.stringify(brief).length < 12000,
     String(JSON.stringify(brief).length),
   );
+}
+
+scenario("Only the month this touch reviews");
+{
+  check("the scans outside the window are dropped", appendix.includes("4 scans to Nov 17, 2026"), appendix.slice(appendix.indexOf("Rank Tracker"), appendix.indexOf("Rank Tracker") + 200));
+  check("nothing from a year ago survives", !appendix.includes("Nov 18, 2025") && !appendix.includes(", 12 scans"));
+  // A grid series that stopped in the spring is the case this is really about: silence is the
+  // finding, and last spring's numbers presented as this month's would be the lie.
+  const stale = evidenceMarkdown(
+    { seoAndGbp: { heatmapGrids: [{ keyword: "x", scanDate: "2026-05-02T00:00:00Z", gridSize: 13, averageRankPosition: 4 }] } },
+    0,
+    AS_OF,
+  );
+  check("a series that stopped months ago is not presented as current", !stale.includes("average rank 4"), stale);
+  check("and the silence is the finding", stale.includes("nothing in the last 30 days"), stale);
+  check("with the date of the last record", stale.includes("the most recent is May 2, 2026"), stale);
+  check("a record dated ahead of the page is kept", evidenceMarkdown({ s: { heatmaps: [{ keyword: "x", scanDate: "2026-11-30T00:00:00Z", averageRanking: 3 }] } }, 0, AS_OF).includes("average rank 3"));
+  check("the depth rule asks the model for the same window", /30 days before this touch/i.test(PREP_BRIEF_DEPTH_RULE));
+}
+
+scenario("The tool does not name itself on a client's page");
+{
+  check("the appendix never says it", !namesProduct(appendix), appendix.slice(0, 200));
+  check("a missing value just says so", evidenceMarkdown({ value: "" }).includes("**value:** Not available."));
+  check("and an empty list just says so", evidenceMarkdown({ rows: [] }).includes("No records available."));
+  check(
+    "the screenshot's line reads plainly now",
+    withoutProductName("- **previous Value:** Not available in MTOS.") === "- **previous Value:** Not available.",
+    withoutProductName("- **previous Value:** Not available in MTOS."),
+  );
+  check("a sentence that names it as a subject keeps its grammar", withoutProductName("MTOS has no record of this.") === "Map Ranking has no record of this.");
+  check("a possessive becomes ours", withoutProductName("This is MTOS's own record.") === "This is our own record.");
+  check("every other preposition goes too", withoutProductName("Nothing recorded on MTOS, nothing from MTOS.") === "Nothing recorded, nothing.");
+  check("a page that never mentioned it is untouched", withoutProductName("The client asked for photos.") === "The client asked for photos.");
+  check("the whole brief is clean", !namesProduct(JSON.stringify(completePrepBrief(undefined, prep, client))));
+  check("the depth rule tells the model not to either", /never \"not available in MTOS\"/i.test(PREP_BRIEF_DEPTH_RULE));
 }
 
 scenario("The model is asked for this as well as held to it");

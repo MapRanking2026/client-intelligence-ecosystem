@@ -13,6 +13,7 @@ import {
   isTableStructureError,
   normalizeMarkdownTables,
 } from "@/src/lib/server/services/clickup-markdown";
+import { withoutProductName } from "@/src/lib/contracts/client-book-page";
 import {
   CLICKUP_V3,
   clickupFetch,
@@ -368,12 +369,12 @@ export async function filePrepNotesToClientBook(
 
   let prepPageId = "";
   if (existing?.prepPageId) {
-    const replaced = await replacePage(access, docId, existing.prepPageId, name, options.markdown);
+    const replaced = await replacePage(access, docId, existing.prepPageId, name, withoutProductName(options.markdown));
     if (replaced.ok) prepPageId = existing.prepPageId;
     // Otherwise fall through and create a fresh page: the old one may have been deleted in ClickUp.
   }
   if (!prepPageId) {
-    const created = await createPage(access, docId, name, options.markdown, meetingsPageId);
+    const created = await createPage(access, docId, name, withoutProductName(options.markdown), meetingsPageId);
     if (!created.ok) {
       return {
         error: `ClickUp refused to create the "${name}" page in the Client's Book: ${created.detail}`,
@@ -481,7 +482,7 @@ export async function writePostNotesToClientBook(
   // A subpage MTOS wrote before is this touch's own write-up; replacing it is how a re-run updates
   // rather than duplicates.
   if (links.postPageId) {
-    const replaced = await replacePage(access, docId, links.postPageId, name, options.markdown);
+    const replaced = await replacePage(access, docId, links.postPageId, name, withoutProductName(options.markdown));
     if (replaced.ok) {
       return {
         pageName: name,
@@ -500,11 +501,11 @@ export async function writePostNotesToClientBook(
     const read = typeof page?.content === "string" ? page : await clickupFetch(
       `${CLICKUP_V3}/workspaces/${access.workspaceId}/docs/${docId}/pages/${theirs.id}?content_format=text%2Fmd`, access.token,
     ) as JsonRecord | null;
-    if (typeof read?.content === "string" && read.content.trim() === normalizeMarkdownTables(options.markdown).trim()) {
+    if (typeof read?.content === "string" && read.content.trim() === normalizeMarkdownTables(withoutProductName(options.markdown)).trim()) {
       return { pageName: name, links: { ...links, postPageId: theirs.id, postPageUrl: pageUrl(access.workspaceId, docId, theirs.id), writtenAt: new Date().toISOString() } };
     }
     if (typeof read?.content === "string" && read.content.trim() === POST_NOTES_PLACEHOLDER) {
-      const replaced = await replacePage(access, docId, theirs.id, name, options.markdown);
+      const replaced = await replacePage(access, docId, theirs.id, name, withoutProductName(options.markdown));
       if (!replaced.ok) return { error: `ClickUp could not fill the post-notes placeholder: ${replaced.detail}` };
       return { pageName: name, links: { ...links, postPageId: theirs.id, postPageUrl: pageUrl(access.workspaceId, docId, theirs.id), writtenAt: new Date().toISOString() } };
     }
@@ -513,7 +514,7 @@ export async function writePostNotesToClientBook(
     };
   }
 
-  const created = await createPage(access, docId, name, options.markdown, parentId);
+  const created = await createPage(access, docId, name, withoutProductName(options.markdown), parentId);
   if (!created.ok) {
     return {
       error: `ClickUp refused to create the "${name}" subpage under "${parentName}": ${created.detail}`,

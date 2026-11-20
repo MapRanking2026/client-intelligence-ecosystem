@@ -7,19 +7,21 @@
  * configured providers exactly as before.
  *
  * Resolution order for a prompt key:
- *   1. MTOS_MODEL_ROUTES[promptKey]            explicit override, set in the environment
- *   2. the prompt's own provider + difficulty  set per prompt in Settings -> Prompt Engine
- *   3. MTOS_MODEL_ROUTES.default               catch-all
- *   4. no route                                the caller keeps the default provider order
+ *   1. the model pinned on the prompt          chosen per prompt in Settings -> Prompt Engine
+ *   2. MTOS_MODEL_ROUTES[promptKey]            explicit override, set in the environment
+ *   3. the prompt's own provider + difficulty  set per prompt in Settings -> Prompt Engine
+ *   4. MTOS_MODEL_ROUTES.default               catch-all
+ *   5. no route                                the caller keeps the default provider order
  *
- * Routing is OFF until at least one MTOS_MODEL_* variable is set, so deploying
- * this file changes nothing by itself.
+ * A pinned model always applies. Steps 2 to 4 are OFF until at least one
+ * MTOS_MODEL_* variable is set.
  *
  * A tier resolves to a model through MTOS_MODEL_<TIER>; when that variable is
  * missing it falls back to the provider's existing default (ANTHROPIC_MODEL or
  * GEMINI_MODEL), so a model can be swapped without a code change.
  */
 
+import { providerOfPromptModel } from "@/src/lib/contracts/prompt-models";
 import type { getServerEnv } from "@/src/lib/server/env";
 
 type ServerEnv = ReturnType<typeof getServerEnv>;
@@ -38,8 +40,11 @@ export const MODEL_TIERS = [
 
 export type ModelTier = (typeof MODEL_TIERS)[number];
 
+/** "PROMPT_MODEL" marks a route that came from the model pinned on the prompt itself. */
+export type ModelRouteTier = ModelTier | "PROMPT_MODEL";
+
 export interface ModelRoute {
-  tier: ModelTier;
+  tier: ModelRouteTier;
   provider: RoutedProvider;
   model: string;
   /** Tried next when the routed model fails; absent when no fallback is configured. */
@@ -53,6 +58,8 @@ export interface ModelRouteInput {
   provider?: "claude" | "gemini";
   /** The prompt's own difficulty, from its Prompt Engine record. */
   difficulty?: "simple" | "moderate" | "difficult";
+  /** The model pinned on the prompt in the Prompt Engine, if any. */
+  model?: string;
 }
 
 function isModelTier(value: unknown): value is ModelTier {
@@ -144,6 +151,14 @@ export function isModelRoutingEnabled(env: ServerEnv): boolean {
 
 /** Resolve the route for a prompt, or null when routing is off or nothing matches. */
 export function resolveModelRoute(env: ServerEnv, input: ModelRouteInput): ModelRoute | null {
+  // A model the operator pinned on the prompt wins over everything else and does
+  // not depend on any environment variable. An id we do not offer is ignored
+  // rather than sent to a provider that may not serve it.
+  const pinnedProvider = providerOfPromptModel(input.model);
+  if (pinnedProvider && input.model) {
+    return { tier: "PROMPT_MODEL", provider: pinnedProvider, model: input.model };
+  }
+
   if (!isModelRoutingEnabled(env)) {
     return null;
   }

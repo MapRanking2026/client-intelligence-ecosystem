@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { getServerEnv } from "@/src/lib/server/env";
+import { resolveModelRoute } from "@/src/lib/server/model-router";
 import { requirePromptEngineAdmin } from "@/src/lib/server/prompt-engine-guard";
 import {
   collectPromptVariables,
@@ -27,6 +28,10 @@ interface TestRequestBody {
   sampleInput?: string;
   /** Values for {{variables}} the calling module would normally supply. */
   variables?: Record<string, string>;
+  /** Draft routing settings, so a test runs on the model the operator has selected. */
+  provider?: "claude" | "gemini";
+  difficulty?: "simple" | "moderate" | "difficult";
+  model?: string;
 }
 
 /**
@@ -102,6 +107,13 @@ export async function POST(request: Request, { params }: RouteContext) {
       userText: sampleInput,
       maxTokens: 1400,
       temperature: 0.2,
+      // The unsaved selection when the editor sent one, otherwise what is stored.
+      route: resolveModelRoute(env, {
+        promptKey: key,
+        provider: body.provider ?? existing.provider,
+        difficulty: body.difficulty ?? existing.difficulty,
+        model: "model" in body ? body.model : existing.model,
+      }),
     });
     return NextResponse.json({ issues, preview, detectedVariables, output: text, provider, model });
   } catch (error) {

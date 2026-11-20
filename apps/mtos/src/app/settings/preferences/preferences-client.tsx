@@ -4,6 +4,7 @@ import { useCallback, useMemo, useState } from "react";
 import { Check, RotateCcw, Save, TriangleAlert } from "lucide-react";
 
 import { readJsonResponse } from "@/src/lib/api/read-json-response";
+import { RichTextField } from "@/src/components/mtos/rich-text-field";
 import {
   DEFAULT_PREFERENCES,
   PREFERENCE_GROUPS,
@@ -194,6 +195,13 @@ export function PreferencesClient({ initial }: { initial: UserPreferences }) {
                             </option>
                           ))}
                         </select>
+                      ) : field.kind === "richtext" ? (
+                        <RichTextField
+                          id={id}
+                          ariaLabel={field.label}
+                          value={String(value)}
+                          onChange={(html) => write(field, html)}
+                        />
                       ) : field.kind === "textarea" ? (
                         <textarea
                           id={id}

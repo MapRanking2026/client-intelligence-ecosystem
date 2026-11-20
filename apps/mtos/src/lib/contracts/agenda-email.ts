@@ -65,6 +65,8 @@ export interface AgendaEmailFacts {
   meetingUrl: string;
   /** The AM's sign-off, one line per line. */
   signoff: string[];
+  /** The same sign-off with the formatting they gave it in Settings, ready to drop into the body. */
+  signoffHtml?: string;
   /** Absolute https URL of the logo, or empty to render the wordmark as text only. */
   logoUrl: string;
 }
@@ -262,6 +264,7 @@ export function buildAgendaEmailDraft(
     ask: email?.ask && !internalTaskText(email.ask) ? email.ask.trim() : "",
     meetingUrl,
     signoff,
+    signoffHtml: emailSignatureHtml(source.signoff, source.accountManagerName),
     logoUrl,
   };
 
@@ -374,7 +377,7 @@ export function buildAgendaEmailHtml(facts: AgendaEmailFacts): string {
       : "",
     `<p style="margin:0;color:${BODY}">Anything else you&#39;d like to add? Just reply to this email 💬</p>`,
     facts.signoff.length
-      ? `<p style="margin:16px 0 22px">${facts.signoff.map(esc).join("<br>")}</p>`
+      ? `<p style="margin:16px 0 22px">${facts.signoffHtml || facts.signoff.map(esc).join("<br>")}</p>`
       : `<div style="height:22px"></div>`,
     `</div>`,
     footerBlock(facts.logoUrl),
@@ -456,11 +459,59 @@ export interface AgendaSendOutcome {
   sendItYourself?: boolean;
 }
 
-/** The user's saved signature is used verbatim apart from empty lines. */
+/**
+ * True when the saved signature was written in the formatted editor rather than typed flat.
+ *
+ * Matched against the tags that editor can actually produce rather than against "anything in
+ * angle brackets": somebody typing "Best <regards>," is writing text, and treating it as markup
+ * would hand a mail client an unknown tag, which renders as nothing -- the words would simply
+ * vanish from the signature.
+ */
+const EDITOR_TAGS = /<\/?(?:b|strong|i|em|u|s|strike|span|div|br|p|ul|ol|li|a|font|h[1-6]|img)\b[^>]*>/i;
+
+export function isFormattedSignature(signature?: string): boolean {
+  return EDITOR_TAGS.test(signature || "");
+}
+
+/**
+ * The signature as plain lines -- what a reader needs when it cannot show formatting.
+ *
+ * A formatted signature is reduced to its text here rather than refused: this is what answers
+ * "is there a signature at all" for the blocking gaps, and what a plain-text digest prints. The
+ * formatting itself is `emailSignatureHtml`'s job.
+ */
 export function emailSignatureLines(signature?: string, name?: string): string[] {
-  const lines = (signature || "").split("\n").map((line) => line.trim()).filter(Boolean);
+  const saved = signature || "";
+  const flat = isFormattedSignature(saved)
+    ? sanitizeAgendaEmailHtml(saved)
+        .replace(/<\/(p|div|h[1-6]|li|tr)\s*>/gi, "\n")
+        .replace(/<br\s*\/?>/gi, "\n")
+        .replace(/<[^>]*>/g, "")
+        .replace(/&nbsp;/gi, " ")
+        .replace(/&amp;/gi, "&")
+        .replace(/&lt;/gi, "<")
+        .replace(/&gt;/gi, ">")
+        .replace(/&quot;/gi, '"')
+    : saved;
+  const lines = flat.split("\n").map((line) => line.trim()).filter(Boolean);
   if (lines.length) return lines;
   return name?.trim() ? ["Best regards,", name.trim(), "Map Ranking"] : [];
+}
+
+/**
+ * The signature as it should appear in an email body.
+ *
+ * An AM who bolds their name in Settings means it to arrive bold. So a signature written in the
+ * formatted editor is passed through the same sanitiser the email bodies use and kept as markup,
+ * and one typed as flat lines is escaped and joined with breaks exactly as before -- the two
+ * shapes produce the same thing for anyone who never opens the formatting toolbar.
+ */
+export function emailSignatureHtml(signature?: string, name?: string): string {
+  if (isFormattedSignature(signature)) {
+    const cleaned = sanitizeAgendaEmailHtml(signature || "").trim();
+    if (cleaned) return cleaned;
+  }
+  return emailSignatureLines(signature, name).map(esc).join("<br>");
 }
 
 export function isAgendaRecipient(address: string): boolean {

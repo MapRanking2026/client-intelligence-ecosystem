@@ -16,6 +16,7 @@
  *    charts, and the brief now draws them.
  */
 
+import { sanitizeAgendaEmailHtml } from "@/src/lib/contracts/agenda-email";
 import {
   CALL_LENGTH_OPTIONS,
   isCallLength,
@@ -172,7 +173,9 @@ export function isTimeZone(value: unknown): value is string {
 const TEXT_LIMITS: Record<string, number> = {
   displayName: 120,
   jobTitle: 120,
-  emailSignoff: 600,
+  // Markup, not plain lines: the formatted editor spends most of its budget on inline styles, so
+  // a 600-character limit would silently truncate an ordinary four-line signature.
+  emailSignoff: 6000,
   clientEmailsSendThrough: 200,
 };
 
@@ -215,7 +218,12 @@ export function normalizePreferences(input: unknown): UserPreferences {
   const jobTitle = text(row.jobTitle, "jobTitle");
   if (jobTitle !== undefined) out.jobTitle = jobTitle;
   if (isTimeZone(row.timeZone)) out.timeZone = row.timeZone;
-  const signoff = typeof row.emailSignoff === "string" ? row.emailSignoff.slice(0, TEXT_LIMITS.emailSignoff) : undefined;
+  // The signature is markup now, so it is cleaned on the way in with the same sanitiser the email
+  // bodies use -- it is pasted into as often as it is typed into, and whatever lands in it is
+  // dropped straight into a message to a client.
+  const signoff = typeof row.emailSignoff === "string"
+    ? sanitizeAgendaEmailHtml(row.emailSignoff).slice(0, TEXT_LIMITS.emailSignoff)
+    : undefined;
   if (signoff !== undefined) out.emailSignoff = signoff;
   const sendThrough = text(row.clientEmailsSendThrough, "clientEmailsSendThrough");
   if (sendThrough !== undefined) out.clientEmailsSendThrough = sendThrough;
@@ -276,7 +284,7 @@ export function changedPreferenceCount(stored: UserPreferences | undefined): num
 // How the screen is laid out
 // ---------------------------------------------------------------------------
 
-export type PreferenceKind = "text" | "textarea" | "select" | "switch" | "timezone";
+export type PreferenceKind = "text" | "textarea" | "richtext" | "select" | "switch" | "timezone";
 
 export interface PreferenceField {
   key: keyof UserPreferences | `notifications.${keyof NotificationPreferences}`;
@@ -323,8 +331,8 @@ export const PREFERENCE_GROUPS: PreferenceGroup[] = [
       {
         key: "emailSignoff",
         label: "Email signature",
-        kind: "textarea",
-        hint: "Used in new confirmation and recap drafts. Enter the closing, your name and title on separate lines.",
+        kind: "richtext",
+        hint: "Used in new confirmation and recap drafts, with the formatting you give it here — bold, italics and lists all arrive in the client's inbox.",
       },
     ],
   },

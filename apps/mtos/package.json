@@ -96,7 +96,9 @@
     "check:recap-email-structure": "tsx scripts/check-recap-email-structure.ts",
     "check:recap-email-layout": "node scripts/check-recap-email-layout.cjs",
     "check:recap-structure": "node scripts/check-recap-structure.cjs",
-    "check:recap-agreements": "node scripts/check-recap-agreements.cjs"
+    "check:recap-agreements": "node scripts/check-recap-agreements.cjs",
+    "check:brief-evidence-brevity": "tsx scripts/check-brief-evidence-brevity.ts",
+    "check:email-signature": "tsx scripts/check-email-signature.ts"
   },
   "dependencies": {
     "@cie/contracts": "*",

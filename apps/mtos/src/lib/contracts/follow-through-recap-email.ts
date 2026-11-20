@@ -1,5 +1,5 @@
 import { knownContactName } from "@/src/lib/contracts/recap-contact";
-import { emailSignatureLines, sanitizeAgendaEmailHtml } from "@/src/lib/contracts/agenda-email";
+import { emailSignatureHtml, emailSignatureLines, sanitizeAgendaEmailHtml } from "@/src/lib/contracts/agenda-email";
 import {
   approvedItems,
   itemTitle,
@@ -114,6 +114,8 @@ export interface RecapEmailFacts {
   /** "Just reply to this email", or whatever channel this client actually uses. */
   followUpChannel: string;
   signoff: string[];
+  /** The same sign-off with the formatting the AM gave it in Settings. */
+  signoffHtml?: string;
   logoUrl: string;
 }
 
@@ -235,6 +237,7 @@ export function buildRecapEmailDraft(
         ? "Please reply with the information above, and include any questions or concerns in the same reply. Your email comes straight to me, and I’m happy to help."
         : "If you have any questions or concerns, please reply to this email. It comes straight to me, and I’m happy to help."),
     signoff,
+    signoffHtml: emailSignatureHtml(source.signoff, source.accountManagerName),
     logoUrl,
   };
 
@@ -312,7 +315,7 @@ export function buildRecapEmailHtml(facts: RecapEmailFacts): string {
     facts.nextCheckInLabel ? '<p style="margin:22px 0 16px;line-height:1.65">Our next Monthly Touch is scheduled for <strong>' + (nextUrl ? '<a href="' + esc(nextUrl) + '" style="color:#1a73e8;text-decoration:underline">' + esc(facts.nextCheckInLabel) + '</a>' : esc(facts.nextCheckInLabel)) + '</strong>. We can review progress and go over the next steps then, and you can reach out to me anytime before our meeting.</p>' : '',
     paragraph('Thank you again' + (name ? ', ' + name : '') + '. I appreciate your help with these items.'),
     paragraph(facts.followUpChannel),
-    facts.signoff.length ? '<p style="margin:20px 0 14px;line-height:1.6">' + facts.signoff.map(line => inlineText(line)).join('<br>') + '</p>' : '',
+    facts.signoff.length ? '<p style="margin:20px 0 14px;line-height:1.6">' + (facts.signoffHtml || facts.signoff.map(line => inlineText(line)).join('<br>')) + '</p>' : '',
     '</div>', footerBlock(facts.logoUrl), '</div>',
   ].join('');
 }

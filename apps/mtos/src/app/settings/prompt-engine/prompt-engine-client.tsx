@@ -3,6 +3,12 @@
 import { useMemo, useState } from "react";
 import { History, Play, Plus, Save, ShieldCheck } from "lucide-react";
 
+import {
+  AUTOMATIC_PROMPT_MODEL,
+  isPromptModelFor,
+  promptModelLabel,
+  promptModelOptions,
+} from "@/src/lib/contracts/prompt-models";
 import { getPromptBindings } from "@/src/lib/prompt-registry";
 import type {
   PromptConfig,
@@ -32,6 +38,8 @@ interface Draft {
   role: PromptRole;
   provider: PromptProvider;
   difficulty: PromptTaskDifficulty;
+  /** A pinned model id, or "" for automatic (the model follows provider and difficulty). */
+  model: string;
   description: string;
   workflows: string;
   prompt: string;
@@ -52,6 +60,11 @@ function toDraft(prompt: PromptDefinition): Draft {
     role: prompt.role,
     provider: prompt.provider ?? "gemini",
     difficulty: prompt.difficulty ?? "simple",
+    // A stored model that is no longer offered for this provider shows as automatic,
+    // which is also how the runtime treats it.
+    model: isPromptModelFor(prompt.provider ?? "gemini", prompt.model)
+      ? (prompt.model as string)
+      : AUTOMATIC_PROMPT_MODEL,
     description: prompt.description ?? "",
     workflows: (prompt.workflows || []).join(", "),
     prompt: prompt.prompt ?? "",
@@ -133,6 +146,7 @@ export function PromptEngineClient({ initialPrompts }: { initialPrompts: PromptC
       role: current.role,
       provider: current.provider,
       difficulty: current.difficulty,
+      model: current.model,
       description: current.description,
       runtimeContract: current.runtimeContract,
       workflows: current.workflows
@@ -183,6 +197,10 @@ export function PromptEngineClient({ initialPrompts }: { initialPrompts: PromptC
           prompt: draft.prompt,
           runtimeContract: draft.runtimeContract,
           sampleInput: withSample ? testInput : "",
+          // So the test runs on the model selected in the editor, saved or not.
+          provider: draft.provider,
+          difficulty: draft.difficulty,
+          model: draft.model,
         }),
       });
       const payload = await response.json();
@@ -190,7 +208,12 @@ export function PromptEngineClient({ initialPrompts }: { initialPrompts: PromptC
       setPreview(payload.preview ?? null);
       setTestOutput(payload.output ?? null);
       if (payload.error) setStatus(payload.error);
-      else if (withSample) setStatus("Test run complete.");
+      else if (withSample)
+        setStatus(
+          payload.model
+            ? `Test run complete. Answered by ${payload.model}.`
+            : "Test run complete.",
+        );
       else setStatus("Validated — nothing was saved.");
     } catch {
       setStatus("Could not reach the server.");
@@ -340,7 +363,10 @@ export function PromptEngineClient({ initialPrompts }: { initialPrompts: PromptC
                       >
                         <div className="text-sm font-semibold">{prompt.title}</div>
                         <div className={`mt-1 text-xs ${active ? "text-[#36506b]" : "text-slate-400"}`}>
-                          v{prompt.version} · {prompt.provider ?? "gemini"} · {prompt.difficulty ?? "simple"}
+                          v{prompt.version} · {prompt.provider ?? "gemini"} ·{" "}
+                          {isPromptModelFor(prompt.provider ?? "gemini", prompt.model)
+                            ? promptModelLabel(prompt.model)
+                            : (prompt.difficulty ?? "simple")}
                         </div>
                       </button>
                     );
@@ -501,7 +527,13 @@ export function PromptEngineClient({ initialPrompts }: { initialPrompts: PromptC
                       <select
                         value={draft.provider}
                         onChange={(event) =>
-                          setDraft({ ...draft, provider: event.target.value as PromptProvider })
+                          // A model belongs to one provider, so switching provider
+                          // returns the model to automatic.
+                          setDraft({
+                            ...draft,
+                            provider: event.target.value as PromptProvider,
+                            model: AUTOMATIC_PROMPT_MODEL,
+                          })
                         }
                         className={fieldClass}
                       >
@@ -511,6 +543,26 @@ export function PromptEngineClient({ initialPrompts }: { initialPrompts: PromptC
                           </option>
                         ))}
                       </select>
+                    </div>
+                    <div>
+                      <label className={labelClass}>Model</label>
+                      <select
+                        value={draft.model}
+                        onChange={(event) => setDraft({ ...draft, model: event.target.value })}
+                        className={fieldClass}
+                      >
+                        <option value={AUTOMATIC_PROMPT_MODEL}>Automatic (set by difficulty)</option>
+                        {promptModelOptions(draft.provider).map((option) => (
+                          <option key={option.id} value={option.id}>
+                            {option.label} ({option.note})
+                          </option>
+                        ))}
+                      </select>
+                      <p className="mt-1 text-xs leading-5 text-slate-400">
+                        {draft.model
+                          ? "This prompt always runs on the selected model. If that model fails, MTOS falls back to the default provider order."
+                          : "The model follows the difficulty below."}
+                      </p>
                     </div>
                     <div>
                       <label className={labelClass}>Difficulty</label>

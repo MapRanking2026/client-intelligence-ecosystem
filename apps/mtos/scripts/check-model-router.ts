@@ -5,6 +5,7 @@
  */
 import assert from "node:assert/strict";
 
+import { PROMPT_MODEL_OPTIONS, isPromptModelFor, providerOfPromptModel } from "../src/lib/contracts/prompt-models";
 import { getServerEnv } from "../src/lib/server/env";
 import { isModelRoutingEnabled, resolveModelRoute } from "../src/lib/server/model-router";
 
@@ -74,5 +75,30 @@ assert.equal(resolveModelRoute(env, { promptKey: "a" })?.model, "claude-fast");
 const partialEnv = { anthropicModel: "claude-default", geminiModel: "gemini-default" } as unknown as ReturnType<typeof getServerEnv>;
 assert.equal(isModelRoutingEnabled(partialEnv), false);
 assert.equal(resolveModelRoute(partialEnv, { promptKey: "qa_evaluation_prompt", provider: "claude", difficulty: "difficult" }), null);
+
+// 7. A model pinned on the prompt wins over the environment and works with routing off.
+env = withEnv({});
+route = resolveModelRoute(env, { promptKey: "qa_evaluation_prompt", provider: "claude", difficulty: "difficult", model: "claude-haiku-5-5" });
+assert.deepEqual(route, { tier: "PROMPT_MODEL", provider: "claude", model: "claude-haiku-5-5" });
+env = withEnv({
+  MTOS_MODEL_CLAUDE_HEAVY: "claude-heavy",
+  MTOS_MODEL_ROUTES: JSON.stringify({ qa_evaluation_prompt: "CLAUDE_HEAVY" }),
+});
+route = resolveModelRoute(env, { promptKey: "qa_evaluation_prompt", provider: "claude", model: "gemini-3.6-flash" });
+assert.equal(route?.provider, "gemini");
+assert.equal(route?.model, "gemini-3.6-flash");
+// A model id that is not offered is ignored, and the other rules apply.
+route = resolveModelRoute(env, { promptKey: "qa_evaluation_prompt", provider: "claude", model: "some-unknown-model" });
+assert.equal(route?.tier, "CLAUDE_HEAVY");
+
+// 8. The offered list and the provider lookup agree.
+assert.equal(isPromptModelFor("claude", "claude-sonnet-5-5"), true);
+assert.equal(isPromptModelFor("gemini", "claude-sonnet-5-5"), false);
+assert.equal(isPromptModelFor("claude", ""), false);
+for (const provider of Object.keys(PROMPT_MODEL_OPTIONS) as (keyof typeof PROMPT_MODEL_OPTIONS)[]) {
+  for (const option of PROMPT_MODEL_OPTIONS[provider]) {
+    assert.equal(providerOfPromptModel(option.id), provider);
+  }
+}
 
 console.log("model router: all checks passed");

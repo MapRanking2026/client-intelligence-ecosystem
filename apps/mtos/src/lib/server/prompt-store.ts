@@ -36,6 +36,12 @@ export type PromptDefinition = {
   provider?: PromptProvider;
   difficulty?: PromptTaskDifficulty;
   /**
+   * A model pinned to this prompt in the Prompt Engine (an id from
+   * `contracts/prompt-models.ts`). Absent means automatic: the model follows the
+   * provider and difficulty above.
+   */
+  model?: string;
+  /**
    * Binding-specific operating instructions for the MTOS module that executes
    * this prompt: the evidence it may use and the exact JSON shape it must
    * return. Appended after `prompt` at execution time and declared
@@ -73,6 +79,7 @@ export type PromptPatch = Partial<
     | "description"
     | "provider"
     | "difficulty"
+    | "model"
     | "runtimeContract"
     | "workflows"
   >

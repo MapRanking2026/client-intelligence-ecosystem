@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { isPromptModelFor } from "@/src/lib/contracts/prompt-models";
 import { requirePromptEngineAdmin } from "@/src/lib/server/prompt-engine-guard";
 import {
   getPromptRecord,
@@ -22,6 +23,7 @@ const EDITABLE_FIELDS = [
   "description",
   "provider",
   "difficulty",
+  "model",
   "runtimeContract",
   "workflows",
 ] as const;
@@ -72,6 +74,24 @@ export async function PATCH(request: Request, { params }: RouteContext) {
 
   if (issues.some((issue) => issue.level === "error")) {
     return NextResponse.json({ error: "Prompt failed validation", issues }, { status: 422 });
+  }
+
+  // A pinned model must be one offered for the prompt's provider. An empty value
+  // means "automatic", and a provider change drops a model that belonged to the
+  // old provider -- in both cases the field is cleared rather than stored empty.
+  const provider = patch.provider ?? existing.provider;
+  const requestedModel = "model" in patch ? patch.model : existing.model;
+  if (requestedModel && typeof requestedModel !== "string") {
+    return NextResponse.json({ error: "Model must be a model id or empty for automatic." }, { status: 422 });
+  }
+  if ("model" in patch && requestedModel && !isPromptModelFor(provider, requestedModel)) {
+    return NextResponse.json(
+      { error: `"${requestedModel}" is not a model offered for the ${provider ?? "selected"} provider.` },
+      { status: 422 },
+    );
+  }
+  if (("model" in patch || "provider" in patch) && !isPromptModelFor(provider, requestedModel)) {
+    patch.model = undefined;
   }
 
   const note = typeof body.note === "string" ? body.note : undefined;

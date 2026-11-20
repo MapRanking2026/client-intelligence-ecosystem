@@ -35,6 +35,7 @@ import { agendaEmailPatch } from "@/src/lib/server/services/agenda-email-service
 import { approveAndPrepareCall, sendAgendaEmailNow } from "@/src/lib/server/services/touch-approval-service";
 import {
   attachTouchTranscript,
+  switchTranscriptSource,
   watchTouchTranscript,
 } from "@/src/lib/server/services/transcript-watch-service";
 import { GOAL_STATUSES, hasMeetingNotes } from "@/src/lib/contracts/follow-through-notes";
@@ -447,6 +448,9 @@ const touchRequestSchema = z.discriminatedUnion("action", [
   // The AM pasting the dialogue themselves: a call on Zoom, a call hosted by the client, a call
   // nobody transcribed. Stored as attached, so no later poll overrules it.
   z.object({ action: z.literal("attach_transcript"), transcript: z.string().min(1) }),
+  // Switching between the two, once both exist. Neither copy is lost: an AM who pasted the wrong
+  // half of a call has to be able to go back to what the calendar event carried.
+  z.object({ action: z.literal("use_transcript_source"), source: z.enum(["google", "attached"]) }),
   // The follow-through's first screen. `analyze_score_gate` reads the transcript for the six red
   // flags; the other three are the AM's own decisions about the score, so each is its own action
   // rather than one "save" that could not tell a draft from a confirmation.
@@ -745,6 +749,9 @@ export async function POST(
         break;
       case "attach_transcript":
         result = await attachTouchTranscript(context, touchId, payload.transcript);
+        break;
+      case "use_transcript_source":
+        result = await switchTranscriptSource(context, touchId, payload.source);
         break;
       case "analyze_score_gate":
         result = await analyzeScoreGate(context, touchId);

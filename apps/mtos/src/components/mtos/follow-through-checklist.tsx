@@ -21,7 +21,7 @@ export function FollowThroughChecklist({
   timeZone,
 }: {
   rows: ChecklistRow[];
-  /** 24 business hours after the call ended. Absent until the call has an end. */
+  /** 24 hours after the call ended. Absent until the call has an end. */
   dueAt?: string;
   timeZone?: string;
 }) {
@@ -55,7 +55,7 @@ export function FollowThroughChecklist({
           </p>
         ) : (
           <p className="muted mt-1 text-[0.78rem]">
-            The 24 business hours start when the call ends, so there is no deadline on this touch yet.
+            The 24 hours start when the call ends, so there is no deadline on this touch yet.
           </p>
         )}
 

@@ -97,12 +97,29 @@ function payloadOf(fullNotes: string, transcript: string): string {
   return [...(fullNotes ? [FULL_NOTES_MARKER, fullNotes, ""] : []), TRANSCRIPT_MARKER, transcript].join("\n");
 }
 
+/**
+ * Which of the two transcripts a touch is being written from.
+ *
+ * Both are kept once both exist. The AM attaches their own when Google's notes are the wrong call
+ * or the dialogue is missing from them, and they need to be able to go back: discovering the
+ * pasted text was the wrong half of the call should not mean the automatic one is gone.
+ */
+export type TranscriptSource = "google" | "attached";
+
+/** The stored transcript document: the one in force, and a labelled copy of each source. */
+interface TranscriptArtifact {
+  payload?: string;
+  googlePayload?: string;
+  attachedPayload?: string;
+}
+
 async function persist(
   context: TenantContext,
   touchId: string,
   state: TouchTranscriptState,
   payload?: string,
   expectedScheduledAt?: string,
+  source: TranscriptSource = "google",
 ): Promise<TranscriptWatchResult> {
   const db = getFirebaseAdminDb();
   if (db) {
@@ -110,17 +127,31 @@ async function persist(
     // and the preparation both write this document, and a whole-document merge from here would
     // restore whatever this request happened to have read.
     const ref = db.doc(monthlyTouchPath(context.tenantId, touchId));
+    const artifactRef = db.doc(monthlyTouchArtifactPath(context.tenantId, touchId, TRANSCRIPT_ARTIFACT_ID));
     await db.runTransaction(async (tx) => {
       const current = (await tx.get(ref)).data() as MonthlyTouchRecord | undefined;
       if (!current) throw new Error("Monthly touch not found");
       if (expectedScheduledAt && current.scheduledAt !== expectedScheduledAt) throw new Error("This meeting was rescheduled while its transcript was being fetched. Reload the touch.");
       if (current.noShow?.resolution === "loom") throw new Error("The Loom update uses supporting documents instead of a meeting transcript.");
       if (current.noShow?.rescheduledAt && !current.live?.callEndedAt) throw new Error("Wait until the rescheduled call ends before attaching or fetching its transcript.");
-      tx.set(ref, { transcript: state }, { mergeFields: ["transcript"] });
-      if (payload) tx.set(db.doc(monthlyTouchArtifactPath(context.tenantId, touchId, TRANSCRIPT_ARTIFACT_ID)), { payload, savedAt: new Date().toISOString() });
+      const stored = (await tx.get(artifactRef)).data() as TranscriptArtifact | undefined;
+      // What the touch now holds, so the panel can offer the switch without reading the payloads
+      // themselves -- they are large, and the panel only needs to know the choice exists.
+      const held = {
+        hasGooglePayload: Boolean(stored?.googlePayload?.trim()) || (Boolean(payload) && source === "google"),
+        hasAttachedPayload: Boolean(stored?.attachedPayload?.trim()) || (Boolean(payload) && source === "attached"),
+      };
+      tx.set(ref, { transcript: { ...state, ...held, source } }, { mergeFields: ["transcript"] });
+      // `payload` is the one in force, so every reader downstream is unchanged. The labelled
+      // copy beside it is what makes switching back possible at all.
+      if (payload) tx.set(
+        artifactRef,
+        { payload, savedAt: new Date().toISOString(), [source === "attached" ? "attachedPayload" : "googlePayload"]: payload },
+        { merge: true },
+      );
     });
   }
-  return { transcript: state, ...(payload ? { payload } : {}) };
+  return { transcript: { ...state, source }, ...(payload ? { payload } : {}) };
 }
 
 /**
@@ -308,10 +339,68 @@ export async function attachTouchTranscript(
       chars: trimmed.length,
       foundAt: now,
       lastCheckedAt: now,
-      note: "Attached by you, so MTOS has stopped looking.",
+      note: "Attached by you, so nothing further is being looked for.",
+      source: "attached",
     },
     payload,
     touch.scheduledAt,
+    "attached",
+  );
+}
+
+/**
+ * Switch the touch between the transcript Google published and the one the AM attached.
+ *
+ * Both copies stay where they are; only which one is in force changes. That is the whole point:
+ * an AM who pastes the wrong half of a call has to be able to go back to the automatic pull, and
+ * one whose Gemini notes are a different meeting has to be able to leave their own in place.
+ *
+ * Everything written from the transcript -- the notes, the recap, the red-flag read -- is
+ * generated on demand from whatever is in force when it runs, so a switch takes effect the next
+ * time any of them is generated. It does not rewrite work already drafted.
+ */
+export async function switchTranscriptSource(
+  context: TenantContext,
+  touchId: string,
+  source: TranscriptSource,
+): Promise<TranscriptWatchResult> {
+  const dataSource = getMtosDataSource(context);
+  const touch = await dataSource.getMonthlyTouchById(touchId);
+  if (!touch) throw new Error("Monthly touch not found");
+
+  const db = getFirebaseAdminDb();
+  if (!db) throw new Error("Storage is unavailable, so the transcript cannot be switched.");
+
+  const artifactRef = db.doc(monthlyTouchArtifactPath(context.tenantId, touchId, TRANSCRIPT_ARTIFACT_ID));
+  const stored = (await artifactRef.get()).data() as TranscriptArtifact | undefined;
+  const chosen = source === "attached" ? stored?.attachedPayload : stored?.googlePayload;
+  if (!chosen?.trim()) {
+    throw new Error(
+      source === "attached"
+        ? "No transcript has been attached to this touch, so there is nothing to switch to."
+        : "Nothing was pulled from the calendar event for this touch, so there is nothing to switch back to.",
+    );
+  }
+
+  const now = new Date().toISOString();
+  return persist(
+    context,
+    touchId,
+    {
+      ...(touch.transcript || { docIds: [] }),
+      // The status says where the text came from, which is what the panel and the poll both read:
+      // an attached transcript stops the watcher looking, and switching back lets it resume.
+      status: source === "attached" ? "attached" : "found",
+      chars: chosen.length,
+      lastCheckedAt: now,
+      note:
+        source === "attached"
+          ? "Attached by you, so nothing further is being looked for."
+          : "Using the transcript pulled from the calendar event. Your attached copy is kept.",
+    },
+    chosen,
+    touch.scheduledAt,
+    source,
   );
 }
 

@@ -117,74 +117,21 @@ function wallClockLabel(date: Date, timeZone?: string): string {
   }).format(date);
 }
 
-/**
- * The offset between UTC and a zone's wall clock at one instant.
- *
- * Derived by formatting the instant in that zone and reading the clock back, rather than from a
- * fixed table, so a call that ends the week daylight saving changes still gets a deadline on the
- * clock the AM is reading.
- */
-function zoneOffsetMs(instant: number, timeZone: string): number {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hour12: false,
-  }).formatToParts(new Date(instant));
-  const read = (type: string) => Number(parts.find((part) => part.type === type)?.value || 0);
-  // Some ICU builds render midnight as hour 24; left as 24 it would push the day forward.
-  const hour = read("hour") % 24;
-  const asIfUtc = Date.UTC(read("year"), read("month") - 1, read("day"), hour, read("minute"), read("second"));
-  return asIfUtc - instant;
-}
-
-export const FOLLOW_THROUGH_BUSINESS_HOURS = 24;
-const DAY_MS = 24 * 60 * 60 * 1000;
+export const FOLLOW_THROUGH_HOURS = 24;
 
 /**
- * When the follow-through is due: 24 business hours after the call ended.
+ * When the follow-through is due: 24 hours after the call ended.
  *
- * Saturday and Sunday hours do not count, so a Friday afternoon call is due Monday afternoon
- * rather than on Saturday -- a deadline nobody is working towards is a deadline that teaches the
- * team to ignore the clock. Measured on the account manager's own wall clock, because that is the
- * calendar they are answering to.
- *
- * Walks the clock a local day at a time instead of hour by hour: the offset is re-read each day,
- * so a weekend with a daylight-saving change in it still lands on the right hour.
+ * Plain clock hours, weekend included. This used to skip Saturday and Sunday, which made a Friday
+ * call read as "2d 23h left" on the Friday afternoon it happened -- a deadline that says you have
+ * three days is not a 24-hour deadline, whatever it is measured in, and the follow-through is
+ * worth doing while the call is still fresh rather than after a weekend.
  */
-export function followThroughDueAt(
-  callEndedAt: string | undefined,
-  timeZone = "America/Los_Angeles",
-): string | undefined {
+export function followThroughDueAt(callEndedAt: string | undefined): string | undefined {
   if (!callEndedAt) return undefined;
   const parsed = Date.parse(callEndedAt);
   if (Number.isNaN(parsed)) return undefined;
-
-  let instant = parsed;
-  let remaining = FOLLOW_THROUGH_BUSINESS_HOURS * 60 * 60 * 1000;
-  // One pass per local day; the bound is a safety net, not a limit anyone reaches.
-  for (let guard = 0; remaining > 0 && guard < 60; guard += 1) {
-    const local = new Date(instant + zoneOffsetMs(instant, timeZone));
-    const intoDay =
-      local.getUTCHours() * 3600_000 +
-      local.getUTCMinutes() * 60_000 +
-      local.getUTCSeconds() * 1000 +
-      local.getUTCMilliseconds();
-    const toMidnight = DAY_MS - intoDay;
-    const weekday = local.getUTCDay();
-    if (weekday === 0 || weekday === 6) {
-      instant += toMidnight;
-      continue;
-    }
-    const used = Math.min(toMidnight, remaining);
-    instant += used;
-    remaining -= used;
-  }
-  return new Date(instant).toISOString();
+  return new Date(parsed + FOLLOW_THROUGH_HOURS * 60 * 60 * 1000).toISOString();
 }
 
 export type DeadlineTone = "ok" | "amber" | "red";

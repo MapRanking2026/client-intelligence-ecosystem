@@ -305,7 +305,7 @@ export default async function CommandCenterPage() {
             icon={<AlertTriangle />}
             title="Follow-through that is late"
             count={overdueFollowThrough.length}
-            subtitle="The meeting happened and the recap, the tickets and the notes are not done. The window is 24 business hours."
+            subtitle="The meeting happened and the recap, the tickets and the notes are not done. The window is 24 hours."
             empty="Every meeting that has happened has had its follow-through completed."
           >
             {overdueFollowThrough.map((entry) => (

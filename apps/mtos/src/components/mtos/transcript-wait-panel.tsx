@@ -36,13 +36,17 @@ const DECISION_ICON: Record<TranscriptFile["decision"], { icon: typeof Check; ch
   kept: { icon: Minus, chip: "muted", label: "Kept for reference" },
 };
 
-function FileRow({ file }: { file: TranscriptFile }) {
+function FileRow({ file, dimmed }: { file: TranscriptFile; dimmed?: boolean }) {
   const { icon: Icon, chip, label } = DECISION_ICON[file.decision];
+  // "Used" is only true while this touch is being written from what Google published. With an
+  // attached transcript in force, the same row still claiming "Used" is the screen telling the AM
+  // their paste was ignored -- which is exactly what it looked like.
+  const superseded = Boolean(dimmed) && file.decision === "used";
   return (
     <li className="list-row items-start">
-      <span className={`chip ${chip}`} style={{ flexShrink: 0 }}>
+      <span className={`chip ${superseded ? "muted" : chip}`} style={{ flexShrink: 0 }}>
         <Icon />
-        {label}
+        {superseded ? "Not in use" : label}
       </span>
       <span className="min-w-0 flex-1">
         <span className="text-[0.84rem] font-semibold" style={{ color: "var(--text)" }}>
@@ -149,6 +153,26 @@ export function TranscriptWaitPanel({
     };
   }, [keepPolling, check]);
 
+  /**
+   * Switch which transcript the follow-through is written from.
+   *
+   * Both copies stay stored; only the one in force changes, so an AM who pasted the wrong half of
+   * a call can go back to what the calendar event carried without losing their paste.
+   */
+  async function chooseSource(source: "google" | "attached") {
+    setAttaching(true);
+    try {
+      const next = await post({ action: "use_transcript_source", source });
+      if (next) setState(next);
+      setError("");
+      router.refresh();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "That transcript could not be switched.");
+    } finally {
+      setAttaching(false);
+    }
+  }
+
   async function attach() {
     setAttaching(true);
     try {
@@ -168,6 +192,8 @@ export function TranscriptWaitPanel({
   if (view.phase === "not_ended" && followThroughHref) return null;
 
   const tone = view.phase === "found" || view.phase === "attached" ? "good" : view.phase === "none" ? "watch" : "info";
+  // Touches that pre-date the choice carry no `source`; their attached status is the answer.
+  const usingAttached = state?.source ? state.source === "attached" : state?.status === "attached";
 
   return (
     <div className="card mt-4" style={{ position: followThroughHref ? "sticky" : "static", bottom: 12, zIndex: 20 }}>
@@ -195,12 +221,50 @@ export function TranscriptWaitPanel({
         {view.detail}
       </p>
 
+      {/*
+        Which transcript is in force, and the way back to the other one. Shown only when both
+        exist: with one transcript there is no choice to make, and a disabled pair of buttons
+        would only raise the question of what the other one would have been.
+      */}
+      {state?.hasGooglePayload && state?.hasAttachedPayload ? (
+        <div className="mt-3 grid gap-2">
+          <div className="eyebrow muted">Which transcript this follow-through uses</div>
+          <div className="seg" role="group" aria-label="Which transcript this follow-through uses">
+            <button
+              type="button"
+              className={`seg-btn ${usingAttached ? "on" : ""}`}
+              disabled={attaching}
+              onClick={() => void chooseSource("attached")}
+            >
+              The one you attached
+            </button>
+            <button
+              type="button"
+              className={`seg-btn ${usingAttached ? "" : "on"}`}
+              disabled={attaching}
+              onClick={() => void chooseSource("google")}
+            >
+              The one pulled from the event
+            </button>
+          </div>
+          <span className="field-hint">
+            The notes, the recap and the red-flag read are written from whichever is selected, the next time each
+            one is generated. Anything already drafted keeps what it was written from.
+          </span>
+        </div>
+      ) : null}
+
       {state?.files?.length ? (
         <>
           <div className="eyebrow muted mt-4">What Google had attached to the event</div>
+          {usingAttached ? (
+            <p className="field-hint mt-1">
+              Kept for reference. This follow-through is written from the transcript you attached, not from these.
+            </p>
+          ) : null}
           <ul className="mt-2 grid gap-2">
             {state.files.map((file) => (
-              <FileRow key={file.docId} file={file} />
+              <FileRow key={file.docId} file={file} dimmed={usingAttached} />
             ))}
           </ul>
         </>

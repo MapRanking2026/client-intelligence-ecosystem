@@ -100,7 +100,8 @@
     "check:brief-evidence-brevity": "tsx scripts/check-brief-evidence-brevity.ts",
     "check:email-signature": "tsx scripts/check-email-signature.ts",
     "check:agenda-match": "tsx scripts/check-agenda-match.ts",
-    "check:presentation-facts": "tsx scripts/check-presentation-facts.ts"
+    "check:presentation-facts": "tsx scripts/check-presentation-facts.ts",
+    "check:score-suggestion": "node scripts/check-score-suggestion.cjs"
   },
   "dependencies": {
     "@cie/contracts": "*",

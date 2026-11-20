@@ -170,7 +170,7 @@ export function TouchProgressRail({
             Follow-through {deadline.label}
           </span>
           <span className="muted text-[0.78rem]">
-            Due {wallClock(deadline.dueAt, timeZone)} — 24 business hours after the call ended.
+            Due {wallClock(deadline.dueAt, timeZone)} — 24 hours after the call ended.
           </span>
         </div>
       ) : null}

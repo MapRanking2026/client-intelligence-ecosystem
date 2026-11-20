@@ -67,7 +67,7 @@ const CLOSE_STEPS: { n: number; title: string; detail: string }[] = [
   {
     n: 5,
     title: "Promise the recap email",
-    detail: "Today, within 24 business hours: our actions, their items with dates, the goal agreed, the next meeting.",
+    detail: "Today, within 24 hours: our actions, their items with dates, the goal agreed, the next meeting.",
   },
   {
     n: 6,

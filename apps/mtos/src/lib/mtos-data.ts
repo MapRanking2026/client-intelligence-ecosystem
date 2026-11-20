@@ -1467,13 +1467,23 @@ export interface TouchTranscriptState {
    * the AM may be reading the panel between two of them, so the reason has to survive a reload.
    */
   note?: string;
+  /**
+   * Which transcript the follow-through is being written from.
+   *
+   * Absent on touches that pre-date the choice, and on any touch where only one of the two exists.
+   * Read as "google" when absent, which is what every touch did before the AM could choose.
+   */
+  source?: "google" | "attached";
+  /** True once both a pulled and an attached transcript exist, so the AM can switch between them. */
+  hasGooglePayload?: boolean;
+  hasAttachedPayload?: boolean;
 }
 
 /** The follow-through, and the one deadline in the whole touch. */
 export interface TouchFollowThroughState {
   bookingReminderId?: string;
   bookingReminderStatus?: "creating" | "created" | "failed" | "unknown";
-  /** 24 business hours after the call ended, on the AM's own clock. */
+  /** 24 hours after the call ended, on the AM's own clock. */
   dueAt?: string;
   startedAt?: string;
   finishedAt?: string;

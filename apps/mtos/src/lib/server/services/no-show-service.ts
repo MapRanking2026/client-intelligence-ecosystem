@@ -140,7 +140,7 @@ export async function runNoShowAction(context: TenantContext, touchId: string, a
       state = { ...state, sendStatus: "sent", sentAt: at, ...("messageId" in outcome ? { gmailMessageId: outcome.messageId, ...(outcome.threadId ? { gmailThreadId: outcome.threadId } : {}) } : { conversationId: outcome.conversationId }) };
       delete state.sendError;
       await ref.update({ noShow: state, progress: "follow", progressUpdatedAt: at,
-        "followThrough.dueAt": followThroughDueAt(at, (await getAccountManagerProfile(context)).timeZone),
+        "followThrough.dueAt": followThroughDueAt(at),
         noShowHistory: FieldValue.arrayUnion({ at, by: context.userId, resolution: "loom", detail: `Loom email accepted by ${state.emailProvider === "gmail" ? "Gmail" : "Intercom (legacy)"}: ${reference}` }) });
       return state;
     }

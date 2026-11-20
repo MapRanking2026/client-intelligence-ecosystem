@@ -64,7 +64,7 @@ export const NOTES_SECTIONS: NotesSection[] = [
     blurb: "Work we cannot start yet. Who we are waiting on, and when to chase.",
   },
   { id: "7", title: "Client recap email", blurb: "The email going to the client, in their language." },
-  { id: "8", title: "Post-touch checklist", blurb: "Everything above, filed within 24 business hours." },
+  { id: "8", title: "Post-touch checklist", blurb: "Everything above, filed within 24 hours." },
 ];
 
 /**

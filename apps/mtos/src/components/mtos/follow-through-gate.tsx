@@ -225,7 +225,12 @@ export function FollowThroughGate({
     setError("");
     try {
       const data = await post({ action: "analyze_score_gate" });
-      if (!data) return;
+      // A response with nothing in it used to leave the button finished and the screen unchanged,
+      // which reads as the read having silently done nothing. Say so instead.
+      if (!data) {
+        setError("The call was read but nothing came back. Try again, and score from your own notes if it keeps happening.");
+        return;
+      }
       setJustifications(data.justifications || {});
       setNote(data.note || "");
       setRead(true);

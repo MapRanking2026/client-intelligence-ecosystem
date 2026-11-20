@@ -15,7 +15,6 @@ import type {
 } from "@/src/lib/mtos-data";
 import { getFirebaseAdminDb } from "@/src/lib/server/firebase/admin";
 import { monthlyTouchPath } from "@/src/lib/server/firebase/collections";
-import { getAccountManagerProfile } from "@/src/lib/server/services/user-service";
 
 /**
  * Where a touch has got to, and the autosave behind every edit on its screens.
@@ -36,7 +35,7 @@ import { getAccountManagerProfile } from "@/src/lib/server/services/user-service
 export interface TouchStateResult {
   progress: TouchStep;
   savedAt: string;
-  /** Present once the call has ended: 24 business hours later, on the AM's own clock. */
+  /** Present once the call has ended: 24 hours later, on the AM's own clock. */
   followThroughDueAt?: string;
 }
 
@@ -113,7 +112,6 @@ export async function saveTouchDraft(
   const db = requireDb();
   const ref = db.doc(monthlyTouchPath(context.tenantId, touchId));
   const savedAt = new Date().toISOString();
-  const timeZone = (await getAccountManagerProfile(context)).timeZone;
 
   return db.runTransaction(async (tx) => {
     const snapshot = await tx.get(ref);
@@ -171,7 +169,7 @@ export async function saveTouchDraft(
       // The deadline is set once, from the first recorded end of the call. Recomputing it on every
       // later save would quietly move the deadline whenever the AM edited a note afterwards.
       if (next.callEndedAt && !dueAt) {
-        dueAt = followThroughDueAt(next.callEndedAt, timeZone);
+        dueAt = followThroughDueAt(next.callEndedAt);
         if (dueAt) {
           update.followThrough = { ...current.followThrough, dueAt };
           fields.push("followThrough");

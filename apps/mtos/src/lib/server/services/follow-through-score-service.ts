@@ -127,10 +127,28 @@ function findingsFromIntelligence(touch: MonthlyTouchRecord): {
 }
 
 /**
+ * A score to start from when no model supplied one.
+ *
+ * The gate is useless if reading the call leaves the picker blank: the AM pressed the button to
+ * be given a number and a sentence to argue with. The flags already carry the ceiling each one
+ * puts on the score, so the lowest ceiling is a defensible opening bid -- and a call with no flags
+ * at all opens at 9, which is what a month with nothing wrong in it looks like.
+ *
+ * It is a suggestion in the same sense the model's is: a draft the AM confirms, overrides or
+ * clears, never a recorded score.
+ */
+function suggestionFromFindings(findings: RedFlagFinding[]): number {
+  const { cap } = recommendedCap(findings);
+  return cap === null ? 9 : cap;
+}
+
+/**
  * Read the transcript for the six flags and a suggested score.
  *
  * Returns a draft for the AM, never a decision. A failure to reach a model is not an error here:
- * the gate still has to open, so it falls back and says in `note` what it fell back to.
+ * the gate still has to open, so it falls back and says in `note` what it fell back to -- and it
+ * still arrives with a score and a justification, because a button that reads the call and then
+ * changes nothing on the screen is one nobody presses twice.
  */
 export async function analyzeScoreGate(
   context: TenantContext,
@@ -155,15 +173,25 @@ export async function analyzeScoreGate(
     touch.transcript.foundAt > (touch.postMeeting?.analyzedAt || "");
   if (!transcript || !hasAnyLlmProvider(env) || (!newerTranscript && isScoreValue(legacyScore))) {
     const { findings, note } = findingsFromIntelligence(touch);
+    if (!newerTranscript && isScoreValue(legacyScore)) {
+      return {
+        findings,
+        suggested: legacyScore,
+        justifications: legacy?.suggestedNpsReason ? { [legacyScore]: legacy.suggestedNpsReason } : {},
+        note: "Score suggestion and risk flags loaded from the earlier transcript analysis. Confirm them against the call.",
+      };
+    }
+    // No model read happened, so the suggestion comes off the flags themselves and says so. The
+    // missing transcript is named separately: "no AI provider answered" is the wrong sentence to
+    // read when the real problem is that nothing has been attached to this touch yet.
+    const suggested = suggestionFromFindings(findings);
     return {
       findings,
-      ...(!newerTranscript && isScoreValue(legacyScore) ? { suggested: legacyScore } : {}),
-      justifications: !newerTranscript && isScoreValue(legacyScore) && legacy?.suggestedNpsReason
-        ? { [legacyScore]: legacy.suggestedNpsReason }
-        : {},
-      note: !newerTranscript && isScoreValue(legacyScore)
-        ? "Score suggestion and risk flags loaded from the earlier transcript analysis. Confirm them against the call."
-        : note,
+      suggested,
+      justifications: { [suggested]: fallbackJustification(suggested, findings, clientName) },
+      note: transcript
+        ? `${note} The ${suggested}/10 below is drawn from those flags, not from a read of the call.`
+        : "There is no transcript on this touch yet, so the call has not been read. Attach one above, or score from your own notes — the suggestion below is drawn from the flags already recorded, not from the call.",
     };
   }
 
@@ -190,10 +218,12 @@ export async function analyzeScoreGate(
   const parsed = analysisSchema.safeParse(data);
   if (!parsed.success) {
     const { findings, note } = findingsFromIntelligence(touch);
+    const suggested = suggestionFromFindings(findings);
     return {
       findings,
-      justifications: {},
-      note: `The transcript read came back in a shape MTOS could not use (${parsed.error.issues[0]?.message || "unexpected fields"}). ${note}`,
+      suggested,
+      justifications: { [suggested]: fallbackJustification(suggested, findings, clientName) },
+      note: `The transcript read came back in a shape that could not be used (${parsed.error.issues[0]?.message || "unexpected fields"}). ${note} The ${suggested}/10 below is drawn from those flags, not from a read of the call.`,
     };
   }
 
@@ -205,10 +235,21 @@ export async function analyzeScoreGate(
     }
   }
 
+  // The model read the call but named no score, or named one outside 1-10. The flags it did find
+  // still cap the score, so the gate opens on that rather than on an empty picker.
+  const findings = completeFindings(parsed.data.findings);
+  if (isScoreValue(parsed.data.suggestedScore)) {
+    return { findings, suggested: parsed.data.suggestedScore, justifications };
+  }
+  const suggested = suggestionFromFindings(findings);
   return {
-    findings: completeFindings(parsed.data.findings),
-    ...(isScoreValue(parsed.data.suggestedScore) ? { suggested: parsed.data.suggestedScore } : {}),
-    justifications,
+    findings,
+    suggested,
+    justifications: {
+      ...justifications,
+      ...(justifications[String(suggested)] ? {} : { [suggested]: fallbackJustification(suggested, findings, clientName) }),
+    },
+    note: `The call was read, but it did not come back with a score. The ${suggested}/10 below follows from the flags it found; change it if the call says otherwise.`,
   };
 }
 

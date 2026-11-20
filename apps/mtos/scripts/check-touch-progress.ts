@@ -140,51 +140,44 @@ check(
 );
 
 // ---------------------------------------------------------------------------
-scenario("24 business hours after the call");
+scenario("24 hours after the call");
 
-// Friday 3 July 2026, 3:00pm Pacific. Nine hours left in Friday, then the weekend is skipped, so
-// the remaining fifteen hours land on Monday afternoon.
-const fridayAfternoon = followThroughDueAt("2026-07-03T22:00:00.000Z", PT);
+// Plain clock hours now, weekend included. The weekend skip is gone because a Friday afternoon
+// call read as "2d 23h left" on the Friday it happened, which is not a 24-hour deadline by any
+// reading, and the follow-through is worth doing while the call is still fresh.
+const fridayAfternoon = followThroughDueAt("2026-07-03T22:00:00.000Z");
 check(
-  "a Friday 3pm call is due Monday 3pm, not Saturday 3pm",
-  wall(fridayAfternoon) === "Mon 2026-07-06 15:00",
+  "a Friday 3pm call is due Saturday 3pm",
+  wall(fridayAfternoon) === "Sat 2026-07-04 15:00",
   wall(fridayAfternoon),
 );
 
-// Monday 6 July 2026, 10:00am Pacific -> Tuesday 10:00am.
-const mondayMorning = followThroughDueAt("2026-07-06T17:00:00.000Z", PT);
+const mondayMorning = followThroughDueAt("2026-07-06T17:00:00.000Z");
 check("a Monday morning call is due Tuesday morning", wall(mondayMorning) === "Tue 2026-07-07 10:00", wall(mondayMorning));
 
-// Saturday 4 July 2026, 11:00am Pacific. No weekend hours count, so the clock starts Monday 00:00.
-const saturday = followThroughDueAt("2026-07-04T18:00:00.000Z", PT);
-check(
-  "a Saturday call starts its clock on Monday",
-  wall(saturday) === "Tue 2026-07-07 00:00",
-  wall(saturday),
-);
+const saturday = followThroughDueAt("2026-07-04T18:00:00.000Z");
+check("a weekend call gets the same 24 hours as any other", wall(saturday) === "Sun 2026-07-05 11:00", wall(saturday));
 
-// Thursday 2 July 2026, 11:00pm Pacific: one hour of Thursday, then 23 hours of Friday.
-const lateThursday = followThroughDueAt("2026-07-03T06:00:00.000Z", PT);
+const lateThursday = followThroughDueAt("2026-07-03T06:00:00.000Z");
 check("a late Thursday call is due late Friday", wall(lateThursday) === "Fri 2026-07-03 23:00", wall(lateThursday));
 
-// The same instant read on a different clock gives a different local deadline, which is the point
-// of measuring it in the AM's zone rather than the server's.
-const newYork = followThroughDueAt("2026-07-03T22:00:00.000Z", "America/New_York");
+// The deadline is one instant; the wall clock an AM reads it on is their own.
+const newYork = followThroughDueAt("2026-07-03T22:00:00.000Z");
 check(
-  "an east-coast AM gets the deadline on their own clock",
-  wall(newYork, "America/New_York") === "Mon 2026-07-06 18:00",
+  "an east-coast AM reads the same instant on their own clock",
+  wall(newYork, "America/New_York") === "Sat 2026-07-04 18:00",
   wall(newYork, "America/New_York"),
 );
 
 check("no call end means no deadline", followThroughDueAt(undefined) === undefined);
 check("an unparseable call end means no deadline", followThroughDueAt("after lunch") === undefined);
 
-// A call that ends the Friday before the clocks go back: the extra hour belongs to the weekend, so
-// the Monday deadline is still at the same wall-clock time the AM read on Friday.
-const beforeFallBack = followThroughDueAt("2026-10-30T22:00:00.000Z", PT);
+// 24 hours is 24 hours across a daylight-saving change: the instant is fixed, so the wall clock
+// the AM reads it on moves by the hour the clocks moved.
+const beforeFallBack = followThroughDueAt("2026-10-31T22:00:00.000Z");
 check(
-  "a daylight-saving weekend does not shift the Monday deadline",
-  wall(beforeFallBack) === "Mon 2026-11-02 15:00",
+  "a daylight-saving change moves the wall clock, not the window",
+  wall(beforeFallBack) === "Sun 2026-11-01 14:00",
   wall(beforeFallBack),
 );
 

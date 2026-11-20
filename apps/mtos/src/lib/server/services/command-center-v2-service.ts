@@ -140,7 +140,7 @@ export async function getCommandCenterV2View(
     .sort(byDate);
 
   // Follow-through is overdue once the meeting has passed and the post-meeting decisions have not
-  // been applied. The SOP window is 24 business hours; a full day past the meeting is the earliest
+  // been applied. The SOP window is 24 hours; a full day past the meeting is the earliest
   // point at which it is genuinely late rather than simply not done yet.
   const overdueFollowThrough = entries
     .filter((entry) => {

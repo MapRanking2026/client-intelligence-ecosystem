@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { unverifiedFigureLines } from "@/src/lib/contracts/presentation-facts";
 import { useRouter } from "next/navigation";
 import { ChevronLeft, ChevronRight, Eye, Monitor, PhoneOff, Play, X } from "lucide-react";
 
@@ -627,6 +628,18 @@ export function LiveCallStep({
                   <span className="chip">Never on the client screen</span>
                 </div>
               </div>
+              {presentation?.unverifiedFigures?.length ? (
+                <div role="alert" className="callout mb-3">
+                  <div className="callout-body">
+                    <strong>Check these figures before you present.</strong>
+                    <ul className="mt-2 grid gap-1">
+                      {unverifiedFigureLines(presentation.unverifiedFigures).map((line) => (
+                        <li key={line} className="text-[0.84rem]">· {line}</li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+              ) : null}
               {presentation?.formatRationale ? <details className="mb-3"><summary className="field-hint">Presentation background</summary><p className="field-hint">{presentation.experienceFormat ? presentation.experienceFormat + " · " : ""}{presentation.formatRationale}</p></details> : null}
 
               {presenterView === "script" ? (

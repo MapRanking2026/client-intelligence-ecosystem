@@ -1,3 +1,4 @@
+import { exactFigure } from "@/src/lib/contracts/presentation-facts";
 import { rankTrackerChip, unlinkedChip, type SourceChip } from "@/src/lib/contracts/brief-sources";
 import type { BriefSectionId } from "@/src/lib/contracts/prep-brief";
 import type {
@@ -390,7 +391,7 @@ export function deltaLine(
   const size =
     previous === 0
       ? formatMetricValue(Math.abs(change), unit)
-      : `${Math.round((Math.abs(change) / Math.abs(previous)) * 100)}%`;
+      : `${exactFigure((Math.abs(change) / Math.abs(previous)) * 100)}%`;
   return {
     detail: `${arrow} ${size} · was ${formatMetricValue(previous, unit)}`,
     tone: better ? "good" : "risk",

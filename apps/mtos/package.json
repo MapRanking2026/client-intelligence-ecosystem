@@ -99,7 +99,8 @@
     "check:recap-agreements": "node scripts/check-recap-agreements.cjs",
     "check:brief-evidence-brevity": "tsx scripts/check-brief-evidence-brevity.ts",
     "check:email-signature": "tsx scripts/check-email-signature.ts",
-    "check:agenda-match": "tsx scripts/check-agenda-match.ts"
+    "check:agenda-match": "tsx scripts/check-agenda-match.ts",
+    "check:presentation-facts": "tsx scripts/check-presentation-facts.ts"
   },
   "dependencies": {
     "@cie/contracts": "*",

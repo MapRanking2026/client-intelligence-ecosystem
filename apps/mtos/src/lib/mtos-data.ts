@@ -791,6 +791,14 @@ export interface Presentation {
   scriptsGeneratedAt?: string;
   model?: string;
   provider?: string;
+  /**
+   * Figures on the slides that this touch's evidence does not hold.
+   *
+   * Recorded rather than removed: a number taken out of a sentence leaves a sentence that says
+   * something else, and the account manager is the one who can open the source and settle whether
+   * it is a transcription slip, a rounded value, or a figure that should not be there at all.
+   */
+  unverifiedFigures?: { slide: number; title: string; figures: string[] }[];
   errorMessage?: string;
 }
 

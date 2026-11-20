@@ -1,4 +1,5 @@
 import { BRIEF_SECTIONS, EMPTY_PREP_BRIEF, type PrepBrief } from "@/src/lib/contracts/prep-brief";
+import { exactFigure } from "@/src/lib/contracts/presentation-facts";
 import { EVIDENCE_WINDOW_DAYS, EVIDENCE_WINDOW_RULE, NO_PRODUCT_NAME_RULE, withinWindow } from "@/src/lib/contracts/client-book-page";
 import type { ClientRecord, MonthlyTouchPrepPack } from "@/src/lib/mtos-data";
 
@@ -43,7 +44,9 @@ const day = (value: unknown) => {
     ? text(value)
     : new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" }).format(parsed);
 };
-const num = (value: unknown) => (typeof value === "number" && Number.isFinite(value) ? String(Math.round(value * 10) / 10) : "");
+// Written as the record holds it. A figure rounded on its way into a brief is a figure the AM
+// then reads out, and the client checks against a profile that says something else.
+const num = (value: unknown) => (typeof value === "number" && Number.isFinite(value) ? exactFigure(value) : "");
 const record = (value: unknown) => (value && typeof value === "object" ? (value as Record<string, unknown>) : {});
 const sentence = (parts: string[]) => {
   const body = parts.filter(Boolean).join(", ");

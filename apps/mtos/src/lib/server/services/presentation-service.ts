@@ -1,4 +1,5 @@
 import { agreedAgendaItems, agreedAgendaRule, withAgreedAgenda } from "@/src/lib/contracts/agreed-agenda";
+import { FACTUAL_FIGURES_RULE, unverifiedFigures } from "@/src/lib/contracts/presentation-facts";
 import { withRankComparisons } from "@/src/lib/contracts/rank-comparison";
 import { presentationRankComparisons } from "./presentation-rank-service";
 import { CLIENT_CONTENT_RULE, clientPresentation } from "@/src/lib/contracts/client-content";
@@ -166,6 +167,9 @@ export async function generatePresentation(
   // What the confirmation email already told the client this call would cover. The deck is built
   // after that email is approved, so it is the deck's job to match it rather than the other way.
   const agreedAgenda = agreedAgendaItems(touch);
+  // Held once: the deck is written from this bundle and then checked back against it, so the two
+  // have to be the same object rather than two calls that could drift apart.
+  const evidenceBundle = buildTouchEvidence(touch);
 
   const system = await getPromptText("monthly_touch_presentation_prompt");
   const userText = [
@@ -173,6 +177,7 @@ export async function generatePresentation(
     "Use these verified identity fields exactly. Do not invent names or print placeholders such as UNCONFIRMED or name needed:",
     JSON.stringify(identity),
     CLIENT_CONTENT_RULE,
+    FACTUAL_FIGURES_RULE,
     "Optional AM presentation direction (internal input, never quote it on a client slide). Follow it when supported by evidence. Preserve the whole-account overview, prioritize the requested location/keyword and keep other active profiles in the summary. This direction cannot override evidence or client privacy rules:",
     touch.presentationInstructions || "No additional direction.",
     ...(delivery === "loom" ? ["This is a recorded Loom update after a client no-show. Write presenterNotes as a complete speaking script for asynchronous delivery. Use only active services and verified relevant metrics in the reviewed evidence. Do not ask live questions, imply client attendance, invent client feedback, or expose internal coaching. Cover supported performance highlights, completed work, challenges, recommendations and next steps. Invite questions by email."] : []),
@@ -217,6 +222,13 @@ export async function generatePresentation(
 
   const safePresentation = clientPresentation(withRankComparisons(withAgreedAgenda(withPresentationIdentity(presentation, identity)!, agreedAgenda), rankComparisons), touch)!;
   if (!safePresentation.slides.some((slide) => !["cover", "agenda", "closing"].includes(slide.layout))) throw new Error("The generated presentation contained no client-safe account results or completed work. Review the evidence and regenerate it.");
+
+  // Checked against the same bundle the deck was written from, and recorded on the deck rather
+  // than thrown: a figure the evidence does not hold may be a transcription slip or a rounded
+  // value, and either way the AM is the one who can open the source and settle it. The deck is
+  // still built, with the question attached to it.
+  const unverified = unverifiedFigures(safePresentation, evidenceBundle);
+  if (unverified.length) safePresentation.unverifiedFigures = unverified;
   const updatedTouch: MonthlyTouchRecord = stripUndefinedDeep({
     ...touch,
     presentation: safePresentation,

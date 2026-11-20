@@ -343,7 +343,10 @@ function topicsBlock(topics: AgendaTopic[]): string {
       return [
         `<tr>`,
         `<td style="padding:9px 0;vertical-align:middle;width:52px"><div style="width:38px;height:38px;border-radius:38px;background:${BLUE};color:#ffffff;text-align:center;line-height:38px;font-size:17px;font-weight:700">${index + 1}</div></td>`,
-        `<td style="padding:9px 0;vertical-align:middle;border-bottom:1px solid ${HAIR}"><div style="font-weight:700;color:${NAVY};font-size:16px">${heading}</div>`,
+        // Marked so the agenda can be read back out of the sent email. The deck shown on the call
+        // has to list what the client was actually promised, and after the AM edits this body by
+        // hand the body is the only record of what that was.
+        `<td style="padding:9px 0;vertical-align:middle;border-bottom:1px solid ${HAIR}"><div data-mtos-field="agenda-topic" style="font-weight:700;color:${NAVY};font-size:16px">${heading}</div>`,
         topic.line ? `<div style="color:${BODY};font-size:14px;margin-top:2px">${esc(topic.line)}</div>` : "",
         `</td></tr>`,
       ].join("");

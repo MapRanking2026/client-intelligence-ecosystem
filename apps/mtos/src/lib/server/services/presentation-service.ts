@@ -1,3 +1,4 @@
+import { agreedAgendaItems, agreedAgendaRule, withAgreedAgenda } from "@/src/lib/contracts/agreed-agenda";
 import { withRankComparisons } from "@/src/lib/contracts/rank-comparison";
 import { presentationRankComparisons } from "./presentation-rank-service";
 import { CLIENT_CONTENT_RULE, clientPresentation } from "@/src/lib/contracts/client-content";
@@ -162,6 +163,10 @@ export async function generatePresentation(
   if (!identity.preparedBy) throw new Error("Add the Account Manager's name to this client's record or your profile before generating the presentation.");
   const rankComparisons = await presentationRankComparisons(context, touch);
 
+  // What the confirmation email already told the client this call would cover. The deck is built
+  // after that email is approved, so it is the deck's job to match it rather than the other way.
+  const agreedAgenda = agreedAgendaItems(touch);
+
   const system = await getPromptText("monthly_touch_presentation_prompt");
   const userText = [
     "Build the client-facing deck for this Monthly Touch.",
@@ -183,6 +188,7 @@ export async function generatePresentation(
     "VISUAL DIRECTION: Use a clear evidence-led story with varied layouts: a strong headline, two or three large metrics, concise takeaways and restrained blue/teal accents. Avoid long paragraphs and repeated tables. Keep declines and missing evidence visible; do not invent improvements.",
     "Server-verified keyword comparison slides will be inserted beside relevant keyword discussions. Introduce those keywords using their exact names; do not manufacture rank numbers or map imagery.",
     JSON.stringify(rankComparisons.map(item => ({ keyword: item.keyword, business: item.businessName, currentDate: item.current.grid.scanDate, previousDate: item.previous?.grid.scanDate, baseline: item.baselineLabel, sameGrid: item.sameGrid }))),
+    ...(agreedAgenda.length ? [agreedAgendaRule(agreedAgenda)] : []),
     "The reviewed preparation and its full evidence bundle:",
     JSON.stringify(buildTouchEvidence(touch), null, 2),
   ].join("\n");
@@ -209,7 +215,7 @@ export async function generatePresentation(
     provider: result.provider,
   };
 
-  const safePresentation = clientPresentation(withRankComparisons(withPresentationIdentity(presentation, identity)!, rankComparisons), touch)!;
+  const safePresentation = clientPresentation(withRankComparisons(withAgreedAgenda(withPresentationIdentity(presentation, identity)!, agreedAgenda), rankComparisons), touch)!;
   if (!safePresentation.slides.some((slide) => !["cover", "agenda", "closing"].includes(slide.layout))) throw new Error("The generated presentation contained no client-safe account results or completed work. Review the evidence and regenerate it.");
   const updatedTouch: MonthlyTouchRecord = stripUndefinedDeep({
     ...touch,

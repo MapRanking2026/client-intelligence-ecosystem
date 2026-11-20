@@ -549,7 +549,13 @@ export function LiveMode({
  * The host is checked rather than trusted. The URL comes back from a calendar event, so a bad or
  * tampered link would otherwise send the AM wherever it pointed.
  */
-async function openMeetWindow(touch: MonthlyTouchRecord, callWindow: Window) {
+/** Everything joining a call needs: which touch it is, and which calendar event to fall back on. */
+export interface JoinableTouch {
+  id: string;
+  calendarEventId?: string;
+}
+
+async function openMeetWindow(touch: JoinableTouch, callWindow: Window) {
   const overview = await meetingRequest<GoogleMeetingOverview>(touch.id);
   let selection = overview.selection;
   if (!selection && touch.calendarEventId) {
@@ -570,7 +576,7 @@ async function openMeetWindow(touch: MonthlyTouchRecord, callWindow: Window) {
  * the full-screen Live mode behind it -- opening both would give the AM two sets of notes for one
  * call, and only one of them would be saved where the follow-through reads it.
  */
-export function JoinMeetButton({ touch, label = "Join the Google Meet" }: { touch: MonthlyTouchRecord; label?: string }) {
+export function JoinMeetButton({ touch, label = "Join the Google Meet", className = "btn btn-ghost" }: { touch: JoinableTouch; label?: string; className?: string }) {
   const [joining, setJoining] = useState(false);
   const [joinError, setJoinError] = useState("");
   async function join() {
@@ -587,7 +593,7 @@ export function JoinMeetButton({ touch, label = "Join the Google Meet" }: { touc
   }
   return (
     <>
-      <button type="button" className="btn btn-ghost" disabled={joining} onClick={() => void join()}>
+      <button type="button" className={className} disabled={joining} onClick={() => void join()}>
         <PlayCircle />
         {joining ? "Opening Google Meet…" : label}
       </button>

@@ -8,6 +8,7 @@ import { ChevronLeft, ChevronRight, Eye, Monitor, PhoneOff, Play, X } from "luci
 import { Linkified } from "@/src/components/mtos/annotate";
 import { formatSpeakingTime, notesBullets, scriptParagraphs } from "@/src/lib/contracts/presenter-script";
 import { NextTouchBookingControl } from "@/src/components/mtos/next-touch-booking";
+import { JoinMeetButton } from "@/src/components/mtos/live-mode";
 import { DECK, PresentationSlideCanvas } from "@/src/components/mtos/presentation-slide";
 import { SourceChips } from "@/src/components/mtos/source-chip";
 import { useTouchAutosave } from "@/src/components/mtos/use-touch-autosave";
@@ -236,6 +237,8 @@ export function LiveCallStep({
   approvedAtLabel,
   agendaSent,
   callAtLabel,
+  calendarEventId,
+  meetingUrl,
 }: {
   touchId: string;
   clientId: string;
@@ -251,6 +254,10 @@ export function LiveCallStep({
   approvedAtLabel?: string;
   agendaSent?: boolean;
   callAtLabel?: string;
+  /** The calendar event this touch is pinned to, so Join can resolve the link if none is stored. */
+  calendarEventId?: string;
+  /** The Google Meet link, when one has been chosen. Printed as well as opened. */
+  meetingUrl?: string;
 }) {
   const router = useRouter();
   const autosave = useTouchAutosave(touchId);
@@ -495,7 +502,43 @@ export function LiveCallStep({
 
   return (
     <div className="grid gap-4 live-call-workspace" aria-label="Live call workspace">
-      <div className="card mt-4">
+      {/*
+        The call itself, first on the screen.
+
+        The AM is on this page because the call is now, and joining it used to mean going back to
+        the Google meetings panel in Prep. The link is also printed, because an AM who is dialling
+        in from their phone, or whose browser blocks the popup, needs something they can copy.
+      */}
+      <section className="card mt-4" aria-label="The meeting">
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="min-w-0">
+            <div className="eyebrow muted">The meeting</div>
+            <div className="text-[0.95rem] font-semibold">{callAtLabel || "Time not recorded on this touch"}</div>
+          </div>
+          <div className="ml-auto flex flex-wrap items-center gap-2">
+            <JoinMeetButton
+              touch={{ id: touchId, ...(calendarEventId ? { calendarEventId } : {}) }}
+              label="Join the Google Meet"
+              className="btn btn-primary"
+            />
+            {meetingUrl ? (
+              <a className="btn btn-ghost btn-sm" href={meetingUrl} target="_blank" rel="noopener noreferrer">
+                Open the link
+              </a>
+            ) : null}
+          </div>
+        </div>
+        {meetingUrl ? (
+          <p className="field-hint mt-2" style={{ overflowWrap: "anywhere" }}>{meetingUrl}</p>
+        ) : (
+          <p className="field-hint mt-2">
+            No Google Meet link is recorded for this touch yet. Pick the call under Google meetings in Prep, and
+            Join will open it from here.
+          </p>
+        )}
+      </section>
+
+      <div className="card">
         <div className="flex flex-wrap items-center gap-3">
           <span className={`chip ${TONE_CLASS[header.tone].chip}`}>
             <span className={`sig-dot ${TONE_CLASS[header.tone].dot}`} />

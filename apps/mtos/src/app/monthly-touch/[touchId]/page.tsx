@@ -650,6 +650,8 @@ export default async function MonthlyTouchRunSheetPage({
             {...(approvedAtLabel ? { approvedAtLabel } : {})}
             {...(agendaEmail.state.declined ? {} : { agendaSent: agendaEmail.sent })}
             {...(callAtLabel ? { callAtLabel } : {})}
+            {...(touch.calendarEventId ? { calendarEventId: touch.calendarEventId } : {})}
+            {...(touch.googleMeeting?.meetingUrl ? { meetingUrl: touch.googleMeeting.meetingUrl } : {})}
             {...(touch.callGuide?.sections ? { sections: touch.callGuide.sections } : {})}
             {...(touch.presentation ? { presentation: touch.presentation } : {})}
             {...(touch.review?.declinedSections ? { declinedSections: touch.review.declinedSections } : {})}

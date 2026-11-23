@@ -1,7 +1,9 @@
-import type { ClientAction, NotesDraft } from "@/src/lib/contracts/follow-through-notes";
+import type { ClientAction, NotesDraft, TicketAction } from "@/src/lib/contracts/follow-through-notes";
 import { notesBlockers } from "@/src/lib/contracts/follow-through-notes";
 import {
+  approvedItems,
   itemBlockers,
+  itemTitle,
   type FollowThroughItem,
 } from "@/src/lib/contracts/follow-through-tickets";
 import {
@@ -93,6 +95,63 @@ export function reviewedClientActions(actions: ClientAction[], items: FollowThro
 
 export function approvedClientActions(actions: ClientAction[], items: FollowThroughItem[] = []): ClientAction[] {
   return reviewedClientActions(actions, items).filter(action => action.what.trim() && action.decision !== "denied" && action.decision !== "deleted");
+}
+
+/** The draft as it will be filed, and the approved tickets that become section 3. */
+export interface FiledNotes {
+  draft: NotesDraft;
+  ticketActions: TicketAction[];
+}
+
+/**
+ * The filed document, derived from the draft and the item decisions.
+ *
+ * Only what was approved reaches the page: a denied action is not a commitment, and the Client's
+ * Book is read later as the record of what we said we would do. The pending drafts are left out
+ * of section 3 because they already have section 6, and listing a ticket nobody may start yet in
+ * both places reads as two commitments.
+ *
+ * This is the single source of that filtering. The preview and the write to ClickUp both call it,
+ * so the AM approves the exact document that gets filed.
+ */
+export function filedNotes(
+  notes: NotesDraft,
+  items: FollowThroughItem[] = [],
+  /** Created ticket urls by item id. Absent before the tickets exist, as in the preview. */
+  ticketUrls?: Record<string, string>,
+): FiledNotes {
+  const approved = approvedItems(items);
+  const approvedIds = new Set(approved.map(item => item.actionId).filter(Boolean));
+
+  const draft: NotesDraft = {
+    ...notes,
+    departments: notes.departments
+      .map(department => ({
+        ...department,
+        actions: department.actions.filter(action => approvedIds.has(action.id)),
+      }))
+      .filter(department => department.actions.length || department.clientFeedback.trim()),
+    clientActions: approvedClientActions(notes.clientActions, items),
+  };
+
+  const pendingIds = new Set(notes.pending.map(item => item.id));
+  const ticketActions: TicketAction[] = approved
+    .filter(item => !(item.actionId && pendingIds.has(item.actionId)))
+    .map(item => {
+      const url = ticketUrls?.[item.id];
+      return {
+        // A billing change is filed on its own form rather than to a delivery team, so it is
+        // grouped as what it is instead of landing under "Unassigned".
+        ...(item.formType === "billing" ? { department: "Billing" } : item.department ? { department: item.department } : {}),
+        what: itemTitle(item),
+        ...(item.assignee?.trim() ? { owner: item.assignee.trim() } : {}),
+        ...(item.dueDate?.trim() ? { due: item.dueDate.trim() } : {}),
+        // Before the run there are no urls yet, and "not filed" would be a lie rather than a gap.
+        ...(url ? { url } : ticketUrls ? { notFiled: true } : {}),
+      };
+    });
+
+  return { draft, ticketActions };
 }
 
 // ---------------------------------------------------------------------------

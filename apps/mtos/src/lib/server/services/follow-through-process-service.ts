@@ -7,7 +7,7 @@ import type { TenantContext } from "@/src/lib/contracts/mtos";
 import type { ClientRecord, MonthlyTouchRecord } from "@/src/lib/mtos-data";
 import {
   PROCESSING_STEPS,
-  approvedClientActions,
+  filedNotes,
   reviewedClientActions,
   finishBlockers,
   processingOutcome,
@@ -15,7 +15,7 @@ import {
   type StepResult,
   type StepStatus,
 } from "@/src/lib/contracts/follow-through-finish";
-import { renderNotesMarkdown, type NotesDraft, type TicketAction } from "@/src/lib/contracts/follow-through-notes";
+import { renderNotesMarkdown, type NotesDraft } from "@/src/lib/contracts/follow-through-notes";
 import {
   approvedItems,
   itemTitle,
@@ -296,38 +296,9 @@ async function createTickets(state: StepContext): Promise<StepResult> {
 // ---------------------------------------------------------------------------
 
 async function fileNotes(state: StepContext): Promise<StepResult> {
-  // Only what was approved reaches the filed page: a denied action is not a commitment, and the
-  // Client's Book is read later as the record of what we said we would do.
-  const approvedIds = new Set(approvedItems(state.items).map((item) => item.actionId).filter(Boolean));
-  const filtered: NotesDraft = {
-    ...state.notes,
-    departments: state.notes.departments
-      .map((department) => ({
-        ...department,
-        actions: department.actions.filter((action) => approvedIds.has(action.id)),
-      }))
-      .filter((department) => department.actions.length || department.clientFeedback.trim()),
-    clientActions: approvedClientActions(state.notes.clientActions, state.items),
-  };
-
-  // Section 3 is the approved tickets themselves, in the form the AM approved them in. The
-  // pending ones are left out of it: they already have section 6, and a ticket nobody may start
-  // yet is not an action item -- listing it in both places reads as two commitments.
-  const pendingIds = new Set(state.notes.pending.map((item) => item.id));
-  const ticketActions: TicketAction[] = approvedItems(state.items)
-    .filter((item) => !(item.actionId && pendingIds.has(item.actionId)))
-    .map((item) => {
-      const url = state.ticketUrls[item.id];
-      return {
-        // A billing change is filed on its own form rather than to a delivery team, so it is
-        // grouped as what it is instead of landing under "Unassigned".
-        ...(item.formType === "billing" ? { department: "Billing" } : item.department ? { department: item.department } : {}),
-        what: itemTitle(item),
-        ...(item.assignee?.trim() ? { owner: item.assignee.trim() } : {}),
-        ...(item.dueDate?.trim() ? { due: item.dueDate.trim() } : {}),
-        ...(url ? { url } : { notFiled: true }),
-      };
-    });
+  // Only what was approved reaches the filed page. The same derivation backs the AM's preview,
+  // so the document they looked at on the Finish screen is the document written here.
+  const { draft: filtered, ticketActions } = filedNotes(state.notes, state.items, state.ticketUrls);
 
   const loomHeader = state.touch.noShow?.resolution === "loom" ? `No-Show / Loom Video Update
 Loom recording: ${state.touch.noShow.url}

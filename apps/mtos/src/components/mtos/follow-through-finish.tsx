@@ -8,6 +8,7 @@ import { readJsonResponse } from "@/src/lib/api/read-json-response";
 import { NextTouchBookingControl } from "@/src/components/mtos/next-touch-booking";
 import {
   PROCESSING_STEPS,
+  filedNotes,
   finishBlockers,
   processingOutcome,
   processingSummary,
@@ -89,6 +90,10 @@ export function FollowThroughFinish({
   const outstanding = useMemo(() => finishBlockers(inputs), [inputs]);
   const remaining = remainingCount(inputs);
   const shown = blockers.length ? blockers : outstanding;
+
+  // The preview is the filed document, not the draft. An AM who denied a ticket should not read
+  // its action back as a commitment, so the same derivation the run uses backs what is shown here.
+  const filed = useMemo(() => (notes ? filedNotes(notes, items || []) : undefined), [notes, items]);
 
   const run = useCallback(async () => {
     setRunning(true);
@@ -205,7 +210,7 @@ export function FollowThroughFinish({
         </div>
       ) : null}
 
-      {notes ? (
+      {notes && filed ? (
         <div>
           <button type="button" className="btn btn-ghost btn-sm" onClick={() => setPreview((open) => !open)}>
             <Eye />
@@ -216,7 +221,7 @@ export function FollowThroughFinish({
               className="card mono mt-2"
               style={{ whiteSpace: "pre-wrap", fontSize: "0.8rem", lineHeight: 1.7, color: "var(--text-2)" }}
             >
-              {renderNotesMarkdown(notes)}
+              {renderNotesMarkdown(filed.draft, { ticketActions: filed.ticketActions })}
             </pre>
           ) : null}
         </div>

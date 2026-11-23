@@ -88,6 +88,26 @@ export async function readBookedNextMeeting(context: TenantContext, touchId: str
   return booking;
 }
 
+/**
+ * Record that the next Monthly Touch is being booked outside MTOS, or take that back.
+ *
+ * Some clients do not have their calendar on the call. The AM sends the booking link and the
+ * client picks a time later, which leaves a real follow-through with one step MTOS can never
+ * complete. Saying so here turns that step into a deliberate handoff rather than a standing
+ * warning, and it is cleared automatically the moment a real meeting exists.
+ */
+export async function deferNextTouchBooking(context: TenantContext, touchId: string, deferred: boolean) {
+  const { touch } = await visible(context, touchId);
+  if (deferred && touch.nextMeetingBooking) throw new Error("The next Monthly Touch is already booked, so there is nothing to defer.");
+  const db = getFirebaseAdminDb(); if (!db) throw new Error("MTOS storage is unavailable.");
+  const deferredAt = deferred ? new Date().toISOString() : "";
+  await db.doc(monthlyTouchPath(context.tenantId, touchId)).set(
+    { followThrough: { bookingDeferredAt: deferredAt, bookingDeferredBy: deferred ? context.userId : "" } },
+    { mergeFields: ["followThrough.bookingDeferredAt", "followThrough.bookingDeferredBy"] },
+  );
+  return { deferred, ...(deferredAt ? { deferredAt } : {}) };
+}
+
 export async function bookNextMonthlyTouch(context: TenantContext, touchId: string, input: NextTouchBookingRequest) {
   const { touch, client } = await visible(context, touchId);
   if (!input.confirmed || !Number.isInteger(input.durationMinutes) || input.durationMinutes < 15 || input.durationMinutes > 240 || !input.attendees.length || !input.title.trim()) throw new Error("Confirm the meeting details, duration and attendees before booking.");
@@ -126,7 +146,8 @@ export async function bookNextMonthlyTouch(context: TenantContext, touchId: stri
     if (!event) throw new Error("Google Calendar did not confirm the booking.");
     const booking = fromEvent(event, context, touch.nextMeetingBooking);
     await db.runTransaction(async tx => {
-      tx.update(ref, { nextMeetingBooking: booking });
+      // A real meeting ends any deferral: the client did send a time after all.
+      tx.update(ref, { nextMeetingBooking: booking, "followThrough.bookingDeferredAt": "", "followThrough.bookingDeferredBy": "" });
       tx.update(db.doc(clientPath(context.tenantId, client.id)), { nextTouchStartAt: booking.scheduledAt, nextTouchEventId: booking.eventId });
     });
     return booking;

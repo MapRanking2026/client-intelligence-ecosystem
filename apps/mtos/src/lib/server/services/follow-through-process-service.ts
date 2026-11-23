@@ -595,6 +595,12 @@ async function bookNextTouch(state: StepContext): Promise<StepResult> {
     } catch (error) { return step("booking", "warning", error instanceof Error ? error.message : "Verify the saved next meeting in Google Calendar."); }
   }
   const reminder = state.touch.followThrough;
+  // Deferring is a decision, not a gap, so it is reported as skipped rather than as a warning the
+  // AM can never clear. Checked after the live calendar read above: if the client went ahead and
+  // booked it anyway, the real meeting is the truth and this never applies.
+  if (reminder?.bookingDeferredAt) {
+    return step("booking", "skipped", `The client is booking the next Monthly Touch themselves${reminder.bookingReminderId ? `, and the reminder ticket (${reminder.bookingReminderId}) is tracking it` : ""}. Book it here if they send a time instead.`);
+  }
   const previousReminder = reminder?.processing?.steps.find(entry => entry.id === "booking")?.message.match(/A reminder ticket was created instead: https:\/\/app\.clickup\.com\/t\/([a-z0-9]+)/i)?.[1];
   if (!reminder?.bookingReminderId && previousReminder) {
     await persistProgress(state.context, state.touch.id, { bookingReminderId: previousReminder, bookingReminderStatus: "created" });

@@ -221,6 +221,7 @@ export default async function FollowThroughPage({
             {...(touch.followThrough?.trackerCards ? { trackerCards: touch.followThrough.trackerCards } : {})}
             {...(touch.followThrough?.recap ? { recap: touch.followThrough.recap } : {})}
             {...(touch.followThrough?.processing ? { processing: touch.followThrough.processing } : {})}
+            {...(touch.followThrough?.bookingDeferredAt ? { bookingDeferredAt: touch.followThrough.bookingDeferredAt } : {})}
             qaHref={`/qa/${touch.clientId}/${touch.id}`}
           />
         </SectionCard>

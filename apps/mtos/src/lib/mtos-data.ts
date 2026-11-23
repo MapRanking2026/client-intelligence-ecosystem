@@ -1483,6 +1483,15 @@ export interface TouchTranscriptState {
 export interface TouchFollowThroughState {
   bookingReminderId?: string;
   bookingReminderStatus?: "creating" | "created" | "failed" | "unknown";
+  /**
+   * When the AM said the next touch will be booked outside MTOS, and who said it.
+   *
+   * A client who did not have her calendar on the call is not an unfinished step — the AM sent
+   * the link and she books it herself. Recorded rather than silently ignored, so the booking
+   * reads as a deliberate handoff in the step list instead of a warning nobody ever cleared.
+   */
+  bookingDeferredAt?: string;
+  bookingDeferredBy?: string;
   /** 24 hours after the call ended, on the AM's own clock. */
   dueAt?: string;
   startedAt?: string;

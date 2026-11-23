@@ -55,6 +55,7 @@ export function FollowThroughFinish({
   trackerCards,
   recap,
   processing,
+  bookingDeferredAt,
   qaHref,
 }: {
   touchId: string;
@@ -63,6 +64,7 @@ export function FollowThroughFinish({
   trackerCards?: TrackerCard[];
   recap?: RecapEmailState;
   processing?: ProcessingResult;
+  bookingDeferredAt?: string;
   qaHref: string;
 }) {
   const [result, setResult] = useState<ProcessingResult | undefined>(processing);
@@ -70,6 +72,11 @@ export function FollowThroughFinish({
   const [preview, setPreview] = useState(false);
   const [error, setError] = useState("");
   const [blockers, setBlockers] = useState<string[]>([]);
+  // The one step MTOS cannot do for the AM. A client without her calendar on the call is not an
+  // unfinished follow-through -- she has the link and books herself -- so this is tracked as a
+  // decision the AM made, and can be taken back the moment a time comes through.
+  const [deferred, setDeferred] = useState(Boolean(bookingDeferredAt));
+  const [deferring, setDeferring] = useState(false);
 
   const diffs = useMemo(
     () => Object.fromEntries((trackerCards || []).map((card) => [card.id, trackerCardDiffs(card)])),
@@ -121,6 +128,36 @@ export function FollowThroughFinish({
       setRunning(false);
     }
   }, [touchId]);
+
+  /**
+   * Hand the booking to the client, or take it back.
+   *
+   * The run is repeated straight afterwards so the AM sees the answer in the step list rather than
+   * being told to press Finish again: deferring turns step 7 from a warning into a deliberate skip,
+   * which is what releases the rest of the follow-through.
+   */
+  const defer = useCallback(
+    async (next: boolean) => {
+      setDeferring(true);
+      setError("");
+      try {
+        const response = await fetch(`/api/monthly-touches/${encodeURIComponent(touchId)}/next-meeting`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ action: "defer", deferred: next }),
+        });
+        const payload = await readJsonResponse<{ error?: string }>(response);
+        if (!response.ok) throw new Error(payload?.error || "That could not be saved.");
+        setDeferred(next);
+        await run();
+      } catch (caught) {
+        setError(caught instanceof Error ? caught.message : "That could not be saved.");
+      } finally {
+        setDeferring(false);
+      }
+    },
+    [touchId, run],
+  );
 
   const outcome = result ? processingOutcome(result.steps) : undefined;
 
@@ -176,9 +213,23 @@ export function FollowThroughFinish({
                 <span className="muted block text-[0.8rem]">
                   {outcomeStep?.message || definition.detail}
                 </span>
-                {outcomeStep && (outcomeStep.status === "warning" || outcomeStep.status === "failed") ? (
-                  <span className="mt-2 flex flex-wrap gap-2">
-                    {definition.id === "booking" ? <NextTouchBookingControl touchId={touchId} /> : null}
+                {outcomeStep && (outcomeStep.status === "warning" || outcomeStep.status === "failed" || (definition.id === "booking" && deferred)) ? (
+                  <span className="mt-2 flex flex-wrap items-center gap-3">
+                    {definition.id === "booking" && !deferred ? <NextTouchBookingControl touchId={touchId} /> : null}
+                    {definition.id === "booking" ? (
+                      <button
+                        type="button"
+                        className="ilink"
+                        disabled={deferring || running}
+                        onClick={() => void defer(!deferred)}
+                      >
+                        {deferring
+                          ? "Saving…"
+                          : deferred
+                            ? "Actually, book it here"
+                            : "The client is booking it herself — move on without it"}
+                      </button>
+                    ) : null}
                     {definition.id === "recap" ? <a className="ilink" href="#recap">Review recipient and recap email</a> : null}
                     {definition.id === "notes" ? <a className="ilink" href="#notes">Review the notes</a> : null}
                     {definition.id === "risk" || definition.id === "health" ? <a className="ilink" href="#trackers">Review tracker rows</a> : null}

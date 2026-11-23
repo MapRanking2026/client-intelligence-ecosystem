@@ -1,4 +1,5 @@
 import { readSeoDashboardOwner } from "@/src/lib/server/services/clickup-specialist-owner";
+import { reviewedClientActions } from "@/src/lib/contracts/follow-through-finish";
 import { isWorkflowRecapTask, suggestedEffortMinutes, suggestChatOwner } from "@/src/lib/contracts/follow-through-task-policy";
 import { withoutClientIdentity, type TicketClientIdentity } from "@/src/lib/contracts/ticket-description";
 import { fetchClickupClientContext } from "@/src/lib/server/services/clickup-client-context";
@@ -388,10 +389,11 @@ export async function saveFollowThroughItems(
   items: FollowThroughItem[],
 ): Promise<FollowThroughItem[]> {
   const db = getFirebaseAdminDb();
-  if (db) {
-    await db
-      .doc(monthlyTouchPath(context.tenantId, touchId))
-      .set({ followThrough: { items } }, { mergeFields: ["followThrough.items"] });
-  }
+  if (db) await db.runTransaction(async tx => {
+    const ref = db.doc(monthlyTouchPath(context.tenantId, touchId));
+    const snapshot = await tx.get(ref);
+    const notes = (snapshot.data() as { followThrough?: { notes?: import("@/src/lib/contracts/follow-through-notes").NotesDraft } } | undefined)?.followThrough?.notes;
+    tx.set(ref, { followThrough: { items, ...(notes ? { notes: { ...notes, clientActions: reviewedClientActions(notes.clientActions || [], items) } } : {}) } }, { mergeFields: ["followThrough.items", ...(notes ? ["followThrough.notes"] : [])] });
+  });
   return items;
 }

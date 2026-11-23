@@ -52,14 +52,7 @@ export function finishBlockers(input: FinishInputs): string[] {
 
   blockers.push(...notesBlockers(input.notes));
 
-  // A client action creates no ticket, but it goes into the recap email as something the client
-  // agreed to -- so it is a decision, not a line of prose.
-  const undecidedClientActions = input.notes.clientActions.filter((action) => !action.decision).length;
-  if (undecidedClientActions) {
-    blockers.push(
-      `Decide the remaining ${undecidedClientActions === 1 ? "client action" : `${undecidedClientActions} client actions`} in section 5.`,
-    );
-  }
+  // The ticket forms own action decisions. Notes must not introduce a second approval gate.
 
   if (!input.items) {
     blockers.push("Build the tickets from the notes.");
@@ -82,14 +75,24 @@ export function finishBlockers(input: FinishInputs): string[] {
 export function remainingCount(input: FinishInputs): number {
   const items = (input.items || []).filter((item) => !item.decision).length;
   const cards = (input.trackerCards || []).filter((card) => !card.decision).length;
-  const actions = (input.notes?.clientActions || []).filter((action) => !action.decision).length;
   const recap = input.recap && !input.recap.decision ? 1 : 0;
-  return items + cards + actions + recap;
+  return items + cards + recap;
 }
 
-/** Only the client actions the AM approved reach the notes and the recap. */
-export function approvedClientActions(actions: ClientAction[]): ClientAction[] {
-  return actions.filter((action) => action.decision === "approved");
+/** Match ticket decisions without introducing a second review queue for the same action. */
+export function reviewedClientActions(actions: ClientAction[], items: FollowThroughItem[]): ClientAction[] {
+  return actions.map(action => {
+    const linked = items.filter(item => item.actionId === action.id);
+    if (!linked.length) return !action.decision && items.every(item => item.decision) ? { ...action, decision: "approved" as const } : action;
+    const decision = linked.some(item => !item.decision) ? undefined : linked.some(item => item.decision === "approved") ? "approved" : "denied";
+    const next = { ...action };
+    delete next.decision;
+    return { ...next, ...(decision ? { decision: decision as "approved" | "denied" } : {}) };
+  });
+}
+
+export function approvedClientActions(actions: ClientAction[], items: FollowThroughItem[] = []): ClientAction[] {
+  return reviewedClientActions(actions, items).filter(action => action.what.trim() && action.decision !== "denied" && action.decision !== "deleted");
 }
 
 // ---------------------------------------------------------------------------

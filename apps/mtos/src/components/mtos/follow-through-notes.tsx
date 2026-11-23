@@ -20,7 +20,7 @@ import {
  * The exceptions are the client follow-up details `finishBlockers` will not let past without them, which no
  * other screen can supply:
  *
- *   - every client action needs a decision, because each one is a commitment in the recap email;
+ *   - client requests are documentation; linked ticket decisions are their review;
  *   - a pending item needs what is missing, who it is coming from and when to chase.
  *
  * Only the rows that are actually blocking are shown, so this stays a short list that empties
@@ -35,18 +35,6 @@ function Read({ label, value }: { label: string; value: string }) {
   return <div className="field">
     <span className="field-label">{label}</span>
     <p className="text-sm" style={{ whiteSpace: "pre-wrap", color: written ? "var(--text)" : "var(--text-2)" }}>{written || "Nothing written yet"}</p>
-  </div>;
-}
-
-/** Approve, deny or delete, in the shape the tickets step uses for the same decision. */
-function Decide({ label, decision, onDecide }: {
-  label: string; decision?: ClientAction["decision"]; onDecide: (next: NonNullable<ClientAction["decision"]>) => void;
-}) {
-  return <div className="seg" role="group" aria-label={label}>
-    {(["approved", "denied", "deleted"] as const).map(value => <button key={value} type="button"
-      className={`seg-btn ${decision === value ? "on" : ""}`} onClick={() => onDecide(value)}>
-      {value === "approved" ? "Approve" : value === "denied" ? "Deny" : "Delete"}
-    </button>)}
   </div>;
 }
 
@@ -118,7 +106,6 @@ export function FollowThroughNotes({ touchId, notes, draftNote, autoPrepare = fa
     finally { setBusy(""); }
   }
   // What step 6 will refuse, listed here while the fields for it are still on screen.
-  const undecided = (draft?.clientActions || []).filter(item => !item.decision).length;
   const changed = JSON.stringify(draft ?? null) !== JSON.stringify(notes ?? null);
   const blockers = draft ? notesBlockers(draft) : [];
 
@@ -155,10 +142,9 @@ export function FollowThroughNotes({ touchId, notes, draftNote, autoPrepare = fa
         {draft.clientActions.length ? <section className="card grid gap-2">
           <div className="card-head">
             <div className="card-title">What the client agreed to do</div>
-            <span className={`chip ${undecided ? "watch" : "good"}`}>{undecided ? `${undecided} still to decide` : "all decided"}</span>
           </div>
           <ul className="grid gap-2">{draft.clientActions.map(item => <li key={item.id} className="text-sm" style={{ color: "var(--text-2)" }}>
-            · {item.what.trim() || "Nothing written yet"}{item.due.trim() ? ` — by ${item.due.trim()}` : ""} <span className={`chip ${item.decision ? "good" : "watch"}`}>{item.decision || "no decision yet"}</span>
+            · {item.what.trim() || "Nothing written yet"}{item.due.trim() ? ` — by ${item.due.trim()}` : ""}
           </li>)}</ul>
         </section> : null}
         
@@ -196,13 +182,12 @@ export function FollowThroughNotes({ touchId, notes, draftNote, autoPrepare = fa
       {draft.clientActions.length ? <section className="card grid gap-3">
         <div className="card-head">
           <div className="card-title">What the client agreed to do</div>
-          <span className={`chip ${undecided ? "watch" : "good"}`}>{undecided ? `${undecided} still to decide` : "all decided"}</span>
         </div>
-        <p className="muted text-sm">Each of these reaches the client in the recap email, so each one is a decision rather than a line of prose. Deny keeps it in the notes as something that was considered; delete says it was never really theirs to do.</p>
+        <p className="muted text-sm">These are documented client requests. Matching ticket decisions carry over automatically; no separate action approval is required. Review the client email before approving it.</p>
         {draft.clientActions.map((item, index) => <div key={item.id} className="grid gap-2 md:grid-cols-[minmax(0,1fr)_12rem] md:items-end">
           <label className="field">What they will do<input className="input" aria-label={`Client action ${index + 1}`} value={item.what} onChange={event => editClientAction(item.id, { what: event.target.value })} /></label>
           <label className="field">By when<input className="input" aria-label={`Client action ${index + 1} due`} value={item.due} placeholder="YYYY-MM-DD, or what was said" onChange={event => editClientAction(item.id, { due: event.target.value })} /></label>
-          <div className="md:col-span-2"><Decide label={`Client action ${index + 1} decision`} {...(item.decision ? { decision: item.decision } : {})} onDecide={next => editClientAction(item.id, { decision: next })} /></div>
+          <div className="md:col-span-2"><button type="button" className="ilink text-sm" onClick={() => editClientAction(item.id, { decision: item.decision === "deleted" ? undefined : "deleted" })}>{item.decision === "deleted" ? "Restore this request" : "Exclude this request from final notes"}</button></div>
         </div>)}
       </section> : null}
       
@@ -222,11 +207,10 @@ export function FollowThroughNotes({ touchId, notes, draftNote, autoPrepare = fa
         </div>)}
       </section> : null}
       </> : null}
-      {blockers.length || undecided ? <section className="card">
+      {blockers.length ? <section className="card">
         <div className="eyebrow muted">Before the follow-through can be finished</div>
         <ul className="mt-2 grid gap-2">
           {blockers.map(line => <li key={line} className="text-sm" style={{ color: "var(--text-2)" }}>· {line}</li>)}
-          {undecided ? <li className="text-sm" style={{ color: "var(--text-2)" }}>· Decide the remaining {undecided === 1 ? "client action" : `${undecided} client actions`} above.</li> : null}
         </ul>
       </section> : null}
       {preview ? <pre className="card text-sm" style={{ whiteSpace: "pre-wrap" }}>{renderNotesMarkdown(draft)}</pre> : null}

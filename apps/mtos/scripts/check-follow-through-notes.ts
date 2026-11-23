@@ -286,8 +286,8 @@ check(
   notesBlockers(draft({ pending: [{ ...draft().pending[0], reminderDate: "" }] })).length === 1,
 );
 check(
-  "an empty client action blocks",
-  notesBlockers(draft({ clientActions: [{ id: "c1", what: "", due: "Wed" }] })).length === 1,
+  "an empty draft client action does not block reviewed tickets",
+  notesBlockers(draft({ clientActions: [{ id: "c1", what: "", due: "Wed" }] })).length === 0,
 );
 
 console.log(`\n${passed} passed, ${failed} failed`);

@@ -8,6 +8,7 @@ import type { ClientRecord, MonthlyTouchRecord } from "@/src/lib/mtos-data";
 import {
   PROCESSING_STEPS,
   approvedClientActions,
+  reviewedClientActions,
   finishBlockers,
   processingOutcome,
   type ProcessingResult,
@@ -306,7 +307,7 @@ async function fileNotes(state: StepContext): Promise<StepResult> {
         actions: department.actions.filter((action) => approvedIds.has(action.id)),
       }))
       .filter((department) => department.actions.length || department.clientFeedback.trim()),
-    clientActions: approvedClientActions(state.notes.clientActions),
+    clientActions: approvedClientActions(state.notes.clientActions, state.items),
   };
 
   // Section 3 is the approved tickets themselves, in the form the AM approved them in. The
@@ -748,7 +749,7 @@ async function processFollowThroughRun(
     context,
     touch,
     client,
-    notes: notes!,
+    notes: { ...notes!, clientActions: reviewedClientActions(notes!.clientActions, follow?.items || []) },
     items: follow?.items || [],
     cards,
     ticketUrls: { ...(follow?.ticketUrls || {}) },
@@ -764,6 +765,7 @@ async function processFollowThroughRun(
     channel: postBrief,
     booking: bookNextTouch,
   };
+  if (JSON.stringify(state.notes.clientActions) !== JSON.stringify(notes!.clientActions)) await persistProgress(context, touchId, { notes: state.notes });
 
   const steps: StepResult[] = [];
   for (const definition of PROCESSING_STEPS) {

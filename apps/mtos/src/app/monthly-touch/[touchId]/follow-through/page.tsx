@@ -89,7 +89,7 @@ export default async function FollowThroughPage({
   // Older partial runs were prematurely handed to QA. Show the unfinished work as active
   // while preserving the stored QA history and reviewer records.
   const needsRepair = touch.followThrough?.processing && processingOutcome(touch.followThrough.processing.steps) !== "processed";
-  const progress: TouchStep = needsRepair ? "follow" : isTouchStep(touch.progress) ? touch.progress : stage === "follow_through" ? "follow" : stage;
+  const progress: TouchStep = needsRepair || (confirmed && hasNotes && touch.progress !== "qa") ? "follow" : isTouchStep(touch.progress) ? touch.progress : stage === "follow_through" ? "follow" : stage;
 
   return (
     <AppShell

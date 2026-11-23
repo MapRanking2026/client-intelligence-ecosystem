@@ -7,6 +7,7 @@
 import {
   PROCESSING_STEPS,
   approvedClientActions,
+  reviewedClientActions,
   finishBlockers,
   processingOutcome,
   processingSummary,
@@ -141,11 +142,11 @@ check(
   ),
 );
 check(
-  "an undecided client action blocks",
+  "client actions require no second approval",
   finishBlockers({
     ...complete,
     notes: { ...notes, clientActions: [{ id: "c1", what: "Send the photos", due: "Wed" }] },
-  }).some((line) => line.includes("client action")),
+  }).length === 0,
 );
 
 // The asymmetry the whole gate is built on: decided-but-denied costs nothing, approved must be complete.
@@ -202,17 +203,24 @@ check(
     items: [{ ...item, decision: undefined }],
     trackerCards: [{ ...card, decision: undefined }],
     recap: { ...recap, decision: undefined },
-  }) === 4,
+  }) === 3,
 );
 check("an empty follow-through has nothing to approve", remainingCount({}) === 0);
+const fiveClientActions = Array.from({ length: 5 }, (_, index) => ({ id: `client-${index}`, what: `Documented request ${index}`, due: "Friday" }));
+check("five undecided client actions do not block reviewed tickets", finishBlockers({ ...complete, notes: { ...notes, clientActions: fiveClientActions } }).length === 0);
+check("only the undecided recap remains in the screenshot scenario", remainingCount({ ...complete, notes: { ...notes, clientActions: fiveClientActions }, recap: { ...recap, decision: undefined } }) === 1);
+const linkedActions = reviewedClientActions(fiveClientActions, fiveClientActions.map(action => ({ ...item, id: `ticket-${action.id}`, actionId: action.id, decision: "approved" })));
+check("approved tickets approve their matching client actions", linkedActions.every(action => action.decision === "approved"));
+check("denied ticket excludes the matching action", approvedClientActions(fiveClientActions, [{ ...item, actionId: "client-0", decision: "denied" }]).every(action => action.id !== "client-0"));
+check("an undecided ticket is not auto-approved through notes", reviewedClientActions(fiveClientActions, [{ ...item, actionId: "client-0", decision: undefined }])[0].decision === undefined);
 
 check(
-  "only approved client actions carry forward",
+  "documented client requests carry forward unless excluded",
   approvedClientActions([
     { id: "c1", what: "a", due: "", decision: "approved" },
     { id: "c2", what: "b", due: "", decision: "denied" },
     { id: "c3", what: "c", due: "" },
-  ]).length === 1,
+  ]).length === 2,
 );
 
 // ---------------------------------------------------------------------------

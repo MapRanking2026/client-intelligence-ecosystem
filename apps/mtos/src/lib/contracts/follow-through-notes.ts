@@ -260,9 +260,8 @@ export interface ClientAction {
   /**
    * The AM's decision on it.
    *
-   * A client action creates no ticket -- it is a line in the notes and a line in the recap email
-   * -- but it still has to be decided, because approving it is what puts it in front of the
-   * client as something they agreed to do.
+   * A linked ticket owns the review decision. Unlinked client requests are documentation
+   * approved with the final notes, with no separate approval gate. Explicit exclusions remain.
    */
   decision?: "approved" | "denied" | "deleted";
 }
@@ -558,10 +557,6 @@ export function notesBlockers(draft: NotesDraft): string[] {
   // Department action lines are draft source material. The reviewed ticket forms own their
   // validation; missing source-line details and draft counts must not block completion.
 
-  const namelessClientAction = draft.clientActions.filter((item) => !item.what.trim()).length;
-  if (namelessClientAction) {
-    blockers.push("A client action has nothing written in it. Say what they are doing, or delete the line.");
-  }
 
   const incompletePending = draft.pending.filter(
     (item) => !item.missing.trim() || !item.from.trim() || !item.reminderDate.trim(),

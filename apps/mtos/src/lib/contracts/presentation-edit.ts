@@ -90,6 +90,10 @@ export function bodyFieldFor(layout: PresentationLayout): BodyField {
       return "items";
     case "rank_comparison":
       return "rank";
+    // The body of an exhibit slide is the uploaded image. Its words -- title, subtitle, footnote,
+    // presenter notes -- stay editable; the picture itself is not something to retype.
+    case "exhibit":
+      return "none";
     case "bullets":
     case "agenda":
     case "questions":
@@ -106,11 +110,14 @@ export function bodyFieldFor(layout: PresentationLayout): BodyField {
  *
  * Used three ways, which is why it is one function: it is what the screen sends, what a snapshot
  * stores, and what two versions are compared on to decide whether a slide counts as edited.
- * `rankComparison` and `generatedSnapshot` are deliberately absent -- those are the server's.
+ * `rankComparison`, `media` and `generatedSnapshot` are deliberately absent -- those are the
+ * server's. An uploaded image is attached from what the touch holds on every save, the same way
+ * a comparison capture is, so a slide cannot be edited into showing a different file.
  */
 export function editableSlide(slide: PresentationSlide): PresentationSlide {
   const next: PresentationSlide = { ...slide };
   delete next.rankComparison;
+  delete next.media;
   delete next.generatedSnapshot;
   delete next.edited;
   return next;

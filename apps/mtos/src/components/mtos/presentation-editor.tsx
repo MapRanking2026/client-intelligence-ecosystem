@@ -290,7 +290,7 @@ export function PresentationEditor({
           <select
             className="input"
             value={slide.layout}
-            disabled={slide.layout === "rank_comparison"}
+            disabled={slide.layout === "rank_comparison" || slide.layout === "exhibit"}
             onChange={(event) =>
               onSlides(
                 slides.map((value, position) =>
@@ -305,6 +305,7 @@ export function PresentationEditor({
               </option>
             ))}
             {slide.layout === "rank_comparison" ? <option value="rank_comparison">Rank comparison</option> : null}
+            {slide.layout === "exhibit" ? <option value="exhibit">Uploaded image</option> : null}
           </select>
         </label>
         <label className="field-label">

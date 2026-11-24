@@ -182,15 +182,15 @@ async function pptxScenario() {
   );
   const slideXml = await withBytes.file(`ppt/slides/slide${number}.xml`)!.async("string");
   const rels = await withBytes.file(`ppt/slides/_rels/slide${number}.xml.rels`)!.async("string");
-  check("the image is in the package", Boolean(withBytes.file(`ppt/media/rank${number}.png`)));
+  check("the image is in the package", Boolean(withBytes.file(`ppt/media/slide${number}.png`)));
   check("the slide points at it", slideXml.includes('r:embed="rId5"'));
-  check("the relationship is declared", rels.includes(`../media/rank${number}.png`));
+  check("the relationship is declared", rels.includes(`../media/slide${number}.png`));
   check("no pins are redrawn", !slideXml.includes('prst="ellipse"'), "the deck is drawing its own map");
   check("the scan dates are stated", slideXml.includes("2026-10-14") && slideXml.includes("2026-11-14"));
 
   const without = await JSZip.loadAsync(await buildPptx(slides, null));
   const missingXml = await without.file(`ppt/slides/slide${number}.xml`)!.async("string");
-  check("a missing capture leaves no image part", !without.file(`ppt/media/rank${number}.png`));
+  check("a missing capture leaves no image part", !without.file(`ppt/media/slide${number}.png`));
   check("and says so on the slide", missingXml.includes("not available"), missingXml.slice(0, 200));
   check("and still does not draw a map", !missingXml.includes('prst="ellipse"'));
   check("and the deck still builds", missingXml.includes("emergency plumber"));

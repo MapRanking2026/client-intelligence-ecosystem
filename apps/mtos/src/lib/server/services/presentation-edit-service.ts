@@ -107,6 +107,7 @@ export async function savePresentationSlides(
       return {
         ...normalized,
         ...(origin.rankComparison ? { rankComparison: origin.rankComparison } : {}),
+        ...(origin.media ? { media: origin.media } : {}),
         ...(changed ? { generatedSnapshot: editableSlide(baseline), edited: true } : {}),
       };
     });

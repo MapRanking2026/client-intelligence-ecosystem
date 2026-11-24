@@ -8,6 +8,7 @@ import { getMtosDataSource } from "@/src/lib/server/data/seed-mtos-data-source";
 export const maxDuration = 300;
 const schema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("select"), resolution: z.enum(["reschedule", "loom"]) }),
+  z.object({ action: z.literal("cancel") }),
   z.object({ action: z.literal("generate") }),
   z.object({ action: z.literal("save"), script: z.string().max(150000), url: z.string().max(2048), subject: z.string().max(998).optional(), html: z.string().max(150000).optional() }),
   z.object({ action: z.literal("email") }),

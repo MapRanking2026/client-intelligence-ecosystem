@@ -65,6 +65,24 @@ export function monthlyTouchArtifactPath(tenantId: string, touchId: string, arti
 }
 
 /**
+ * Images the account manager uploaded for this touch's deck: screenshots, photos, and the pages
+ * rendered out of a PDF they attached.
+ *
+ * The bytes live here, one document per image with its base64 split across a `chunks`
+ * subcollection, for the same reason the rank captures do: a single Firestore document stops at
+ * 1MB and one screenshot can exceed that on its own. Only the small descriptor -- id, name, the
+ * account manager's note, dimensions -- is kept on the touch document, where the deck builder
+ * and the slide list need it.
+ */
+export function presentationMediaCollectionPath(tenantId: string, touchId: string) {
+  return `${monthlyTouchPath(tenantId, touchId)}/presentationMedia`;
+}
+
+export function presentationMediaPath(tenantId: string, touchId: string, mediaId: string) {
+  return `${presentationMediaCollectionPath(tenantId, touchId)}/${mediaId}`;
+}
+
+/**
  * One small document per touch that has reached QC, holding only what a list needs.
  *
  * A tenant-level collection rather than a field on each touch, and the reason is quota. The QC

@@ -7,6 +7,7 @@ import { NextResponse } from "next/server";
 import { resolveTenantContext } from "@/src/lib/auth/resolve-tenant-context";
 import { getMtosDataSource } from "@/src/lib/server/data/seed-mtos-data-source";
 import { loadRankImage } from "@/src/lib/server/services/original-rank-report-service";
+import { loadPresentationMedia } from "@/src/lib/server/services/presentation-media-service";
 import { buildPptx } from "@/src/lib/server/services/pptx-builder";
 import { presentationIdentity, withPresentationIdentity } from "@/src/lib/server/services/presentation-identity-service";
 
@@ -60,24 +61,37 @@ export async function GET(request: Request, { params }: { params: Promise<{ touc
   // The approved Report Builder captures for the comparison slides. Loaded here because this is
   // where the tenant context lives; one that cannot be read is skipped rather than failing the
   // download, and its slide then says the screenshot is missing instead of redrawing the map.
-  const rankImages = new Map<string, Buffer>();
+  const slideImages = new Map<string, Buffer>();
   const wanted = new Map(
     (presentation.slides || [])
       .flatMap((slide) => (slide.rankComparison?.originalImage ? [slide.rankComparison.originalImage] : []))
       .map((image) => [image.id, image] as const),
   );
-  await Promise.all(
-    [...wanted.values()].map(async (image) => {
+  // The account manager's own uploads, on the exhibit slides, read the same way: skipped if
+  // missing rather than failing the download.
+  const wantedUploads = new Map(
+    (presentation.slides || []).flatMap((slide) => (slide.media ? [[slide.media.id, slide.media] as const] : [])),
+  );
+  await Promise.all([
+    ...[...wanted.values()].map(async (image) => {
       try {
         const loaded = await loadRankImage(context, image);
-        rankImages.set(image.id, loaded.bytes);
+        slideImages.set(image.id, loaded.bytes);
       } catch (error) {
         console.warn(`[presentation.pptx] rank image ${image.id} unavailable`, error);
       }
     }),
-  );
+    ...[...wantedUploads.values()].map(async (media) => {
+      try {
+        const loaded = await loadPresentationMedia(context, media.touchId, media.id);
+        slideImages.set(media.id, loaded.bytes);
+      } catch (error) {
+        console.warn(`[presentation.pptx] uploaded image ${media.id} unavailable`, error);
+      }
+    }),
+  ]);
 
-  const file = await buildPptx(presentation, logo, rankImages);
+  const file = await buildPptx(presentation, logo, slideImages);
   const name = safeFileName(
     [presentation.clientName || "Monthly Touch", presentation.periodLabel].filter(Boolean).join(" "),
   );

@@ -673,6 +673,36 @@ export interface CallGuide {
  */
 export interface RankScanScreenshot { id: string; touchId: string; width: number; height: number; mimeType: "image/png"; }
 
+/**
+ * Something the account manager uploaded for this month's deck.
+ *
+ * A screenshot, a photo, or one page rendered out of a PDF they attached -- the PDF itself is
+ * never stored, only the pages they picked, because a page is what a slide can show.
+ *
+ * `note` is load-bearing. Nothing downstream can see the picture: the model that writes the deck
+ * is given the file name and this note and nothing else, so the note is the only description of
+ * the image that exists, and it is what any caption has to be written from.
+ */
+export interface PresentationMedia {
+  id: string;
+  touchId: string;
+  /** The file the account manager chose, as they will recognise it in the list. */
+  name: string;
+  /** The PDF this page was rendered from, when it came from one. */
+  sourceName?: string;
+  /** 1-based page number within `sourceName`. */
+  page?: number;
+  /** What the account manager says this shows, in their words. */
+  note?: string;
+  width: number;
+  height: number;
+  mimeType: "image/png" | "image/jpeg";
+  /** Size of the stored image in bytes, for the uploader's own arithmetic. */
+  bytes: number;
+  uploadedAt: string;
+  uploadedBy?: string;
+}
+
 export interface PresentationRankComparison {
   nativeSource?: { reportId: string; heatmapId: string; scanA: string; scanB: string };
   originalImage?: RankScanScreenshot;
@@ -690,6 +720,8 @@ export type PresentationLayout =
   | "cover"
   | "agenda"
   | "rank_comparison"
+  /** One uploaded image, full width, with the caption written from its note. */
+  | "exhibit"
   | "stat_callouts"
   | "bullets"
   | "two_column"
@@ -722,6 +754,14 @@ export interface PresentationSlide {
   generatedIndex?: number;
   layout: PresentationLayout;
   rankComparison?: PresentationRankComparison;
+  /**
+   * The uploaded image this slide shows, resolved from the id the model returned.
+   *
+   * Server-attached like `rankComparison`, and for the same reason: the deck may only show a file
+   * that was actually uploaded to this touch, so the descriptor is looked up here rather than
+   * taken from the model's answer.
+   */
+  media?: PresentationMedia;
   /**
    * Which brief section this slide presents, when it presents one.
    *
@@ -1545,6 +1585,8 @@ export interface MonthlyTouchRecord {
   approvedRankComparisons?: PresentationRankComparison[];
   presentationInstructions?: string;
   presentationInstructionsUpdatedAt?: string;
+  /** Descriptors for the images uploaded for this deck; the bytes live in a subcollection. */
+  presentationMedia?: PresentationMedia[];
   noShow?: import("@/src/lib/contracts/no-show").NoShowState;
   noShowHistory?: { at: string; by: string; resolution: "reschedule" | "loom"; detail: string }[];
   /** A test attempt removed from the working history. */

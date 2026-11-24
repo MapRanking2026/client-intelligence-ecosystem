@@ -1,7 +1,7 @@
 import { blockedTaskTitles, internalTaskText } from "@/src/lib/contracts/client-content";
 import { FieldValue } from "firebase-admin/firestore";
 import type { TenantContext } from "@/src/lib/contracts/mtos";
-import { calendarSlotAvailable, loomReady, usableLoomUrl, type NoShowState } from "@/src/lib/contracts/no-show";
+import { calendarSlotAvailable, loomReady, noShowUndoBlocker, usableLoomUrl, type NoShowState } from "@/src/lib/contracts/no-show";
 import { sanitizeAgendaEmailHtml, emailSignatureLines } from "@/src/lib/contracts/agenda-email";
 import { followThroughDueAt } from "@/src/lib/contracts/touch-progress";
 import type { MonthlyTouchRecord } from "@/src/lib/mtos-data";
@@ -17,6 +17,7 @@ import { getAccountManagerPreferences, getAccountManagerProfile } from "./user-s
 
 export type NoShowAction =
   | { action: "select"; resolution: "reschedule" | "loom" }
+  | { action: "cancel" }
   | { action: "generate" }
   | { action: "save"; script: string; url: string; subject?: string; html?: string }
   | { action: "email" }
@@ -26,7 +27,7 @@ export type NoShowAction =
 
 const esc = (text: string) => text.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
 
-export async function runNoShowAction(context: TenantContext, touchId: string, action: NoShowAction) {
+export async function runNoShowAction(context: TenantContext, touchId: string, action: NoShowAction): Promise<NoShowState | { cleared: true }> {
   const source = getMtosDataSource(context);
   const touch = await source.getMonthlyTouchById(touchId);
   const client = touch && await source.getClientById(touch.clientId);
@@ -57,6 +58,21 @@ export async function runNoShowAction(context: TenantContext, touchId: string, a
       state = { resolution: action.resolution, selectedAt: at, selectedBy: context.userId };
       await ref.update({ noShow: state, noShowHistory: FieldValue.arrayUnion({ at, by: context.userId, resolution: action.resolution, detail: "No-show resolution selected" }) });
       return state;
+    }
+    // The client turned up after all. Everything this touch recorded about the no-show goes,
+    // including any Loom draft written in the meantime, and Live Call is left exactly as it was
+    // before the button was pressed -- the deck, the call guide and the transcript watcher are
+    // untouched by anything above, so there is nothing to put back. The attempt stays in
+    // noShowHistory: the panel was opened, and the record should say so.
+    if (action.action === "cancel") {
+      const blocker = noShowUndoBlocker(state);
+      if (blocker) throw new Error(blocker);
+      await ref.update({
+        noShow: FieldValue.delete(),
+        noShowHistory: FieldValue.arrayUnion({ at, by: context.userId, resolution: state!.resolution,
+          detail: `No-show undone; the client attended after all${state!.presentation ? ". An unsent Loom draft was discarded" : ""}` }),
+      });
+      return { cleared: true };
     }
     if (!state) throw new Error("Select a no-show resolution first.");
     if (action.action === "reschedule") {

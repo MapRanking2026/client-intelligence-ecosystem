@@ -199,13 +199,14 @@ function logoPic(x: number, y: number, w: number, h: number): string {
 }
 
 /**
- * Picture shape for this slide's rank comparison capture, which rId5 points at.
+ * Picture shape for this slide's own image, which rId5 points at: a rank comparison capture, or
+ * an image the account manager uploaded for an exhibit slide.
  *
  * Separate from `logoPic` because the two live on different relationship ids: the logo is one
- * shared part, while each comparison slide carries its own image, and reusing rId4 for both would
- * make a slide that has a logo and a comparison show the same picture twice.
+ * shared part, while each picture slide carries its own image, and reusing rId4 for both would
+ * make a slide that has a logo and a picture show the same one twice.
  */
-function rankPic(x: number, y: number, w: number, h: number, name: string): string {
+function slidePic(x: number, y: number, w: number, h: number, name: string): string {
   const id = nextId();
   return `<p:pic><p:nvPicPr><p:cNvPr id="${id}" name="${esc(name)}" descr="${esc(name)}"/><p:cNvPicPr/><p:nvPr/></p:nvPicPr><p:blipFill><a:blip r:embed="rId5"/><a:stretch><a:fillRect/></a:stretch></p:blipFill><p:spPr><a:xfrm><a:off x="${px(
     x,
@@ -235,12 +236,12 @@ function buildSlideShapes(
   deck: Presentation,
   number: number,
   total: number,
-  /** True when this slide's approved comparison screenshot is in hand and can be embedded. */
-  hasRankImage = false,
-): { xml: string; usesLogo: boolean; usesRankImage: boolean } {
+  /** True when this slide's own image -- a comparison capture or an upload -- is in hand. */
+  hasSlideImage = false,
+): { xml: string; usesLogo: boolean; usesSlideImage: boolean } {
   const parts: string[] = [];
   let usesLogo = false;
-  let usesRankImage = false;
+  let usesSlideImage = false;
 
   if (slide.layout === "cover" || slide.layout === "closing") {
     const isCover = slide.layout === "cover";
@@ -294,7 +295,7 @@ function buildSlideShapes(
         }),
       );
     }
-    return { xml: designShapes(parts.join(""), slide), usesLogo, usesRankImage };
+    return { xml: designShapes(parts.join(""), slide), usesLogo, usesSlideImage };
   }
 
   // Shared chrome for every content slide.
@@ -329,10 +330,10 @@ function buildSlideShapes(
     const frame = { x: 64, y: bodyTop + 64, w: 1152, h: 392 };
     parts.push(rect(frame.x, frame.y, frame.w, frame.h, "F7F9FC", { line: C.border, round: true }));
 
-    if (image && hasRankImage) {
+    if (image && hasSlideImage) {
       const fitted = fitBox(image, { x: frame.x + 8, y: frame.y + 8, w: frame.w - 16, h: frame.h - 16 });
       parts.push(
-        rankPic(
+        slidePic(
           fitted.x,
           fitted.y,
           fitted.w,
@@ -342,7 +343,7 @@ function buildSlideShapes(
           }`,
         ),
       );
-      usesRankImage = true;
+      usesSlideImage = true;
     } else {
       // No drawing stands in for the capture: a redrawn grid on a client slide would read as the
       // measurement itself. The slide says what is missing and how to put it back.
@@ -378,6 +379,31 @@ function buildSlideShapes(
         { size: 9, color: C.gray },
       ),
     );
+  } else if (slide.layout === "exhibit") {
+    // An account manager's upload. The frame is the full body: these are screenshots and pages of
+    // documents, which are read rather than glanced at, and the image keeps its own aspect ratio
+    // for the same reason -- a stretched screenshot of a table is a table nobody can read.
+    const frame = { x: 64, y: bodyTop, w: bodyW, h: 440 };
+    parts.push(rect(frame.x, frame.y, frame.w, frame.h, "F7F9FC", { line: C.border, round: true }));
+    if (slide.media && hasSlideImage) {
+      const fitted = fitBox(slide.media, { x: frame.x + 8, y: frame.y + 8, w: frame.w - 16, h: frame.h - 16 });
+      parts.push(slidePic(fitted.x, fitted.y, fitted.w, fitted.h, slide.media.note || slide.media.name));
+      usesSlideImage = true;
+      if (slide.media.sourceName) {
+        parts.push(
+          textBox(64, frame.y + frame.h + 8, 1152, 30, [
+            slide.media.page ? `${slide.media.sourceName} · page ${slide.media.page}` : slide.media.sourceName,
+          ], { size: 9, color: C.gray }),
+        );
+      }
+    } else {
+      parts.push(
+        textBox(frame.x + 40, frame.y + 180, frame.w - 80, 120, [
+          "The uploaded image for this slide is not available.",
+          "Upload it again on the Monthly Touch and download the deck once more.",
+        ], { size: 16, color: C.gray, lineSpacePct: 130000 }),
+      );
+    }
   } else if (slide.layout === "stat_callouts" && slide.stats?.length) {
     const n = Math.min(slide.stats.length, 4);
     const gap = 24;
@@ -477,7 +503,7 @@ function buildSlideShapes(
     textBox(900, 650, 316, 28, [`MapRanking  |  ${number} / ${total}`], { size: 10, color: C.gray, align: "r" }),
   );
 
-  return { xml: designShapes(parts.join(""), slide), usesLogo, usesRankImage };
+  return { xml: designShapes(parts.join(""), slide), usesLogo, usesSlideImage };
 }
 
 function slideXml(body: string, background?: string): string {
@@ -510,12 +536,13 @@ export async function buildPptx(
   deck: Presentation,
   logo: Buffer | null,
   /**
-   * The approved comparison captures, by image id. Passed in rather than read here because the
-   * builder stays free of Firestore and the tenant context -- the route that already resolved both
-   * loads them (see presentation.pptx/route.ts). An id with no bytes is not fatal: that slide says
-   * its screenshot is missing instead of the deck failing to download.
+   * Every image a slide of its own carries, by image id: the approved comparison captures and
+   * the account manager's uploads. Passed in rather than read here because the builder stays
+   * free of Firestore and the tenant context -- the route that already resolved both loads them
+   * (see presentation.pptx/route.ts). An id with no bytes is not fatal: that slide says its
+   * image is missing instead of the deck failing to download.
    */
-  rankImages?: Map<string, Buffer>,
+  slideImages?: Map<string, Buffer>,
 ): Promise<Buffer> {
   deck = clientPresentation(deck)!;
   shapeId = 1;
@@ -523,8 +550,8 @@ export async function buildPptx(
   const slides = deck.slides || [];
 
   const imageFor = (slide: PresentationSlide): Buffer | undefined => {
-    const id = slide.rankComparison?.originalImage?.id;
-    return id ? rankImages?.get(id) : undefined;
+    const id = slide.rankComparison?.originalImage?.id || slide.media?.id;
+    return id ? slideImages?.get(id) : undefined;
   };
 
   const built = slides.map((slide, index) =>
@@ -535,7 +562,7 @@ export async function buildPptx(
   zip.file(
     "[Content_Types].xml",
     `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Default Extension="png" ContentType="image/png"/><Override PartName="/ppt/presentation.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"/><Override PartName="/ppt/slideMasters/slideMaster1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slideMaster+xml"/><Override PartName="/ppt/slideLayouts/slideLayout1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slideLayout+xml"/><Override PartName="/ppt/notesMasters/notesMaster1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.notesMaster+xml"/><Override PartName="/ppt/theme/theme1.xml" ContentType="application/vnd.openxmlformats-officedocument.theme+xml"/>${slides
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Default Extension="png" ContentType="image/png"/><Default Extension="jpeg" ContentType="image/jpeg"/><Override PartName="/ppt/presentation.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"/><Override PartName="/ppt/slideMasters/slideMaster1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slideMaster+xml"/><Override PartName="/ppt/slideLayouts/slideLayout1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slideLayout+xml"/><Override PartName="/ppt/notesMasters/notesMaster1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.notesMaster+xml"/><Override PartName="/ppt/theme/theme1.xml" ContentType="application/vnd.openxmlformats-officedocument.theme+xml"/>${slides
       .map(
         (_, index) =>
           `<Override PartName="/ppt/slides/slide${index + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/><Override PartName="/ppt/notesSlides/notesSlide${
@@ -616,14 +643,16 @@ export async function buildPptx(
         `<Relationship Id="rId4" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/logo.png"/>`,
       );
     }
-    // One media part per comparison slide, named after the slide rather than the image id: the
-    // same comparison can legitimately appear on two slides, and a shared part would tie their
-    // relationship ids together.
-    const rankImage = built[index].usesRankImage ? imageFor(slide) : undefined;
-    if (rankImage) {
-      zip.file(`ppt/media/rank${n}.png`, rankImage);
+    // One media part per picture slide, named after the slide rather than the image id: the same
+    // comparison or upload can legitimately appear on two slides, and a shared part would tie
+    // their relationship ids together. The extension has to match the bytes -- an upload may be
+    // a JPEG, and PowerPoint reads the part's type from it.
+    const slideImage = built[index].usesSlideImage ? imageFor(slide) : undefined;
+    if (slideImage) {
+      const ext = slide.media?.mimeType === "image/jpeg" && !slide.rankComparison ? "jpeg" : "png";
+      zip.file(`ppt/media/slide${n}.${ext}`, slideImage);
       rels.push(
-        `<Relationship Id="rId5" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/rank${n}.png"/>`,
+        `<Relationship Id="rId5" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/slide${n}.${ext}"/>`,
       );
     }
     zip.file(

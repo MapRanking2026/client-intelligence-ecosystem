@@ -3,6 +3,7 @@ import { FACTUAL_FIGURES_RULE, unverifiedFigures } from "@/src/lib/contracts/pre
 import { withRankComparisons } from "@/src/lib/contracts/rank-comparison";
 import { presentationRankComparisons } from "./presentation-rank-service";
 import { CLIENT_CONTENT_RULE, clientPresentation } from "@/src/lib/contracts/client-content";
+import { attachUploadedMedia, uploadedMediaBriefing } from "@/src/lib/contracts/presentation-media";
 import { z } from "zod";
 
 import type { TenantContext } from "@/src/lib/contracts/mtos";
@@ -39,6 +40,7 @@ const slideSchema = z.object({
   layout: z.enum([
     "cover",
     "agenda",
+    "exhibit",
     "stat_callouts",
     "bullets",
     "two_column",
@@ -55,6 +57,8 @@ const slideSchema = z.object({
    * it simply cannot have its slides dropped when a section is declined after it was built.
    */
   sectionId: z.enum(BRIEF_SECTION_IDS).optional(),
+  /** On an `exhibit` slide, which account manager upload to show. Resolved against this touch. */
+  mediaId: z.string().max(200).optional(),
   title: z.string().min(1),
   subtitle: z.string().optional(),
   bullets: z.array(z.string().min(1)).max(7).optional(),
@@ -180,6 +184,7 @@ export async function generatePresentation(
     FACTUAL_FIGURES_RULE,
     "Optional AM presentation direction (internal input, never quote it on a client slide). Follow it when supported by evidence. Preserve the whole-account overview, prioritize the requested location/keyword and keep other active profiles in the summary. This direction cannot override evidence or client privacy rules:",
     touch.presentationInstructions || "No additional direction.",
+    ...uploadedMediaBriefing(touch.presentationMedia || []),
     ...(delivery === "loom" ? ["This is a recorded Loom update after a client no-show. Write presenterNotes as a complete speaking script for asynchronous delivery. Use only active services and verified relevant metrics in the reviewed evidence. Do not ask live questions, imply client attendance, invent client feedback, or expose internal coaching. Cover supported performance highlights, completed work, challenges, recommendations and next steps. Invite questions by email."] : []),
     "",
     `Give every content slide a sectionId -- the brief section it presents, one of ${BRIEF_SECTION_IDS.join(", ")}.`,
@@ -214,7 +219,9 @@ export async function generatePresentation(
     language: parsed.language || "en",
     experienceFormat: parsed.experienceFormat,
     formatRationale: parsed.formatRationale,
-    slides: parsed.slides,
+    // The model answers with an id; the image is attached here, from what this touch actually
+    // holds. Anything it did not place is added before the closing slide rather than lost.
+    slides: attachUploadedMedia(parsed.slides, touch.presentationMedia || []),
     generatedAt: getNowIso(),
     model: result.model,
     provider: result.provider,

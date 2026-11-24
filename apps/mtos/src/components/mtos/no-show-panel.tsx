@@ -4,7 +4,7 @@ import { RescheduleCalendar } from "./reschedule-calendar";
 import { useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import type { NoShowState } from "@/src/lib/contracts/no-show";
-import { usableLoomUrl } from "@/src/lib/contracts/no-show";
+import { noShowUndoBlocker, usableLoomUrl } from "@/src/lib/contracts/no-show";
 import { readJsonResponse } from "@/src/lib/api/read-json-response";
 
 export function NoShowPanel({ touchId, initial, primaryAction, embedded = false }: { touchId: string; initial?: NoShowState; primaryAction?: ReactNode; embedded?: boolean }) {
@@ -20,11 +20,18 @@ export function NoShowPanel({ touchId, initial, primaryAction, embedded = false 
   const [checkedAt] = useState(() => Date.now());
   async function run(body: object) {
     const response = await fetch(`/api/monthly-touches/${encodeURIComponent(touchId)}/no-show`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
-    let result: { data?: NoShowState; error?: string };
+    let result: { data?: NoShowState | { cleared: true }; error?: string };
     try { result = await readJsonResponse<typeof result>(response); }
     catch { throw new Error("The request returned no readable result. An action may have completed. Reload this touch and check its recorded state before retrying."); }
     if (!result.data) throw new Error(result.error || "No-show action failed.");
     const next = result.data;
+    // Undone: the touch no longer holds a no-show, so the panel drops back to the Live Call
+    // controls rather than redisplaying a resolution that is no longer recorded anywhere.
+    if ("cleared" in next) {
+      setState(undefined); setScript(""); setUrl(""); setSubject(""); setHtml(""); setOpen(false);
+      if (!response.ok) throw new Error(result.error || "No-show action failed.");
+      return next;
+    }
     setState(next); setScript(next.script || ""); setUrl(next.url || "");
     setSubject(next.email?.subject || ""); setHtml(next.email?.html || "");
     if (!response.ok) throw new Error(result.error || "No-show action failed.");
@@ -35,18 +42,31 @@ export function NoShowPanel({ touchId, initial, primaryAction, embedded = false 
     try {
       if (saveFirst) await run({ action: "save", script, url, subject, html });
       const next = await run(body);
-      if (next.rescheduledAt) { setOpen(false); router.push(`/monthly-touch/${touchId}?step=prep`); }
-      if (next.sentAt) router.push(`/monthly-touch/${touchId}/follow-through`);
+      if (!("cleared" in next)) {
+        if (next.rescheduledAt) { setOpen(false); router.push(`/monthly-touch/${touchId}?step=prep`); }
+        if (next.sentAt) router.push(`/monthly-touch/${touchId}/follow-through`);
+      }
       router.refresh();
     } catch (cause) { setError(cause instanceof Error ? cause.message : "No-show action failed."); }
     finally { setBusy(false); }
   }
   const chosen = state && !state.rescheduledAt ? state.resolution : undefined;
+  // Why the no-show cannot be taken back, once it has gone somewhere the client can see.
+  const undoBlocker = chosen ? noShowUndoBlocker(state) : undefined;
   return <div className={embedded ? "live-resolution-controls" : "card mt-4"}>
     {state?.rescheduledAt && state.standbyUntil && Date.parse(state.standbyUntil) > checkedAt ? <p role="status">Rescheduled. This Monthly Touch stays in Preparation on standby until 48 hours before the meeting.</p> : null}
     <div className={embedded ? "live-workflow-actions" : "flex flex-wrap gap-2"}><button type="button" className="btn btn-risk" disabled={busy} onClick={() => setOpen(!open)} aria-expanded={open}>No-Show</button>{primaryAction}</div>
     {open ? <section aria-label="No-show resolution" className="mt-4 grid gap-4">
-      <div className="flex items-center justify-between"><h2 className="h3">Client did not attend</h2><button type="button" className="btn btn-ghost btn-sm" disabled={busy} onClick={() => setOpen(false)}>{chosen ? "Return to Live Call" : "Cancel"}</button></div>
+      <div className="flex flex-wrap items-center justify-between gap-2"><h2 className="h3">Client did not attend</h2>
+        <div className="flex flex-wrap items-center gap-2">
+          {/* The client walked in late. One click puts the touch back where it was, so the call
+              can be run normally -- distinct from the button beside it, which only hides the
+              panel and leaves the no-show on the record. */}
+          {chosen && !undoBlocker ? <button type="button" className="btn btn-sm" disabled={busy} onClick={() => void act({ action: "cancel" })}>The client showed up — undo the no-show</button> : null}
+          <button type="button" className="btn btn-ghost btn-sm" disabled={busy} onClick={() => setOpen(false)}>{chosen ? "Keep the no-show and hide this" : "Cancel"}</button>
+        </div>
+      </div>
+      {undoBlocker ? <p className="field-hint">This no-show can no longer be undone here. {undoBlocker}</p> : null}
       {!chosen ? <div className="grid gap-3 md:grid-cols-2">
         <button type="button" className="card text-left" disabled={busy} onClick={() => void act({ action: "select", resolution: "reschedule" })}><strong>Reschedule Meeting</strong><p>Reschedule the existing Monthly Touch meeting and return the workflow to Preparation.</p></button>
         <button type="button" className="card text-left" disabled={busy} onClick={() => void act({ action: "select", resolution: "loom" })}><strong>Send Loom Video Update</strong><p>Replace the live meeting with a recorded video update that can be sent to the client by email.</p></button>

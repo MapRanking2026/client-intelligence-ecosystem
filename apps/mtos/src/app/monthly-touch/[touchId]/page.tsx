@@ -527,7 +527,7 @@ export default async function MonthlyTouchRunSheetPage({
 
           {/* 1c. The account review, and the fifteen-section brief it has to produce. */}
           <div id="workflow">
-            <PresentationInstructions touchId={touch.id} initial={touch.presentationInstructions} />
+            <PresentationInstructions touchId={touch.id} initial={touch.presentationInstructions} media={touch.presentationMedia} />
             <PrepStagePanel
               touchId={touch.id}
               clientName={client.name}
@@ -588,7 +588,7 @@ export default async function MonthlyTouchRunSheetPage({
                 </p>
               </div>
             </div>
-            <PresentationInstructions touchId={touch.id} initial={touch.presentationInstructions} />
+            <PresentationInstructions touchId={touch.id} initial={touch.presentationInstructions} media={touch.presentationMedia} />
             <AgendaApprovalPanel
               touchId={touch.id}
               email={agendaEmail.state}
@@ -657,7 +657,7 @@ export default async function MonthlyTouchRunSheetPage({
             {...(touch.review?.declinedSections ? { declinedSections: touch.review.declinedSections } : {})}
             showQaChips={preferences.qaChipsInPresenterView ?? true}
             initialFormat={liveFormat}
-            materialTools={<div className="grid gap-3"><PresentationInstructions touchId={touch.id} initial={touch.presentationInstructions} /><PresentationViewer touchId={touch.id} presentation={touch.presentation} blockedTitles={blockedTaskTitles(touch)} toolsOnly /></div>}
+            materialTools={<div className="grid gap-3"><PresentationInstructions touchId={touch.id} initial={touch.presentationInstructions} media={touch.presentationMedia} /><PresentationViewer touchId={touch.id} presentation={touch.presentation} blockedTitles={blockedTaskTitles(touch)} toolsOnly /></div>}
           /> : null}
 
           {/*

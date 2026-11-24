@@ -1,4 +1,5 @@
 import { RankComparisonVisual } from "./rank-comparison-visual";
+import { ExhibitVisual } from "./exhibit-visual";
 import { Children, Fragment, cloneElement, isValidElement, type ComponentProps, type CSSProperties, type ReactNode } from "react";
 import { normalizePresentationDesign, type PresentationDesign } from "@/src/lib/contracts/presentation-design";
 import type { PresentationSlide, PresentationTone } from "@/src/lib/mtos-data";
@@ -256,6 +257,7 @@ export function PresentationSlideCanvas({
       {bookingAction ? <div style={{ position: "absolute", right: 64, bottom: 100, width: 350, zIndex: 4 }}>{bookingAction}</div> : null}
       <Chrome slide={slide}>
         {slide.layout === "rank_comparison" && slide.rankComparison ? <RankComparisonVisual comparison={slide.rankComparison} /> : null}
+        {slide.layout === "exhibit" ? <ExhibitVisual media={slide.media} /> : null}
         {slide.layout === "stat_callouts" && slide.stats?.length ? (
           <div
             style={{

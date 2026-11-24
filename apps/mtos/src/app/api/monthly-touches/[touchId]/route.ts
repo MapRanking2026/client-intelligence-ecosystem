@@ -102,6 +102,7 @@ const presentationSlideSchema = z.object({
     "cover",
     "agenda",
     "rank_comparison",
+    "exhibit",
     "stat_callouts",
     "bullets",
     "two_column",

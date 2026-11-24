@@ -18,7 +18,7 @@ const DEFAULT_API_BASE = "https://dashboardapi.mapranking.com";
 // One live fetch per prepared touch; cap grid fetches so a keyword-heavy client can't stall prep.
 const MAX_GRIDS_PER_CLIENT = 8;
 
-interface DashboardSession {
+export interface DashboardSession {
   baseUrl: string;
   token: string;
 }

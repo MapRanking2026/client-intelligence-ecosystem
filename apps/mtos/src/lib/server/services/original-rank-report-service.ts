@@ -5,15 +5,45 @@ import { sameRankGrid } from "@/src/lib/contracts/rank-comparison";
 import { getMtosDataSource } from "@/src/lib/server/data/seed-mtos-data-source";
 import { getFirebaseAdminDb } from "@/src/lib/server/firebase/admin";
 import { monthlyTouchPath } from "@/src/lib/server/firebase/collections";
-import { openDashboardSession } from "./mapranking-dashboard";
+import { namesLikelyMatch } from "@/src/lib/server/name-matching";
+import { fetchAllBusinesses, openDashboardSession, type DashboardSession } from "./mapranking-dashboard";
 import { captureOriginalRankComparison } from "./rank-comparison-capture";
 
 type Json = Record<string, unknown>;
 const normalized = (value: string) => value.toLowerCase().replace(/[^a-z0-9]/g, "");
+/**
+ * One report row belongs to one prepared location.
+ *
+ * The name must be exact, because two locations of the same brand are only told apart by address.
+ * A blank address on the report side is not treated as a mismatch: Rank Tracker leaves it empty on
+ * some reports, and refusing those would hide a location the account manager can plainly see.
+ */
+const sameLocation = (business: { businessName: string; address: string }, row: { name: string; address: string }) =>
+  normalized(business.businessName) === normalized(row.name)
+  && (!normalized(row.address) || normalized(business.address) === normalized(row.address));
 async function visibleTouch(context: TenantContext, touchId: string) {
   const source = getMtosDataSource(context), touch = await source.getMonthlyTouchById(touchId);
   if (!touch || !await source.getClientById(touch.clientId)) throw new Error("Monthly Touch is not available to your account.");
   return touch;
+}
+/**
+ * The client's Rank Tracker locations, whether or not the preparation has run.
+ *
+ * This panel sits in the Prep stage, so account managers open it before generating the brief. Until
+ * now the only source of locations was the prep pack, which left the picker empty with nothing to
+ * choose and no explanation. Falling back to the same live match the preparation itself performs --
+ * fuzzy name match plus the client's manually pinned businesses -- means the panel works from the
+ * moment the account is connected, while a generated prep pack still takes precedence because its
+ * locations were already reviewed.
+ */
+async function clientLocations(touch: MonthlyTouchRecord, client: { name: string; integrationMappings?: { rankTracker?: string[] } }, session: DashboardSession) {
+  const prepared = [...(touch.prepPack?.seoPerformance?.matchedBusinesses || []), ...(touch.prepPack?.seoPerformance?.profiles || []).map(profile => profile.business)];
+  if (prepared.length) return prepared;
+  const pinned = new Set(client.integrationMappings?.rankTracker || []);
+  const live = await fetchAllBusinesses(session);
+  const matched = live.filter(business => namesLikelyMatch(client.name, business.businessName) || pinned.has(business.businessId));
+  if (!matched.length) throw new Error(`No Rank Tracker location is matched to ${client.name}. Pin the location on the client's integration settings, then reopen this panel.`);
+  return matched;
 }
 async function read(url: string, token?: string): Promise<Json> {
   const response = await fetch(url, { headers: { accept: "application/json", ...(token ? { authorization: `Bearer ${token}` } : {}) }, signal: AbortSignal.timeout(45000), cache: "no-store" });
@@ -32,34 +62,42 @@ export async function listOriginalReports(context: TenantContext, touchId: strin
   const touch = await visibleTouch(context, touchId);
   const client = await getMtosDataSource(context).getClientById(touch.clientId);
   const session = await openDashboardSession(context); if (!session || !client) throw new Error("Connect Rank Tracker and refresh preparation first.");
-  const businesses = [...(touch.prepPack?.seoPerformance?.matchedBusinesses || []), ...(touch.prepPack?.seoPerformance?.profiles || []).map(profile => profile.business)];
+  const businesses = await clientLocations(touch, client, session);
   const matched = new Map<string, { id: string; name: string; address: string }>();
   // Use the same page size as the provider's Report Builder UI. Its report-list
   // contract differs from eligible-businesses, where a limit of 50 is accepted.
   const limit = 10;
-  for (let page = 1; page <= 100; page++) {
-    const response = await read(`${session.baseUrl}/api/report-builder?${new URLSearchParams({ search: client.name, page: String(page), limit: String(limit) })}`, session.token);
-    const data = response.data as { items?: { id: string; name: string; address: string }[]; total?: number } | undefined;
-    if (!Array.isArray(data?.items)) throw new Error("Rank Tracker did not return a report list. Try loading the report again.");
-    for (const row of data.items) {
-      if (typeof row.id !== "string" || typeof row.name !== "string" || typeof row.address !== "string") continue;
-      if (businesses.some(item => normalized(item.businessName) === normalized(row.name) && normalized(item.address) === normalized(row.address))) matched.set(row.id, { id: row.id, name: row.name, address: row.address });
+  // Whoever built the report named it, and that is often the location rather than the account. Both
+  // are searched so a report filed under one name is not invisible because MTOS knows the other.
+  const searches = [...new Set([client.name, ...businesses.map(business => business.businessName)].map(term => term.trim()).filter(Boolean))].slice(0, 8);
+  for (const search of searches) {
+    let exhausted = false;
+    for (let page = 1; page <= 100 && !exhausted; page++) {
+      const response = await read(`${session.baseUrl}/api/report-builder?${new URLSearchParams({ search, page: String(page), limit: String(limit) })}`, session.token);
+      const data = response.data as { items?: { id: string; name: string; address: string }[]; total?: number } | undefined;
+      if (!Array.isArray(data?.items)) throw new Error("Rank Tracker did not return a report list. Try loading the report again.");
+      for (const row of data.items) {
+        if (typeof row.id !== "string" || typeof row.name !== "string" || typeof row.address !== "string") continue;
+        if (businesses.some(business => sameLocation(business, row))) matched.set(row.id, { id: row.id, name: row.name, address: row.address });
+      }
+      exhausted = !data.items.length || (typeof data.total === "number" && page * limit >= data.total) || (data.total === undefined && data.items.length < limit);
     }
-    if (!data.items.length || (typeof data.total === "number" && page * limit >= data.total) || (data.total === undefined && data.items.length < limit)) return [...matched.values()];
+    if (!exhausted) throw new Error("Rank Tracker returned too many report pages. Narrow this client's report search before retrying.");
   }
-  throw new Error("Rank Tracker returned too many report pages. Narrow this client's report search before retrying.");
+  return [...matched.values()];
 }
 export async function readOriginalReport(context: TenantContext, touchId: string, reportId: string) {
   const touch = await visibleTouch(context, touchId);
+  const client = await getMtosDataSource(context).getClientById(touch.clientId);
   const session = await openDashboardSession(context);
-  if (!session) throw new Error("Connect Rank Tracker before reviewing its original reports.");
+  if (!session || !client) throw new Error("Connect Rank Tracker before reviewing its original reports.");
   // Verify access through the connected account before reading the report's existing share view.
   await read(`${session.baseUrl}/api/report-builder/${reportId}`, session.token);
   const original = await read(`https://dashboardapi.mapranking.com/api/public/report-builder/${reportId}`);
   const data = original.data as { business: { name: string; address: string }; settings: { rank?: { keywordGroups?: Json[] } }; data: { sections: { rankings: { keywords: { heatmapId: string; keyword: string }[]; groups: { heatmapId: string; scanReportIds: string[] }[] } } } };
-  const businesses = [...(touch.prepPack?.seoPerformance?.matchedBusinesses || []), ...(touch.prepPack?.seoPerformance?.profiles || []).map(profile => profile.business)];
-  const business = businesses.find(item => normalized(item.businessName) === normalized(data.business.name) && normalized(item.address) === normalized(data.business.address));
-  if (!business) throw new Error("This report location is not matched to this client's preparation. Refresh the account's Rank Tracker data and confirm its location mapping first.");
+  const businesses = await clientLocations(touch, client, session);
+  const business = businesses.find(item => sameLocation(item, { name: data.business.name, address: data.business.address }));
+  if (!business) throw new Error("This report location is not matched to this client's Rank Tracker locations. Pin the location on the client's integration settings, then reopen this panel.");
   const keywords = await Promise.all((data.data.sections.rankings.keywords || []).slice(0, 24).map(async keyword => {
     const payload = await read(`${session.baseUrl}/api/report-builder/${reportId}/rank/scans?heatmapId=${encodeURIComponent(keyword.heatmapId)}`, session.token);
     const scans = (payload.data as { scans: { reportId: string; date: string }[] }).scans || [];
